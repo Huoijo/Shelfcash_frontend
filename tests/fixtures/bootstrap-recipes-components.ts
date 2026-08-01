@@ -1,0 +1,226 @@
+import type { StoreBootstrapResponse } from "../../lib/types.ts";
+
+export const bootstrapRecipesComponentsFixture: StoreBootstrapResponse = {
+  today: "2026-07-31",
+  store: {
+    store_id: "STORE_RECIPE_FIXTURE",
+    store_name: "Cửa hàng kiểm thử công thức",
+    timezone: "Asia/Ho_Chi_Minh",
+    currency: "VND",
+  },
+  products: [
+    {
+      product_id: "PROD_001",
+      product: "Sản phẩm 1",
+      sku: "SP-001",
+      price: 25_000,
+      item_type: "single",
+    },
+    {
+      product_id: "PROD_002",
+      product: "Sản phẩm 2",
+      sku: "SP-002",
+      price: 30_000,
+      item_type: "single",
+    },
+    {
+      product_id: "PROD_003",
+      product: "Sản phẩm 3",
+      sku: "SP-003",
+      price: 35_000,
+      item_type: "single",
+    },
+    {
+      product_id: "PROD_004",
+      product: "Sản phẩm 4",
+      sku: "SP-004",
+      price: 40_000,
+      item_type: "single",
+    },
+    {
+      product_id: "PROD_005",
+      product: "Sản phẩm 5",
+      sku: "SP-005",
+      price: 45_000,
+      item_type: "single",
+    },
+  ],
+  recipes: [
+    {
+      product_id: "PROD_001",
+      recipe_version: "v1",
+      effective_from: "2026-06-01",
+      components: [
+        {
+          ingredient_id: "ING_001",
+          ingredient_name: "Sữa tươi",
+          ingredient_quantity: "0.12",
+          ingredient_unit: "lít",
+        },
+      ],
+    },
+    {
+      product_id: "PROD_002",
+      recipe_version: "v2",
+      effective_from: "2026-06-02",
+      components: [
+        {
+          ingredient_id: "ING_002",
+          ingredient: "Cà phê",
+          quantity: "0.018",
+          unit: "kg",
+        },
+        {
+          ingredient_id: "ING_003",
+          ingredient: "Đường",
+          quantity: "0.02",
+          unit: "kg",
+        },
+      ],
+    },
+    {
+      product_id: "PROD_003",
+      recipe_version: "v3",
+      effective_date: "2026-06-03",
+      components: [
+        {
+          ingredient_id: "ING_004",
+          ingredient: "Trà đen",
+          quantity: "0.012",
+          unit: "kg",
+        },
+        {
+          ingredient_id: "ING_005",
+          ingredient: "Đào ngâm",
+          quantity: 0.08,
+          unit: "kg",
+        },
+        {
+          ingredient_id: "ING_003",
+          ingredient: "Đường",
+          quantity: 0.015,
+          unit: "kg",
+        },
+      ],
+    },
+    {
+      product_id: "PROD_004",
+      version: 4,
+      effective_from: "2026-06-04",
+      components: [
+        {
+          ingredient_id: "ING_006",
+          ingredient: "Bột matcha",
+          quantity: 0.012,
+          unit: "kg",
+        },
+        {
+          ingredient_id: "ING_001",
+          ingredient: "Sữa tươi",
+          quantity: 0.15,
+          unit: "lít",
+        },
+        {
+          ingredient_id: "ING_003",
+          ingredient: "Đường",
+          quantity: 0.01,
+          unit: "kg",
+        },
+        {
+          ingredient_id: "ING_007",
+          ingredient: "Đá viên",
+          quantity: 0.2,
+          unit: "kg",
+        },
+      ],
+    },
+    {
+      product_id: "PROD_005",
+      recipe_version: "v5",
+      effective_from: "2026-06-05",
+      components: [
+        {
+          ingredient_id: "ING_001",
+          ingredient: "Sữa tươi",
+          quantity: 0.1,
+          unit: "lít",
+        },
+        {
+          ingredient_id: "ING_002",
+          ingredient: "Cà phê",
+          quantity: 0.02,
+          unit: "kg",
+        },
+        {
+          ingredient_id: "ING_003",
+          ingredient: "Đường",
+          quantity: 0.01,
+          unit: "kg",
+        },
+        {
+          ingredient_id: "ING_004",
+          ingredient: "Trà đen",
+          quantity: 0.01,
+          unit: "kg",
+        },
+        {
+          ingredient_id: "ING_005",
+          ingredient: "Đào ngâm",
+          quantity: 0.04,
+          unit: "kg",
+        },
+        {
+          ingredient_id: "ING_006",
+          ingredient: "Bột matcha",
+          quantity: 0.005,
+          unit: "kg",
+        },
+        {
+          ingredient_id: "ING_007",
+          ingredient: "Đá viên",
+          quantity: 0.15,
+          unit: "kg",
+        },
+        {
+          ingredient_id: "ING_008",
+          ingredient: "Sữa đặc",
+          quantity: 0.03,
+          unit: "kg",
+        },
+        {
+          ingredient_id: "ING_009",
+          ingredient: "Kem sữa",
+          quantity: 0.04,
+          unit: "lít",
+        },
+      ],
+    },
+  ],
+  ingredients: [
+    { ingredient_id: "ING_001", ingredient: "Sữa tươi", unit: "lít" },
+    { ingredient_id: "ING_002", ingredient: "Cà phê", unit: "kg" },
+    { ingredient_id: "ING_003", ingredient: "Đường", unit: "kg" },
+    { ingredient_id: "ING_004", ingredient: "Trà đen", unit: "kg" },
+    { ingredient_id: "ING_005", ingredient: "Đào ngâm", unit: "kg" },
+    { ingredient_id: "ING_006", ingredient: "Bột matcha", unit: "kg" },
+    { ingredient_id: "ING_007", ingredient: "Đá viên", unit: "kg" },
+    { ingredient_id: "ING_008", ingredient: "Sữa đặc", unit: "kg" },
+    { ingredient_id: "ING_009", ingredient: "Kem sữa", unit: "lít" },
+    { ingredient_id: "ING_010", ingredient: "Nước lọc", unit: "lít" },
+  ],
+  inventory: [],
+  menu: [],
+  supplier_constraints: [],
+  aliases: [],
+  future_calendar: [],
+  settings: {
+    monthly_budget: 5_000_000,
+    remaining_budget: 3_000_000,
+    forecast_horizon: 7,
+  },
+  latest_runs: {
+    forecast_run_id: null,
+    plan_run_id: null,
+  },
+  data_freshness: {},
+};
