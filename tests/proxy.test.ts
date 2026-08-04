@@ -89,6 +89,62 @@ test("proxy only accepts the ShelfCash API contract", () => {
     "/api/v1/stores/STORE_001/purchase-orders/PO-1/confirm",
   );
   assert.equal(
+    resolveBackendPath(
+      [
+        "api",
+        "v1",
+        "stores",
+        "STORE_001",
+        "forecast-runs",
+        "forecast-1",
+        "ingredient-demand",
+      ],
+      "POST",
+    ),
+    "/api/v1/stores/STORE_001/forecast-runs/forecast-1/ingredient-demand",
+  );
+  assert.equal(
+    resolveBackendPath(
+      [
+        "api",
+        "v1",
+        "stores",
+        "STORE_001",
+        "forecast-runs",
+        "forecast-1",
+        "procurement-plans",
+      ],
+      "GET",
+    ),
+    "/api/v1/stores/STORE_001/forecast-runs/forecast-1/procurement-plans",
+  );
+  assert.equal(
+    resolveBackendPath(
+      ["api", "v1", "forecast-models", "train"],
+      "POST",
+    ),
+    "/api/v1/forecast-models/train",
+  );
+  assert.equal(
+    resolveBackendPath(
+      [
+        "api",
+        "v1",
+        "stores",
+        "STORE_001",
+        "purchase-orders",
+        "PO-1",
+        "receive",
+      ],
+      "POST",
+    ),
+    "/api/v1/stores/STORE_001/purchase-orders/PO-1/receive",
+  );
+  assert.equal(
+    resolveBackendPath(["api", "v1", "forecasts"], "POST"),
+    null,
+  );
+  assert.equal(
     resolveBackendPath(["api", "v1", "llm", "map-sheet"], "GET"),
     null,
   );
@@ -103,6 +159,7 @@ test("proxy keeps secrets server-side and preserves query/idempotency", async ()
   let forwardedUrl = "";
   let forwardedKey: string | null = null;
   let forwardedIdempotencyKey: string | null = null;
+  let forwardedRequestId: string | null = null;
 
   process.env.SHELFCASH_BACKEND_URL = "http://backend.internal:8000";
   process.env.SHELFCASH_API_KEY = "server-only-key";
@@ -111,6 +168,7 @@ test("proxy keeps secrets server-side and preserves query/idempotency", async ()
     const headers = new Headers(init?.headers);
     forwardedKey = headers.get("X-ShelfCash-Key");
     forwardedIdempotencyKey = headers.get("Idempotency-Key");
+    forwardedRequestId = headers.get("X-Request-ID");
     return Response.json({ import_id: "import-1" }, { status: 201 });
   };
 
@@ -123,6 +181,7 @@ test("proxy keeps secrets server-side and preserves query/idempotency", async ()
           headers: {
             "content-type": "application/json",
             "Idempotency-Key": "request-uuid",
+            "X-Request-ID": "trace-uuid",
           },
           body: "{}",
         },
@@ -136,6 +195,8 @@ test("proxy keeps secrets server-side and preserves query/idempotency", async ()
     );
     assert.equal(forwardedKey, "server-only-key");
     assert.equal(forwardedIdempotencyKey, "request-uuid");
+    assert.equal(forwardedRequestId, "trace-uuid");
+    assert.equal(response.headers.get("X-Request-ID"), "trace-uuid");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalUrl === undefined) delete process.env.SHELFCASH_BACKEND_URL;
@@ -143,4 +204,21 @@ test("proxy keeps secrets server-side and preserves query/idempotency", async ()
     if (originalKey === undefined) delete process.env.SHELFCASH_API_KEY;
     else process.env.SHELFCASH_API_KEY = originalKey;
   }
+});
+
+test("proxy-generated errors include a traceable request ID", async () => {
+  const response = await forwardShelfCashRequest(
+    new Request("http://frontend.local/api/shelfcash/not-allowed", {
+      headers: { "X-Request-ID": "bad-route-trace" },
+    }),
+    ["not-allowed"],
+  );
+  assert.equal(response.status, 404);
+  assert.equal(response.headers.get("X-Request-ID"), "bad-route-trace");
+  assert.deepEqual(await response.json(), {
+    code: "ENDPOINT_NOT_ALLOWED",
+    message: "Endpoint hoặc HTTP method không thuộc ShelfCash API contract.",
+    details: {},
+    request_id: "bad-route-trace",
+  });
 });

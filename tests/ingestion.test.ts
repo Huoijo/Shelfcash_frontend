@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { addDays, buildBootstrapData } from "../lib/data.ts";
 import {
+  applyMappingSuggestion,
   buildEditableMappings,
   changeSheetMappingType,
   ignoreField,
-  mergeIngestionResult,
+  mergeImportFiles,
   resultCounts,
   toConfirmMappings,
+  validateImportFiles,
   validateImportMappings,
   validateSheetMapping,
 } from "../lib/ingestion.ts";
@@ -16,7 +17,6 @@ import {
   SHEET_TYPES,
   normalizeSheetType,
 } from "../lib/canonical-schemas.ts";
-import { forecastIngredient } from "../lib/logic.ts";
 import type {
   EditableSheetMapping,
   ImportCreateResponse,
@@ -78,7 +78,7 @@ function mixedUnknownAndSalesMappings(): EditableSheetMapping[] {
   });
 }
 
-test("Qwen suggestions use the exact canonical schema and unresolved columns block confirmation", () => {
+test("optional source columns serialize as null while core fields still validate", () => {
   const response: ImportCreateResponse = {
     import_id: "4f7c6c47-0a4b-47c3-88f3-76fdceaf1227",
     profiles: [
@@ -127,10 +127,13 @@ test("Qwen suggestions use the exact canonical schema and unresolved columns blo
   );
   assert.equal(mappings[0]?.mapping["Ghi chú"], ignoreField);
 
-  const blocked = validateImportMappings(mappings);
-  assert.equal(blocked.complete, false);
-  assert.equal(blocked.unresolvedColumns, 1);
-  assert.throws(() => toConfirmMappings(mappings), /mọi cột/i);
+  const ready = validateImportMappings(mappings);
+  assert.equal(ready.complete, true);
+  assert.equal(ready.unresolvedColumns, 1);
+
+  const nullablePayload = toConfirmMappings(mappings);
+  assert.equal(nullablePayload[0]?.column_mapping["Ghi chú"], null);
+  assert.equal(nullablePayload[0]?.skip, false);
 
   const completed = mappings.map((mapping) => ({
     ...mapping,
@@ -142,7 +145,10 @@ test("Qwen suggestions use the exact canonical schema and unresolved columns blo
   assert.equal(validateImportMappings(completed).complete, true);
 
   const payload = toConfirmMappings(completed);
-  const columnMapping = payload[0]?.column_mapping as Record<string, string>;
+  const columnMapping = payload[0]?.column_mapping as Record<
+    string,
+    string | null
+  >;
   assert.equal(columnMapping["Ghi chú"], "warehouse_name");
   assert.equal(payload[0]?.profile_id, "profile-1");
 });
@@ -196,7 +202,7 @@ test("mapping requires a known sheet type, all core fields, and unique targets",
   assert.equal(validateSheetMapping(complete).complete, true);
 });
 
-test("unknown sheets are ignored by validation, progress, and confirm payload", () => {
+test("unknown sheets validate as skipped and remain in the confirm payload", () => {
   const mappings = mixedUnknownAndSalesMappings();
   const [readme, sales] = mappings;
   assert.ok(readme);
@@ -222,17 +228,20 @@ test("unknown sheets are ignored by validation, progress, and confirm payload", 
   assert.equal(validation.complete, true);
 
   const payload = toConfirmMappings(mappings);
-  assert.equal(payload.length, 1);
-  assert.equal(payload[0]?.profile_id, "profile-sales");
-  assert.equal(payload[0]?.sheet_name, "POS_T7_2026");
-  assert.equal(payload[0]?.sheet_type, "sales_history");
-  assert.equal(JSON.stringify(payload).includes("README"), false);
-  assert.equal(JSON.stringify(payload).includes("unknown"), false);
-  assert.equal(JSON.stringify(payload).includes("null"), false);
+  assert.equal(payload.length, 2);
+  assert.deepEqual(payload[0], {
+    profile_id: "profile-readme",
+    sheet_type: "unknown",
+    column_mapping: {},
+    skip: true,
+  });
+  assert.equal(payload[1]?.profile_id, "profile-sales");
+  assert.equal(payload[1]?.sheet_type, "sales_history");
+  assert.equal(payload[1]?.skip, false);
   assert.equal(JSON.stringify(payload).includes(ignoreField), false);
 });
 
-test("all unknown sheets block confirmation without mapping errors", () => {
+test("all unknown sheets can be confirmed as explicit skips", () => {
   const [readme] = mixedUnknownAndSalesMappings();
   assert.ok(readme);
   const validation = validateImportMappings([readme]);
@@ -240,11 +249,15 @@ test("all unknown sheets block confirmation without mapping errors", () => {
   assert.equal(validation.ignoredSheets, 1);
   assert.equal(validation.totalColumns, 0);
   assert.equal(validation.incompleteSheets, 0);
-  assert.equal(validation.complete, false);
-  assert.throws(
-    () => toConfirmMappings([readme]),
-    /Không tìm thấy bảng dữ liệu có thể xử lý/,
-  );
+  assert.equal(validation.complete, true);
+  assert.deepEqual(toConfirmMappings([readme]), [
+    {
+      profile_id: "profile-readme",
+      sheet_type: "unknown",
+      column_mapping: {},
+      skip: true,
+    },
+  ]);
 });
 
 test("changing unknown to a canonical type restores mapping validation", () => {
@@ -279,20 +292,27 @@ test("changing a canonical sheet to unknown clears stale mapping only for that s
   assert.equal(validation.totalColumns, 8);
   assert.equal(validation.complete, true);
   const payload = toConfirmMappings([skippedSales, originalSales]);
-  assert.equal(payload.length, 1);
-  assert.equal(payload[0]?.sheet_type, "sales_history");
-  assert.deepEqual(payload[0]?.column_mapping, originalMapping);
+  assert.equal(payload.length, 2);
+  assert.equal(payload[0]?.sheet_type, "unknown");
+  assert.equal(payload[0]?.skip, true);
+  assert.deepEqual(payload[0]?.column_mapping, {});
+  assert.equal(payload[1]?.sheet_type, "sales_history");
+  assert.deepEqual(payload[1]?.column_mapping, originalMapping);
 });
 
-test("valid sheets still block confirmation for unresolved columns or missing core fields", () => {
+test("unmapped optional columns are allowed but missing core fields still block", () => {
   const [, sales] = mixedUnknownAndSalesMappings();
   assert.ok(sales);
   const unresolved = {
     ...sales,
     mapping: { ...sales.mapping, "Khuyến mãi": ignoreField },
   };
-  assert.equal(validateImportMappings([unresolved]).complete, false);
+  assert.equal(validateImportMappings([unresolved]).complete, true);
   assert.equal(validateImportMappings([unresolved]).unresolvedColumns, 1);
+  assert.equal(
+    toConfirmMappings([unresolved])[0]?.column_mapping["Khuyến mãi"],
+    null,
+  );
 
   const missingCore = {
     ...sales,
@@ -327,7 +347,111 @@ test("malformed import suggestions fail closed without crashing", () => {
   assert.equal(mappings[0]?.sheetType, "unknown");
   assert.deepEqual(mappings[0]?.columns, []);
   assert.deepEqual(mappings[0]?.mapping, {});
-  assert.equal(validateImportMappings(mappings).complete, false);
+  assert.equal(validateImportMappings(mappings).complete, true);
+  assert.equal(toConfirmMappings(mappings)[0]?.skip, true);
+});
+
+test("mapping suggestions with profile IDs never fall back to duplicate sheet names", () => {
+  const mappings = buildEditableMappings({
+    import_id: "import-duplicate-sheet-names",
+    profiles: [
+      {
+        profile_id: "profile-inventory",
+        sheet_name: "Data",
+        columns: ["Tên", "Số lượng"],
+      },
+      {
+        profile_id: "profile-sales",
+        sheet_name: "Data",
+        columns: ["Ngày", "Món", "Số lượng"],
+      },
+    ],
+    suggested_mappings: [
+      {
+        profile_id: "profile-sales",
+        sheet_name: "Data",
+        sheet_type: "sales_history",
+        column_mapping: {
+          Ngày: "date",
+          Món: "product_name",
+          "Số lượng": "quantity_sold",
+        },
+      },
+      {
+        profile_id: "profile-inventory",
+        sheet_name: "Data",
+        sheet_type: "inventory",
+        column_mapping: {
+          Tên: "ingredient_name",
+          "Số lượng": "on_hand",
+        },
+      },
+    ],
+  });
+
+  assert.equal(mappings[0]?.sheetType, "inventory");
+  assert.equal(mappings[0]?.mapping.Tên, "ingredient_name");
+  assert.equal(mappings[1]?.sheetType, "sales_history");
+  assert.equal(mappings[1]?.mapping.Ngày, "date");
+});
+
+test("unknown sheets are not remapped by Qwen suggestions", () => {
+  const [unknown] = mixedUnknownAndSalesMappings();
+  assert.ok(unknown);
+  const remapped = applyMappingSuggestion(unknown, {
+    sheet_type: "inventory",
+    column_mapping: {
+      "Hướng dẫn": "ingredient_name",
+      "Ghi chú": "on_hand",
+    },
+  });
+  assert.equal(remapped, unknown);
+  assert.equal(remapped.sheetType, "unknown");
+  assert.deepEqual(remapped.mapping, {});
+});
+
+function fakeFile(name: string, size: number, lastModified = 1): File {
+  return { name, size, lastModified } as File;
+}
+
+test("file selection accepts xlsm and retains valid files with precise errors", () => {
+  const current = [fakeFile("kept.csv", 1024)];
+  const selection = mergeImportFiles(current, [
+    fakeFile("macro.xlsm", 2048, 2),
+    fakeFile("notes.txt", 512, 3),
+    fakeFile("too-large.xlsx", 12 * 1024 * 1024 + 1, 4),
+  ]);
+
+  assert.deepEqual(
+    selection.files.map((file) => file.name),
+    ["kept.csv", "macro.xlsm"],
+  );
+  assert.match(selection.errors.join(" "), /notes\.txt/);
+  assert.match(selection.errors.join(" "), /too-large\.xlsx/);
+  assert.match(selection.errors.join(" "), /12 MB/);
+  assert.equal(validateImportFiles(selection.files).length, 0);
+});
+
+test("file selection enforces ten files and fifty megabytes without clearing drafts", () => {
+  const tenFiles = Array.from({ length: 10 }, (_, index) =>
+    fakeFile(`file-${index}.csv`, 1024, index),
+  );
+  const countLimited = mergeImportFiles(tenFiles, [
+    fakeFile("eleventh.csv", 1024, 20),
+  ]);
+  assert.equal(countLimited.files.length, 10);
+  assert.match(countLimited.errors[0] ?? "", /eleventh\.csv/);
+  assert.match(countLimited.errors[0] ?? "", /10 tệp/);
+
+  const nearLimit = Array.from({ length: 5 }, (_, index) =>
+    fakeFile(`large-${index}.xlsx`, 10 * 1024 * 1024, index),
+  );
+  const totalLimited = mergeImportFiles(nearLimit, [
+    fakeFile("over-total.xlsm", 1, 30),
+  ]);
+  assert.deepEqual(totalLimited.files, nearLimit);
+  assert.match(totalLimited.errors[0] ?? "", /over-total\.xlsm/);
+  assert.match(totalLimited.errors[0] ?? "", /50 MB/);
 });
 
 test("result counters only count canonical imported collections", () => {
@@ -434,79 +558,4 @@ test("06_Menu headers map to the Menu canonical schema", () => {
     "product_name",
     "selling_price",
   ]);
-});
-
-test("ingestion result updates operational data and forecasting uses real usage", () => {
-  const base = buildBootstrapData();
-  const forecastDate = base.today;
-  const usageHistory = Array.from({ length: 14 }, (_, index) => ({
-    date: addDays(forecastDate, index - 14),
-    ingredient: "Sữa hạt",
-    quantity: 2 + (index % 3) * 0.25,
-    unit: "lít",
-  }));
-  const result: IngestionResult = {
-    store_id: "STORE_TEST",
-    forecast_date: forecastDate,
-    forecast_horizon: 10,
-    inventory: [
-      {
-        ingredient: "Sữa hạt",
-        on_hand: 9,
-        unit: "lít",
-        expiry_date: addDays(forecastDate, 8),
-      },
-    ],
-    sales_history: [],
-    usage_history: usageHistory,
-    recipes: [
-      {
-        product: "Latte hạt",
-        ingredient: "Sữa hạt",
-        quantity: 0.2,
-        unit: "lít",
-      },
-    ],
-    purchase_history: [
-      {
-        date: addDays(forecastDate, -2),
-        ingredient: "Sữa hạt",
-        quantity: 12,
-        unit_cost: 41_000,
-        supplier: "Green Supply",
-      },
-    ],
-    supplier_constraints: [
-      {
-        ingredient: "Sữa hạt",
-        supplier: "Green Supply",
-        unit_cost: 41_000,
-        moq: 6,
-        pack_size: 6,
-        lead_time_days: 2,
-      },
-    ],
-    calendar_features: [],
-    business_constraints: [
-      {
-        monthly_budget: 8_000_000,
-        remaining_budget: 3_400_000,
-      },
-    ],
-    validation_summary: { valid_rows: 30 },
-    ingestion_metadata: { source: "rule" },
-  };
-
-  const data = mergeIngestionResult(base, result);
-  assert.equal(data.settings.storeId, "STORE_TEST");
-  assert.equal(data.settings.forecastHorizon, 10);
-  assert.equal(data.inventory[0]?.ingredient, "Sữa hạt");
-  assert.equal(data.inventory[0]?.moq, 6);
-  assert.equal(data.inventory[0]?.supplier, "Green Supply");
-  assert.equal(data.recipes[0]?.product, "Latte hạt");
-  assert.equal(data.usageHistory.length, 14);
-
-  const forecast = forecastIngredient(data, "Sữa hạt", 7);
-  assert.match(forecast.dataNotes[0] ?? "", /lịch sử tiêu thụ/);
-  assert.ok(forecast.totals.p50 > 0);
 });

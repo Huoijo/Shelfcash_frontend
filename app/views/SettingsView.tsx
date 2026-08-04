@@ -33,6 +33,46 @@ const tabs = [
   "Lịch sử",
 ] as const;
 
+type DefaultStrategy = "economy" | "balanced" | "safe";
+
+type SettingsDraft = Settings & {
+  reservedBudget: number;
+  spentBudget: number;
+  defaultStrategy: DefaultStrategy;
+  version: number;
+};
+
+function finiteNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function settingsDraftFrom(settings: Settings): SettingsDraft {
+  const extended = settings as Settings &
+    Partial<{
+      reservedBudget: number;
+      spentBudget: number;
+      defaultStrategy: DefaultStrategy;
+      version: number;
+    }>;
+  const defaultStrategy = ["economy", "balanced", "safe"].includes(
+    String(extended.defaultStrategy),
+  )
+    ? (extended.defaultStrategy as DefaultStrategy)
+    : "balanced";
+  return {
+    ...settings,
+    forecastHorizon: Math.min(
+      7,
+      Math.max(1, finiteNumber(settings.forecastHorizon, 7)),
+    ),
+    reservedBudget: finiteNumber(extended.reservedBudget),
+    spentBudget: finiteNumber(extended.spentBudget),
+    defaultStrategy,
+    version: finiteNumber(extended.version),
+  };
+}
+
 export function SettingsView({
   data,
   importLogs,
@@ -51,7 +91,7 @@ export function SettingsView({
   onSaveInventory: (items: SupplierConstraintRow[]) => Promise<boolean>;
   onSaveAliases: (aliases: Alias[]) => Promise<boolean>;
   onSaveContext: (
-    settings: Settings,
+    settings: SettingsDraft,
     calendar: CalendarDay[],
   ) => Promise<boolean>;
   inventoryConstraints: InventoryConstraint[];
@@ -64,7 +104,9 @@ export function SettingsView({
     data.supplierConstraints.map((item) => ({ ...item })),
   );
   const [aliases, setAliases] = useState(data.aliases.map((alias) => ({ ...alias })));
-  const [settings, setSettings] = useState({ ...data.settings });
+  const [settings, setSettings] = useState(() =>
+    settingsDraftFrom(data.settings),
+  );
   const [calendar, setCalendar] = useState(
     data.futureCalendar.map((day) => ({ ...day })),
   );
@@ -78,7 +120,7 @@ export function SettingsView({
   useEffect(() => {
     setSupplierTerms(data.supplierConstraints.map((item) => ({ ...item })));
     setAliases(data.aliases.map((alias) => ({ ...alias })));
-    setSettings({ ...data.settings });
+    setSettings(settingsDraftFrom(data.settings));
     setCalendar(data.futureCalendar.map((day) => ({ ...day })));
   }, [data]);
 
@@ -141,15 +183,12 @@ export function SettingsView({
                       />
                     </td>
                     <td>
-                      <input
-                        value={item.supplier}
-                        aria-label={`Nhà cung cấp ${item.ingredient}`}
-                        onChange={(event) =>
-                          updateSupplierTerm(index, {
-                            supplier: event.target.value,
-                          })
-                        }
-                      />
+                      <strong>{item.supplier || "Chưa thiết lập"}</strong>
+                      <small>
+                        {item.supplierId
+                          ? `ID ${item.supplierId}`
+                          : "Tạo nhà cung cấp qua import"}
+                      </small>
                     </td>
                     <td>
                       <input
@@ -287,18 +326,35 @@ export function SettingsView({
                 <select
                   value={alias.canonicalName}
                   aria-label={`Nguyên liệu chuẩn ${index + 1}`}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const ingredient = data.ingredients.find(
+                      (item) => item.ingredient === event.target.value,
+                    );
                     setAliases((current) =>
                       current.map((item, itemIndex) =>
                         itemIndex === index
-                          ? { ...item, canonicalName: event.target.value }
+                          ? {
+                              ...item,
+                              canonicalName: event.target.value,
+                              ingredientId: ingredient?.ingredientId,
+                            }
                           : item,
                       ),
-                    )
-                  }
+                    );
+                  }}
                 >
-                  {data.inventory.map((item) => (
-                    <option value={item.ingredient} key={item.ingredient}>
+                  {!data.ingredients.some(
+                    (item) => item.ingredient === alias.canonicalName,
+                  ) && alias.canonicalName ? (
+                    <option value={alias.canonicalName}>
+                      {alias.canonicalName} · chưa có trong danh mục hiện tại
+                    </option>
+                  ) : null}
+                  {data.ingredients.map((item) => (
+                    <option
+                      value={item.ingredient}
+                      key={item.ingredientId ?? item.ingredient}
+                    >
                       {item.ingredient}
                     </option>
                   ))}
@@ -318,12 +374,14 @@ export function SettingsView({
             ))}
             <Button
               variant="quiet"
+              disabled={!data.ingredients.length}
               onClick={() =>
                 setAliases((current) => [
                   ...current,
                   {
                     sourceName: "",
-                    canonicalName: data.inventory[0]?.ingredient ?? "",
+                    canonicalName: data.ingredients[0]?.ingredient ?? "",
+                    ingredientId: data.ingredients[0]?.ingredientId,
                   },
                 ])
               }
@@ -380,20 +438,78 @@ export function SettingsView({
               <small>{formatVnd(settings.monthlyBudget)}</small>
             </label>
             <label className="field">
+              <span>Đã giữ chỗ</span>
+              <input
+                type="number"
+                readOnly
+                value={settings.reservedBudget}
+                aria-label="Ngân sách đã giữ chỗ"
+              />
+              <small>{formatVnd(settings.reservedBudget)}</small>
+            </label>
+          </div>
+          <div className="two-column">
+            <label className="field">
+              <span>Đã chi</span>
+              <input
+                type="number"
+                readOnly
+                value={settings.spentBudget}
+                aria-label="Ngân sách đã chi"
+              />
+              <small>{formatVnd(settings.spentBudget)}</small>
+            </label>
+            <label className="field">
               <span>Ngân sách còn lại</span>
               <input
                 type="number"
-                min="0"
-                step="100000"
+                readOnly
                 value={settings.remainingBudget}
+                aria-label="Ngân sách còn lại"
+              />
+              <small>{formatVnd(settings.remainingBudget)}</small>
+            </label>
+          </div>
+
+          <SectionHeading title="Dự báo và chiến lược mặc định" />
+          <div className="two-column">
+            <label className="field">
+              <span>Số ngày dự báo</span>
+              <input
+                type="number"
+                min={1}
+                max={7}
+                value={settings.forecastHorizon}
+                aria-label="Số ngày dự báo"
                 onChange={(event) =>
                   setSettings((current) => ({
                     ...current,
-                    remainingBudget: Number(event.target.value),
+                    forecastHorizon: Math.min(
+                      7,
+                      Math.max(1, Number(event.target.value) || 1),
+                    ),
                   }))
                 }
               />
-              <small>{formatVnd(settings.remainingBudget)}</small>
+              <small>Forecast Core hiện hỗ trợ từ 1 đến 7 ngày.</small>
+            </label>
+            <label className="field">
+              <span>Chiến lược mặc định</span>
+              <select
+                value={settings.defaultStrategy}
+                aria-label="Chiến lược mặc định"
+                onChange={(event) =>
+                  setSettings((current) => ({
+                    ...current,
+                    defaultStrategy: event.target.value as DefaultStrategy,
+                  }))
+                }
+              >
+                <option value="economy">Tiết kiệm</option>
+                <option value="balanced">Cân bằng</option>
+                <option value="safe">An toàn</option>
+              </select>
+              <small>Phiên bản cài đặt {settings.version}</small>
             </label>
           </div>
 
@@ -403,13 +519,31 @@ export function SettingsView({
           />
           <div className="calendar-grid">
             {calendar.map((day, index) => (
-              <label className="calendar-day" key={day.date}>
+              <div className="calendar-day" key={day.date}>
                 <span>{day.weekday.replace("Thứ ", "T")}</span>
                 <strong>{formatDate(day.date).slice(0, 5)}</strong>
-                <small>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={day.holiday}
+                    aria-label={`Ngày lễ ${day.date}`}
+                    onChange={(event) =>
+                      setCalendar((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, holiday: event.target.checked }
+                            : item,
+                        ),
+                      )
+                    }
+                  />
+                  Ngày lễ
+                </label>
+                <label>
                   <input
                     type="checkbox"
                     checked={day.promotion}
+                    aria-label={`Khuyến mãi ${day.date}`}
                     onChange={(event) =>
                       setCalendar((current) =>
                         current.map((item, itemIndex) =>
@@ -427,8 +561,23 @@ export function SettingsView({
                     }
                   />
                   Khuyến mãi
-                </small>
-              </label>
+                </label>
+                <input
+                  value={day.promotionNote}
+                  disabled={!day.promotion}
+                  aria-label={`Ghi chú khuyến mãi ${day.date}`}
+                  placeholder="Nội dung khuyến mãi"
+                  onChange={(event) =>
+                    setCalendar((current) =>
+                      current.map((item, itemIndex) =>
+                        itemIndex === index
+                          ? { ...item, promotionNote: event.target.value }
+                          : item,
+                      ),
+                    )
+                  }
+                />
+              </div>
             ))}
           </div>
           <div className="settings-action">

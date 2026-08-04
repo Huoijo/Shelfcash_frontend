@@ -29,15 +29,62 @@ import {
   formatVnd,
 } from "../components/ui";
 
+type RecipeProductDetails = Product & {
+  recipeYieldQuantity?: number;
+  recipeProcessLossRate?: number;
+};
+
+export type RecipeSaveOptions = {
+  effectiveFrom: string;
+  version: number;
+  yieldQuantity: number;
+  processLossRate: number;
+};
+
+const defaultLoadDetails = async (product: Product) => product;
+
+function addDays(date: string, days: number): string {
+  const [year, month, day] = date.slice(0, 10).split("-").map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day + days));
+  return value.toISOString().slice(0, 10);
+}
+
+function recipeDefaults(product: Product | undefined, today: string) {
+  const details = product as RecipeProductDetails | undefined;
+  const currentEffectiveDate = product?.effectiveDate?.slice(0, 10);
+  return {
+    effectiveFrom:
+      currentEffectiveDate && currentEffectiveDate >= today
+        ? addDays(currentEffectiveDate, 1)
+        : today,
+    yieldQuantity:
+      typeof details?.recipeYieldQuantity === "number" &&
+      details.recipeYieldQuantity > 0
+        ? details.recipeYieldQuantity
+        : 1,
+    processLossRate:
+      typeof details?.recipeProcessLossRate === "number" &&
+      details.recipeProcessLossRate >= 0 &&
+      details.recipeProcessLossRate < 1
+        ? details.recipeProcessLossRate
+        : 0,
+  };
+}
+
 export function RecipesView({
   data,
-  versions,
+  onLoadDetails = defaultLoadDetails,
   onSave,
   onOpenPlan,
 }: {
   data: BootstrapData;
   versions: RecipeVersion[];
-  onSave: (product: Product, rows: RecipeLine[]) => Promise<boolean>;
+  onLoadDetails?: (product: Product) => Promise<Product>;
+  onSave: (
+    product: Product,
+    rows: RecipeLine[],
+    options: RecipeSaveOptions,
+  ) => Promise<boolean>;
   onOpenPlan: () => void;
 }) {
   const products = useMemo(
@@ -47,15 +94,33 @@ export function RecipesView({
   const [selectedProductKey, setSelectedProductKey] = useState(
     products[0] ? productIdentityKey(products[0]) : "",
   );
-  const product = products.find(
+  const selectedProduct = products.find(
     (item) => productIdentityKey(item) === selectedProductKey,
   );
+  const [detailedProduct, setDetailedProduct] = useState<Product | null>(null);
+  const [detailsError, setDetailsError] = useState("");
+  const product =
+    detailedProduct &&
+    selectedProduct &&
+    productIdentityKey(detailedProduct) === productIdentityKey(selectedProduct)
+      ? detailedProduct
+      : selectedProduct;
   const currentRows = useMemo(
     () => recipeLinesForProduct(data.recipes, product),
     [data.recipes, product],
   );
   const [rows, setRows] = useState<RecipeLine[]>(() =>
     currentRows.map((line) => ({ ...line })),
+  );
+  const initialRecipeDefaults = recipeDefaults(product, data.today);
+  const [effectiveFrom, setEffectiveFrom] = useState(
+    initialRecipeDefaults.effectiveFrom,
+  );
+  const [yieldQuantity, setYieldQuantity] = useState(
+    initialRecipeDefaults.yieldQuantity,
+  );
+  const [processLossRate, setProcessLossRate] = useState(
+    initialRecipeDefaults.processLossRate,
   );
   const [confirmed, setConfirmed] = useState(false);
   const [saved, setSaved] = useState("");
@@ -66,10 +131,14 @@ export function RecipesView({
   );
 
   useEffect(() => {
+    const defaults = recipeDefaults(product, data.today);
     setRows(currentRows.map((line) => ({ ...line })));
+    setEffectiveFrom(defaults.effectiveFrom);
+    setYieldQuantity(defaults.yieldQuantity);
+    setProcessLossRate(defaults.processLossRate);
     setConfirmed(false);
     setSaved("");
-  }, [currentRows]);
+  }, [currentRows, data.today, product]);
 
   useEffect(() => {
     if (
@@ -85,20 +154,52 @@ export function RecipesView({
     );
   }, [products, selectedProductKey]);
 
+  useEffect(() => {
+    let active = true;
+    setDetailedProduct(null);
+    setDetailsError("");
+    if (!selectedProduct) return () => undefined;
+    void onLoadDetails(selectedProduct).then(
+      (detail) => {
+        if (active) setDetailedProduct(detail);
+      },
+      (caught) => {
+        if (active) {
+          setDetailsError(
+            caught instanceof Error
+              ? caught.message
+              : "Không tải được recipe chi tiết.",
+          );
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [onLoadDetails, selectedProduct]);
+
+  const effectiveDateInvalid = Boolean(
+    product?.effectiveDate &&
+      effectiveFrom <= product.effectiveDate.slice(0, 10),
+  );
   const invalid =
     rows.length === 0 ||
     rows.some(
       (row) => !row.ingredient || !row.unit || Number(row.quantity) <= 0,
     ) ||
+    !effectiveFrom ||
+    effectiveDateInvalid ||
+    !Number.isFinite(yieldQuantity) ||
+    yieldQuantity <= 0 ||
+    !Number.isFinite(processLossRate) ||
+    processLossRate < 0 ||
+    processLossRate >= 1 ||
     new Set(
       rows.map((row) =>
         recipeIngredientIdentityKey(row, ingredientOptions),
       ),
     ).size !==
       rows.length;
-  const productVersions = versions.filter(
-    (version) => version.product === product?.product,
-  );
 
   function updateRow(index: number, patch: Partial<RecipeLine>) {
     setRows((current) =>
@@ -152,7 +253,7 @@ export function RecipesView({
                   <td>
                     <StatusPill
                       status={
-                        item.recipeStatus === "Hoàn chỉnh" ? "normal" : "missing"
+                        item.recipeStatus === "Hoàn chỉnh" ? "healthy" : "missing"
                       }
                       label={item.recipeStatus}
                     />
@@ -174,6 +275,7 @@ export function RecipesView({
 
       {product ? (
         <>
+          {detailsError ? <Notice tone="error">{detailsError}</Notice> : null}
           <SectionHeading
             title={`Chỉnh sửa · ${product.product}`}
             subtitle="Định lượng cho một sản phẩm bán ra."
@@ -214,6 +316,64 @@ export function RecipesView({
           </div>
 
           <div className="recipe-editor">
+            <div className="two-column">
+              <label className="field">
+                <span>Ngày hiệu lực</span>
+                <input
+                  type="date"
+                  aria-label="Ngày hiệu lực công thức"
+                  min={
+                    product.effectiveDate
+                      ? addDays(product.effectiveDate.slice(0, 10), 1)
+                      : undefined
+                  }
+                  value={effectiveFrom}
+                  onChange={(event) => {
+                    setEffectiveFrom(event.target.value);
+                    setConfirmed(false);
+                    setSaved("");
+                  }}
+                />
+                <small>
+                  {product.recipeVersion === undefined
+                    ? "Chưa có công thức hiện tại."
+                    : `Tạo version sau version ${product.recipeVersion}.`}
+                </small>
+              </label>
+              <label className="field">
+                <span>Sản lượng công thức</span>
+                <input
+                  type="number"
+                  min="0.001"
+                  step="0.001"
+                  aria-label="Sản lượng công thức"
+                  value={yieldQuantity}
+                  onChange={(event) => {
+                    setYieldQuantity(Number(event.target.value));
+                    setConfirmed(false);
+                    setSaved("");
+                  }}
+                />
+                <small>Phải lớn hơn 0.</small>
+              </label>
+            </div>
+            <label className="field">
+              <span>Tỷ lệ hao hụt</span>
+              <input
+                type="number"
+                min="0"
+                max="0.999999"
+                step="0.01"
+                aria-label="Tỷ lệ hao hụt công thức"
+                value={processLossRate}
+                onChange={(event) => {
+                  setProcessLossRate(Number(event.target.value));
+                  setConfirmed(false);
+                  setSaved("");
+                }}
+              />
+              <small>Nhập tỷ lệ từ 0 đến nhỏ hơn 1, ví dụ 0,05.</small>
+            </label>
             <div className="recipe-editor-head">
               <span>Nguyên liệu</span>
               <span>Định lượng</span>
@@ -344,7 +504,9 @@ export function RecipesView({
 
           {invalid ? (
             <Notice tone="warning">
-              Mỗi nguyên liệu chỉ xuất hiện một lần và định lượng phải lớn hơn 0.
+              Mỗi nguyên liệu chỉ xuất hiện một lần; định lượng và sản lượng phải
+              lớn hơn 0; tỷ lệ hao hụt phải từ 0 đến nhỏ hơn 1; ngày hiệu lực mới
+              phải sau công thức hiện tại.
             </Notice>
           ) : null}
           {saved ? <Notice tone="success">{saved}</Notice> : null}
@@ -356,7 +518,10 @@ export function RecipesView({
                 checked={confirmed}
                 onChange={(event) => setConfirmed(event.target.checked)}
               />
-              <span>Áp dụng công thức từ hôm nay.</span>
+              <span>
+                Áp dụng công thức từ{" "}
+                {effectiveFrom ? formatDate(effectiveFrom) : "ngày đã chọn"}.
+              </span>
             </label>
             <div className="button-group">
               <Button onClick={onOpenPlan}>
@@ -378,6 +543,12 @@ export function RecipesView({
                           productId: product.productId,
                           product: product.product,
                         })),
+                        {
+                          effectiveFrom,
+                          version: product.recipeVersion ?? 0,
+                          yieldQuantity,
+                          processLossRate,
+                        },
                       );
                       if (success) {
                         setSaved(
@@ -396,18 +567,6 @@ export function RecipesView({
             </div>
           </div>
 
-          {productVersions.length > 0 ? (
-            <div className="version-list">
-              <SectionHeading title="Phiên bản trước" />
-              {productVersions.map((version) => (
-                <div className="version-row" key={version.savedAt}>
-                  <span>{formatDate(version.effectiveUntil)}</span>
-                  <strong>{version.rows.length} nguyên liệu</strong>
-                  <small>Lưu {new Date(version.savedAt).toLocaleString("vi-VN")}</small>
-                </div>
-              ))}
-            </div>
-          ) : null}
         </>
       ) : null}
     </>

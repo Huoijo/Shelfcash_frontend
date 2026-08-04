@@ -306,15 +306,22 @@ export function buildBootstrapData(): BootstrapData {
     futureCalendar: buildCalendar(today),
     settings: {
       monthlyBudget: 5_000_000,
+      reservedBudget: 0,
+      spentBudget: 2_700_000,
       remainingBudget: 2_300_000,
       forecastHorizon: 7,
+      defaultStrategy: "balanced",
+      version: 1,
       storeId: "STORE_001",
       storeName: "Cửa hàng Quận 3",
     },
   };
 }
 
-export function buildEmptyBootstrapData(): BootstrapData {
+export function buildEmptyBootstrapData(
+  storeId = "",
+  storeName = storeId ? "Đang tải dữ liệu..." : "Chưa chọn cửa hàng",
+): BootstrapData {
   const today = dateInVietnam();
   return {
     today,
@@ -335,10 +342,14 @@ export function buildEmptyBootstrapData(): BootstrapData {
     futureCalendar: [],
     settings: {
       monthlyBudget: 0,
+      reservedBudget: 0,
+      spentBudget: 0,
       remainingBudget: 0,
       forecastHorizon: 7,
-      storeId: "STORE_001",
-      storeName: "Đang tải dữ liệu...",
+      defaultStrategy: "balanced",
+      version: 0,
+      storeId,
+      storeName,
     },
   };
 }
@@ -350,10 +361,3 @@ export function hasOperationalData(data: BootstrapData): boolean {
     data.menu.length > 0
   );
 }
-
-export const productDemandPerDay: Record<string, number> = {
-  "Sinh tố chuối": 12,
-  "Cà phê sữa": 6,
-  "Trà đào": 10,
-  "Matcha sữa": 3,
-};

@@ -10,8 +10,8 @@
     "dev": "vite",
     "build": "bash scripts/build-verified.sh",
     "start": "vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
-    "test:logic": "node --import tsx --test tests/logic.test.ts tests/api.test.ts tests/ingestion.test.ts tests/menu.test.ts tests/proxy.test.ts tests/contract.test.ts tests/client-contract.test.ts tests/recipes-view.test.tsx tests/import-view.test.tsx",
+    "test": "npm run test:logic && npm run build && node --test tests/rendered-html.test.mjs",
+    "test:logic": "node --import tsx --test tests/*.test.ts tests/*.test.tsx",
     "validate:artifact": "bash scripts/validate-artifact.sh",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"

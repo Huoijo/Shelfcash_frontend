@@ -1,10 +1,18 @@
+import type {
+  CoreStrategy,
+  LegacyStrategy,
+  RunStatus,
+} from "./api-contract";
+
+export type { CoreStrategy, LegacyStrategy, RunStatus } from "./api-contract";
+
+/** Statuses actually emitted by InventoryService, plus a UI-only missing state. */
 export type InventoryStatus =
   | "stockout"
+  | "expired"
   | "expiring"
-  | "low"
-  | "overstock"
-  | "missing"
-  | "normal";
+  | "healthy"
+  | "missing";
 
 export type Strategy = "Tiết kiệm" | "Cân bằng" | "An toàn";
 
@@ -28,6 +36,10 @@ export interface InventoryItem {
   unit: string;
   onHand: number;
   usableQuantity?: number;
+  expiredQty?: number;
+  receivedDate?: string;
+  version?: number;
+  lots?: InventoryLot[];
   unitCost: number;
   expiryDate: string;
   expiringQty: number;
@@ -41,6 +53,26 @@ export interface InventoryItem {
   lastCounted: string;
   backendStatus?: InventoryStatus;
   daysSupply?: number;
+}
+
+export interface InventoryLot {
+  lotId: string;
+  ingredientId?: string;
+  supplierId?: string;
+  ingredient: string;
+  sku: string;
+  unit: string;
+  onHand: number;
+  usableQuantity: number;
+  expiringQuantity: number;
+  expiredQuantity: number;
+  unitCost: number;
+  receivedDate: string;
+  expiryDate: string;
+  supplier: string;
+  status: InventoryStatus;
+  lastCounted: string;
+  version: number;
 }
 
 export interface EnrichedInventoryItem extends InventoryItem {
@@ -66,6 +98,8 @@ export interface Product {
   sellingUnit?: string;
   recipeStatus: "Hoàn chỉnh" | "Thiếu định lượng";
   effectiveDate?: string;
+  recipeYieldQuantity?: number;
+  recipeProcessLossRate?: number;
 }
 
 export type MenuItemType = "single" | "combo";
@@ -165,8 +199,14 @@ export interface CalendarDay {
 
 export interface Settings {
   monthlyBudget: number;
+  reservedBudget: number;
+  spentBudget: number;
   remainingBudget: number;
   forecastHorizon: number;
+  defaultStrategy: LegacyStrategy;
+  version: number;
+  safetyPolicy?: string;
+  updatedAt?: string;
   storeId: string;
   storeName: string;
   timezone?: string;
@@ -299,11 +339,18 @@ export interface ForecastPoint {
   p25?: number;
   p50?: number;
   p75?: number;
+  intervalLower?: number;
+  intervalUpper?: number;
+  baselineP50?: number;
+  calibrationSource?: string;
+  warnings?: string[];
   promotion?: boolean;
   weekend?: boolean;
 }
 
 export interface ForecastResult {
+  productId?: string;
+  product?: string;
   ingredientId?: string;
   ingredient: string;
   unit: string;
@@ -319,10 +366,32 @@ export interface ForecastResult {
   dataNotes: string[];
 }
 
+export interface IngredientDemandContribution {
+  productId?: string;
+  product: string;
+  p25: number;
+  p50: number;
+  p75: number;
+  quantity?: number;
+  unit?: string;
+}
+
+export interface IngredientDemandResult {
+  ingredientId: string;
+  ingredient: string;
+  unit: string;
+  forecast: ForecastPoint[];
+  totals: { p25: number; p50: number; p75: number };
+  contributions: IngredientDemandContribution[];
+  warnings: string[];
+}
+
 export interface Recommendation {
+  poLineId?: string;
   recommendationId?: string;
   ingredientId?: string;
   supplierId?: string;
+  supplierTermId?: string;
   ingredient: string;
   unit: string;
   status: string;
@@ -346,14 +415,48 @@ export interface Recommendation {
   capacityWarning: boolean;
   reason: string;
   reasonCodes?: string[];
+  warnings?: string[];
+  orderDate?: string;
+  expectedArrivalDate?: string | null;
+  rawRequiredQuantity?: number;
+  roundingExcess?: number;
+  packCount?: number | null;
+  receivedQuantity?: number;
+  remainingQuantity?: number;
+}
+
+export interface PlanningScenario {
+  strategy: CoreStrategy;
+  feasible: boolean;
+  cost: number;
+  shortage: number;
+  waste: number;
+  fillRate: number;
+  metrics: Record<string, unknown>;
+  warnings: string[];
+  violations: string[];
+  recommendations: Recommendation[];
 }
 
 export interface PlanResponse {
   strategy: Strategy;
+  status: RunStatus | "idle";
+  engineStatus?: string;
+  failureCode?: string | null;
+  failureMessage?: string | null;
+  cutoffDate?: string;
+  horizonDays?: number;
+  createdAt?: string;
+  completedAt?: string;
   enrichedInventory: EnrichedInventoryItem[];
   recommendations: Recommendation[];
   forecasts: Record<string, ForecastResult>;
+  ingredientDemand: Record<string, IngredientDemandResult>;
+  scenarios: PlanningScenario[];
+  recommendedStrategy?: CoreStrategy | null;
   forecastRunId?: string;
+  ingredientDemandRunId?: string;
+  procurementPlanRunId?: string;
   planRunId?: string;
   budget?: {
     limit: number;
@@ -373,9 +476,18 @@ export interface PurchaseOrder {
   lines: Recommendation[];
   total: number;
   budgetAfter: number;
-  status: "Bản nháp" | "Đã đặt hàng";
+  status: PurchaseOrderStatus;
   version?: number;
+  confirmedAt?: string;
+  receivedAt?: string;
+  deliveryReference?: string;
 }
+
+export type PurchaseOrderStatus =
+  | "draft"
+  | "ordered"
+  | "partially_received"
+  | "received";
 
 export interface ParsedSheet {
   name: string;
@@ -398,6 +510,7 @@ export interface ShelfCashApiErrorBody {
   code: string;
   message: string;
   details: ApiRecord;
+  request_id: string | null;
 }
 
 export interface SheetProfile extends ApiRecord {
@@ -437,9 +550,10 @@ export interface ImportStatusResponse extends ApiRecord {
 export interface ConfirmImportMapping {
   profile_id?: string;
   file_name?: string;
-  sheet_name: string;
+  sheet_name?: string;
   sheet_type: string;
-  column_mapping: Record<string, string>;
+  column_mapping: Record<string, string | null>;
+  skip?: boolean;
 }
 
 export interface IngestionResult extends ApiRecord {
@@ -482,7 +596,7 @@ export interface BackendConnectionHealth {
   message?: string;
 }
 
-export type ApiStrategy = "economy" | "balanced" | "safe";
+export type ApiStrategy = LegacyStrategy;
 
 export interface StoreBootstrapResponse extends ApiRecord {
   today: string;
@@ -501,9 +615,15 @@ export interface StoreBootstrapResponse extends ApiRecord {
   aliases: ApiRecord[];
   future_calendar: ApiRecord[];
   settings: {
-    monthly_budget: number;
-    remaining_budget: number;
+    monthly_budget: number | string;
+    reserved_budget?: number | string;
+    spent_budget?: number | string;
+    remaining_budget: number | string;
     forecast_horizon: number;
+    default_strategy?: LegacyStrategy;
+    safety_policy?: string;
+    version?: number;
+    updated_at?: string;
   };
   latest_runs: {
     forecast_run_id: string | null;
@@ -514,28 +634,29 @@ export interface StoreBootstrapResponse extends ApiRecord {
 
 export interface ForecastRunResponse extends ApiRecord {
   forecast_run_id: string;
-  status: string;
+  status: RunStatus;
   cutoff_date?: string;
   horizon_days?: number;
 }
 
 export interface ForecastRunResultResponse extends ApiRecord {
   forecast_run_id: string;
-  status: string;
+  status: RunStatus;
   model_version?: string;
   calibrator_version?: string;
-  forecasts: ApiRecord[];
+  predictions?: ApiRecord[];
+  forecasts?: ApiRecord[];
 }
 
 export interface PlanRunResponse extends ApiRecord {
   plan_run_id: string;
-  status: string;
+  status: RunStatus;
   strategy?: ApiStrategy;
 }
 
 export interface PlanRunResultResponse extends ApiRecord {
   plan_run_id: string;
-  status: string;
+  status: RunStatus;
   strategy: ApiStrategy;
   budget?: {
     limit?: number;

@@ -1,10 +1,7 @@
 import type {
   ApiRecord,
-  ApiStrategy,
   BackendConnectionHealth,
   ConfirmImportMapping,
-  ForecastRunResponse,
-  ForecastRunResultResponse,
   ImportCreateResponse,
   ImportStatusResponse,
   IngestionResult,
@@ -16,23 +13,58 @@ import type {
   PlanRunResponse,
   PlanRunResultResponse,
   SheetProfile,
-  ShelfCashApiErrorBody,
   StoreBootstrapResponse,
 } from "./types";
+import {
+  assertForecastHorizon,
+  isTimezoneAwareDateTime,
+  type ApiErrorBody,
+  type CoreStrategy,
+  type ForecastRunMetadata,
+  type ForecastRunResult,
+  type IngredientDemandRun,
+  type LegacyStrategy,
+  type ProcurementPlanRun,
+  type PurchaseOrderCreateResponse,
+  type PurchaseOrderRecord,
+  type RecipeDetail,
+  type RunStatus,
+  type RunWaitOptions,
+} from "./api-contract";
 
-const proxyPrefix = "/api/shelfcash";
+/** The browser talks to one same-origin BFF root; the BFF owns backend secrets. */
+export const API_ROOT = "/api/shelfcash";
+
+export interface ShelfCashRequestOptions extends RequestInit {
+  requestId?: string;
+  timeoutMs?: number;
+}
+
+export interface MutationOptions {
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
 
 export class ShelfCashApiError extends Error {
   code: string;
   details: ApiRecord;
   status: number;
+  requestId: string | null;
+  request_id: string | null;
 
-  constructor(body: ShelfCashApiErrorBody, status: number) {
+  constructor(
+    body: Omit<ApiErrorBody, "request_id"> & { request_id?: string | null },
+    status: number,
+  ) {
     super(body.message);
     this.name = "ShelfCashApiError";
     this.code = body.code;
     this.details = body.details;
     this.status = status;
+    this.requestId = body.request_id ?? null;
+    this.request_id = this.requestId;
   }
 }
 
@@ -48,46 +80,156 @@ async function parseResponse(response: Response): Promise<unknown> {
   return text ? { message: text } : {};
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${proxyPrefix}${path}`, init);
-  const payload = await parseResponse(response);
-  if (!response.ok) {
-    const record = isRecord(payload) ? payload : {};
-    throw new ShelfCashApiError(
-      {
-        code:
-          typeof record.code === "string"
-            ? record.code
-            : `HTTP_${response.status}`,
-        message:
-          typeof record.message === "string"
-            ? record.message
-            : "Không thể kết nối ShelfCash backend.",
-        details: isRecord(record.details) ? record.details : {},
-      },
-      response.status,
-    );
-  }
-  return payload as T;
+function generatedUuid(prefix: string): string {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function idempotencyKey(): string {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return `shelfcash-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+export function createIdempotencyKey(): string {
+  return generatedUuid("shelfcash-action");
+}
+
+export function createRequestId(): string {
+  return generatedUuid("shelfcash-request");
+}
+
+function composedRequestSignal(
+  externalSignal: AbortSignal | null | undefined,
+  timeoutMs: number,
+): {
+  signal: AbortSignal;
+  didTimeout: () => boolean;
+  cleanup: () => void;
+} {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortFromExternal = () => controller.abort(externalSignal?.reason);
+  if (externalSignal?.aborted) abortFromExternal();
+  else externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
+  const timer =
+    timeoutMs > 0
+      ? setTimeout(() => {
+          timedOut = true;
+          controller.abort(new DOMException("Request timed out", "TimeoutError"));
+        }, timeoutMs)
+      : undefined;
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    cleanup: () => {
+      if (timer !== undefined) clearTimeout(timer);
+      externalSignal?.removeEventListener("abort", abortFromExternal);
+    },
+  };
+}
+
+export async function requestShelfCash<T>(
+  path: string,
+  options: ShelfCashRequestOptions = {},
+): Promise<T> {
+  const { requestId: explicitRequestId, timeoutMs = 120_000, ...init } = options;
+  const headers = new Headers(init.headers);
+  const requestId =
+    explicitRequestId || headers.get("X-Request-ID") || createRequestId();
+  headers.set("X-Request-ID", requestId);
+  const requestSignal = composedRequestSignal(init.signal, timeoutMs);
+  try {
+    const response = await fetch(`${API_ROOT}${path}`, {
+      ...init,
+      headers,
+      signal: requestSignal.signal,
+    });
+    const payload = await parseResponse(response);
+    if (!response.ok) {
+      const record = isRecord(payload) ? payload : {};
+      const responseRequestId =
+        typeof record.request_id === "string"
+          ? record.request_id
+          : response.headers.get("X-Request-ID") || requestId;
+      throw new ShelfCashApiError(
+        {
+          code:
+            typeof record.code === "string"
+              ? record.code
+              : `HTTP_${response.status}`,
+          message:
+            typeof record.message === "string"
+              ? record.message
+              : "Không thể kết nối ShelfCash backend.",
+          details: isRecord(record.details) ? record.details : {},
+          request_id: responseRequestId,
+        },
+        response.status,
+      );
+    }
+    return payload as T;
+  } catch (caught) {
+    if (caught instanceof ShelfCashApiError) throw caught;
+    if (requestSignal.didTimeout()) {
+      throw new ShelfCashApiError(
+        {
+          code: "REQUEST_TIMEOUT",
+          message: "ShelfCash backend xử lý lâu hơn thời gian chờ của yêu cầu.",
+          details: { timeout_ms: timeoutMs },
+          request_id: requestId,
+        },
+        408,
+      );
+    }
+    if (init.signal?.aborted) {
+      throw new ShelfCashApiError(
+        {
+          code: "REQUEST_ABORTED",
+          message: "Yêu cầu đã bị hủy.",
+          details: {},
+          request_id: requestId,
+        },
+        499,
+      );
+    }
+    throw new ShelfCashApiError(
+      {
+        code: "NETWORK_ERROR",
+        message: "Không thể kết nối ShelfCash backend.",
+        details: {
+          reason: caught instanceof Error ? caught.message : "Unknown network error",
+        },
+        request_id: requestId,
+      },
+      0,
+    );
+  } finally {
+    requestSignal.cleanup();
+  }
 }
 
 function jsonRequest(
   method: "POST" | "PUT" | "PATCH",
   body: unknown,
-  idempotent = false,
-): RequestInit {
+  input: boolean | (MutationOptions & { idempotent?: boolean }) = false,
+): ShelfCashRequestOptions {
+  const options = typeof input === "boolean" ? { idempotent: input } : input;
   const headers = new Headers({
     accept: "application/json",
     "content-type": "application/json",
   });
-  if (idempotent) headers.set("Idempotency-Key", idempotencyKey());
-  return { method, headers, body: JSON.stringify(body) };
+  if (options.idempotent || options.idempotencyKey) {
+    headers.set(
+      "Idempotency-Key",
+      options.idempotencyKey ?? createIdempotencyKey(),
+    );
+  }
+  return {
+    method,
+    headers,
+    body: JSON.stringify(body),
+    requestId: options.requestId,
+    signal: options.signal,
+    timeoutMs: options.timeoutMs,
+  };
 }
+
+const request = requestShelfCash;
 
 function storePath(storeId: string): string {
   return `/api/v1/stores/${encodeURIComponent(storeId)}`;
@@ -153,16 +295,26 @@ export async function createImport(input: {
   storeId: string;
   forecastDate?: string;
   forecastHorizon: number;
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<ImportCreateResponse> {
+  const horizon = assertForecastHorizon(input.forecastHorizon);
   const form = new FormData();
   input.files.forEach((file) => form.append("files", file));
   form.append("store_id", input.storeId);
   if (input.forecastDate) form.append("forecast_date", input.forecastDate);
-  form.append("forecast_horizon", String(input.forecastHorizon));
+  form.append("forecast_horizon", String(horizon));
   return request<ImportCreateResponse>("/api/v1/imports", {
     method: "POST",
-    headers: { "Idempotency-Key": idempotencyKey() },
+    headers: {
+      "Idempotency-Key": input.idempotencyKey ?? createIdempotencyKey(),
+    },
     body: form,
+    requestId: input.requestId,
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
   });
 }
 
@@ -177,19 +329,32 @@ export async function getImport(
 export async function confirmImport(
   importId: string,
   mappings: ConfirmImportMapping[],
+  options: MutationOptions = {},
 ): Promise<ImportStatusResponse> {
   return request<ImportStatusResponse>(
     `/api/v1/imports/${encodeURIComponent(importId)}/confirm`,
-    jsonRequest("POST", { mappings }),
+    jsonRequest("POST", { mappings }, options),
   );
 }
 
 export async function processImport(
   importId: string,
+  options: MutationOptions = {},
 ): Promise<ImportStatusResponse> {
   return request<ImportStatusResponse>(
     `/api/v1/imports/${encodeURIComponent(importId)}/process`,
-    { method: "POST", headers: { accept: "application/json" } },
+    {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        ...(options.idempotencyKey
+          ? { "Idempotency-Key": options.idempotencyKey }
+          : {}),
+      },
+      requestId: options.requestId,
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
+    },
   );
 }
 
@@ -213,6 +378,109 @@ export async function getDashboard(storeId: string): Promise<ApiRecord> {
 
 export async function getInventory(storeId: string): Promise<unknown> {
   return request<unknown>(`${storePath(storeId)}/inventory`);
+}
+
+export async function createInventoryCount(input: {
+  storeId: string;
+  countedAt: string;
+  lines: Array<{
+    lotId: string;
+    countedQuantity: number;
+    unit: string;
+    note?: string;
+  }>;
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
+}): Promise<ApiRecord> {
+  return request<ApiRecord>(
+    `${storePath(input.storeId)}/inventory-counts`,
+    jsonRequest(
+      "POST",
+      {
+        counted_at: input.countedAt,
+        lines: input.lines.map((line) => ({
+          lot_id: line.lotId,
+          counted_quantity: line.countedQuantity,
+          unit: line.unit,
+          ...(line.note?.trim() ? { note: line.note.trim() } : {}),
+        })),
+      },
+      {
+        idempotent: true,
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId,
+        signal: input.signal,
+      },
+    ),
+  );
+}
+
+export async function createInventoryAdjustment(input: {
+  storeId: string;
+  occurredAt: string;
+  reference?: string;
+  lines: Array<{
+    lotId: string;
+    expectedVersion: number;
+    quantityDelta: number;
+    unit: string;
+    reason: string;
+    note?: string;
+  }>;
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
+}): Promise<ApiRecord> {
+  return request<ApiRecord>(
+    `${storePath(input.storeId)}/inventory-adjustments`,
+    jsonRequest(
+      "POST",
+      {
+        occurred_at: input.occurredAt,
+        ...(input.reference?.trim()
+          ? { reference: input.reference.trim() }
+          : {}),
+        lines: input.lines.map((line) => ({
+          lot_id: line.lotId,
+          expected_version: line.expectedVersion,
+          quantity_delta: line.quantityDelta,
+          unit: line.unit,
+          reason: line.reason,
+          ...(line.note?.trim() ? { note: line.note.trim() } : {}),
+        })),
+      },
+      {
+        idempotent: true,
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId,
+        signal: input.signal,
+      },
+    ),
+  );
+}
+
+export async function getInventoryMovements(input: {
+  storeId: string;
+  ingredientId?: string;
+  lotId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  pageSize?: number;
+  signal?: AbortSignal;
+}): Promise<unknown> {
+  const query = new URLSearchParams();
+  if (input.ingredientId) query.set("ingredient_id", input.ingredientId);
+  if (input.lotId) query.set("lot_id", input.lotId);
+  if (input.dateFrom) query.set("date_from", input.dateFrom);
+  if (input.dateTo) query.set("date_to", input.dateTo);
+  if (input.page !== undefined) query.set("page", String(input.page));
+  if (input.pageSize !== undefined) query.set("page_size", String(input.pageSize));
+  return request<unknown>(
+    `${storePath(input.storeId)}/inventory-movements${query.size ? `?${query.toString()}` : ""}`,
+    { signal: input.signal },
+  );
 }
 
 export async function getProducts(storeId: string): Promise<unknown> {
@@ -244,10 +512,18 @@ export async function getMenu(
 export async function createMenuProduct(input: {
   storeId: string;
   payload: MenuItemDraft | ApiRecord;
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
 }): Promise<ApiRecord> {
   return request<ApiRecord>(
     `${storePath(input.storeId)}/products`,
-    jsonRequest("POST", input.payload, true),
+    jsonRequest("POST", input.payload, {
+      idempotent: true,
+      idempotencyKey: input.idempotencyKey,
+      requestId: input.requestId,
+      signal: input.signal,
+    }),
   );
 }
 
@@ -255,10 +531,17 @@ export async function updateMenuProduct(input: {
   storeId: string;
   productId: string;
   payload: ApiRecord;
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
 }): Promise<ApiRecord> {
   return request<ApiRecord>(
     `${storePath(input.storeId)}/products/${encodeURIComponent(input.productId)}`,
-    jsonRequest("PATCH", input.payload),
+    jsonRequest("PATCH", input.payload, {
+      idempotencyKey: input.idempotencyKey,
+      requestId: input.requestId,
+      signal: input.signal,
+    }),
   );
 }
 
@@ -267,6 +550,9 @@ export async function replaceMenuComponents(input: {
   productId: string;
   version: number;
   components: MenuComponentDraft[];
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
 }): Promise<ApiRecord> {
   return request<ApiRecord>(
     `${storePath(input.storeId)}/products/${encodeURIComponent(input.productId)}/components`,
@@ -279,7 +565,12 @@ export async function replaceMenuComponents(input: {
           quantity: component.quantity,
         })),
       },
-      true,
+      {
+        idempotent: true,
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId,
+        signal: input.signal,
+      },
     ),
   );
 }
@@ -330,23 +621,67 @@ export async function saveRecipe(input: {
   productId: string;
   effectiveFrom: string;
   version: number;
+  yieldQuantity?: number;
+  processLossRate?: number;
   lines: Array<{
     ingredientId: string;
     quantity: number;
     unit: string;
   }>;
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
 }): Promise<ApiRecord> {
   return request<ApiRecord>(
     `${storePath(input.storeId)}/products/${encodeURIComponent(input.productId)}/recipe`,
-    jsonRequest("PUT", {
-      effective_from: input.effectiveFrom,
-      version: input.version,
-      lines: input.lines.map((line) => ({
-        ingredient_id: line.ingredientId,
-        quantity: line.quantity,
-        unit: line.unit,
-      })),
-    }),
+    jsonRequest(
+      "PUT",
+      {
+        effective_from: input.effectiveFrom,
+        version: input.version,
+        ...(input.yieldQuantity !== undefined
+          ? { yield_quantity: input.yieldQuantity }
+          : {}),
+        ...(input.processLossRate !== undefined
+          ? { process_loss_rate: input.processLossRate }
+          : {}),
+        lines: input.lines.map((line) => ({
+          ingredient_id: line.ingredientId,
+          quantity: line.quantity,
+          unit: line.unit,
+        })),
+      },
+      {
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId,
+        signal: input.signal,
+      },
+    ),
+  );
+}
+
+export async function getRecipe(input: {
+  storeId: string;
+  productId: string;
+  onDate?: string;
+  signal?: AbortSignal;
+}): Promise<RecipeDetail> {
+  const query = new URLSearchParams();
+  if (input.onDate) query.set("on_date", input.onDate);
+  return request<RecipeDetail>(
+    `${storePath(input.storeId)}/products/${encodeURIComponent(input.productId)}/recipe${query.size ? `?${query.toString()}` : ""}`,
+    { signal: input.signal },
+  );
+}
+
+export async function getRecipeVersions(input: {
+  storeId: string;
+  productId: string;
+  signal?: AbortSignal;
+}): Promise<unknown> {
+  return request<unknown>(
+    `${storePath(input.storeId)}/products/${encodeURIComponent(input.productId)}/recipe-versions`,
+    { signal: input.signal },
   );
 }
 
@@ -354,6 +689,9 @@ export async function saveSupplierConstraint(input: {
   storeId: string;
   constraintId?: string;
   payload: ApiRecord;
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
 }): Promise<ApiRecord> {
   const source = input.payload;
   const payload: ApiRecord = {
@@ -376,7 +714,11 @@ export async function saveSupplierConstraint(input: {
     : `${storePath(input.storeId)}/supplier-constraints`;
   return request<ApiRecord>(
     path,
-    jsonRequest(input.constraintId ? "PUT" : "POST", payload),
+    jsonRequest(input.constraintId ? "PUT" : "POST", payload, {
+      idempotencyKey: input.idempotencyKey,
+      requestId: input.requestId,
+      signal: input.signal,
+    }),
   );
 }
 
@@ -387,18 +729,23 @@ export async function saveAliases(
     canonicalName: string;
     ingredientId?: string;
   }>,
+  options: MutationOptions = {},
 ): Promise<ApiRecord> {
   return request<ApiRecord>(
     `${storePath(storeId)}/aliases`,
-    jsonRequest("PUT", {
-      aliases: aliases.map((alias) => ({
-        source_name: alias.sourceName,
-        canonical_name: alias.canonicalName,
-        ...(alias.ingredientId
-          ? { ingredient_id: alias.ingredientId }
-          : {}),
-      })),
-    }),
+    jsonRequest(
+      "PUT",
+      {
+        aliases: aliases.map((alias) => ({
+          source_name: alias.sourceName,
+          canonical_name: alias.canonicalName,
+          ...(alias.ingredientId
+            ? { ingredient_id: alias.ingredientId }
+            : {}),
+        })),
+      },
+      options,
+    ),
   );
 }
 
@@ -407,15 +754,38 @@ export async function saveSettings(
   settings: {
     monthlyBudget: number;
     forecastHorizon: number;
+    defaultStrategy?: LegacyStrategy;
+    safetyPolicy?: string;
+    version?: number;
   },
+  options: MutationOptions = {},
 ): Promise<ApiRecord> {
+  const horizon = assertForecastHorizon(settings.forecastHorizon);
   return request<ApiRecord>(
     `${storePath(storeId)}/settings`,
-    jsonRequest("PUT", {
-      monthly_budget: settings.monthlyBudget,
-      forecast_horizon: settings.forecastHorizon,
-    }),
+    jsonRequest(
+      "PUT",
+      {
+        monthly_budget: settings.monthlyBudget,
+        forecast_horizon: horizon,
+        ...(settings.defaultStrategy
+          ? { default_strategy: settings.defaultStrategy }
+          : {}),
+        ...(settings.safetyPolicy
+          ? { safety_policy: settings.safetyPolicy }
+          : {}),
+        ...(settings.version !== undefined ? { version: settings.version } : {}),
+      },
+      options,
+    ),
   );
+}
+
+export async function getSettings(
+  storeId: string,
+  signal?: AbortSignal,
+): Promise<ApiRecord> {
+  return request<ApiRecord>(`${storePath(storeId)}/settings`, { signal });
 }
 
 export async function saveCalendar(
@@ -426,17 +796,22 @@ export async function saveCalendar(
     promotion: boolean;
     promotionNote: string;
   }>,
+  options: MutationOptions = {},
 ): Promise<ApiRecord> {
   return request<ApiRecord>(
     `${storePath(storeId)}/calendar-features`,
-    jsonRequest("PUT", {
-      items: calendar.map((day) => ({
-        date: day.date,
-        holiday: day.holiday,
-        promotion: day.promotion,
-        promotion_note: day.promotionNote,
-      })),
-    }),
+    jsonRequest(
+      "PUT",
+      {
+        items: calendar.map((day) => ({
+          date: day.date,
+          holiday: day.holiday,
+          promotion: day.promotion,
+          promotion_note: day.promotionNote,
+        })),
+      },
+      options,
+    ),
   );
 }
 
@@ -444,20 +819,35 @@ export async function createForecastRun(input: {
   storeId: string;
   cutoffDate: string;
   horizonDays: number;
+  productIds?: string[];
   ingredientIds?: string[];
-}): Promise<ForecastRunResponse> {
-  return request<ForecastRunResponse>(
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<ForecastRunMetadata> {
+  const horizon = assertForecastHorizon(input.horizonDays);
+  return request<ForecastRunMetadata>(
     `${storePath(input.storeId)}/forecast-runs`,
     jsonRequest(
       "POST",
       {
         cutoff_date: input.cutoffDate,
-        horizon_days: input.horizonDays,
+        horizon_days: horizon,
         quantiles: [0.25, 0.5, 0.75],
-        scope: { ingredient_ids: input.ingredientIds ?? [] },
+        scope: {
+          product_ids: input.productIds ?? [],
+          ingredient_ids: input.ingredientIds ?? [],
+        },
         use_latest_calendar: true,
       },
-      true,
+      {
+        idempotent: true,
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId,
+        signal: input.signal,
+        timeoutMs: input.timeoutMs,
+      },
     ),
   );
 }
@@ -465,27 +855,164 @@ export async function createForecastRun(input: {
 export async function getForecastRun(
   storeId: string,
   forecastRunId: string,
-): Promise<ForecastRunResponse> {
-  return request<ForecastRunResponse>(
+  options: ShelfCashRequestOptions = {},
+): Promise<ForecastRunMetadata> {
+  return request<ForecastRunMetadata>(
     `${storePath(storeId)}/forecast-runs/${encodeURIComponent(forecastRunId)}`,
+    options,
   );
 }
 
 export async function getForecastResult(
   storeId: string,
   forecastRunId: string,
-): Promise<ForecastRunResultResponse> {
-  return request<ForecastRunResultResponse>(
+  options: ShelfCashRequestOptions = {},
+): Promise<ForecastRunResult> {
+  return request<ForecastRunResult>(
     `${storePath(storeId)}/forecast-runs/${encodeURIComponent(forecastRunId)}/result`,
+    options,
+  );
+}
+
+export async function trainForecastModel(input: {
+  storeId: string;
+  cutoffDate: string;
+  modelVersion: string;
+  historyDays?: number;
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<ApiRecord> {
+  return request<ApiRecord>(
+    "/api/v1/forecast-models/train",
+    jsonRequest(
+      "POST",
+      {
+        store_id: input.storeId,
+        cutoff_date: input.cutoffDate,
+        model_version: input.modelVersion,
+        ...(input.historyDays !== undefined
+          ? { history_days: input.historyDays }
+          : {}),
+      },
+      {
+        idempotent: true,
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId,
+        signal: input.signal,
+        timeoutMs: input.timeoutMs,
+      },
+    ),
+  );
+}
+
+export async function createIngredientDemand(input: {
+  storeId: string;
+  forecastRunId: string;
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<IngredientDemandRun> {
+  return request<IngredientDemandRun>(
+    `${storePath(input.storeId)}/forecast-runs/${encodeURIComponent(input.forecastRunId)}/ingredient-demand`,
+    jsonRequest("POST", {}, {
+      idempotent: true,
+      idempotencyKey: input.idempotencyKey,
+      requestId: input.requestId,
+      signal: input.signal,
+      timeoutMs: input.timeoutMs,
+    }),
+  );
+}
+
+export async function getIngredientDemand(
+  storeId: string,
+  forecastRunId: string,
+  options: ShelfCashRequestOptions = {},
+): Promise<IngredientDemandRun> {
+  return request<IngredientDemandRun>(
+    `${storePath(storeId)}/forecast-runs/${encodeURIComponent(forecastRunId)}/ingredient-demand`,
+    options,
+  );
+}
+
+export async function createProcurementPlans(input: {
+  storeId: string;
+  forecastRunId: string;
+  strategies?: CoreStrategy[];
+  useOpenPurchaseOrders?: boolean;
+  budgetOverride?: number;
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<ProcurementPlanRun> {
+  const strategies = input.strategies ?? ["lean", "balanced", "protected"];
+  if (
+    strategies.length < 1 ||
+    strategies.length > 3 ||
+    new Set(strategies).size !== strategies.length ||
+    strategies.some(
+      (strategy) => !(["lean", "balanced", "protected"] as const).includes(strategy),
+    )
+  ) {
+    throw new RangeError(
+      "strategies must contain one to three unique lean/balanced/protected values.",
+    );
+  }
+  return request<ProcurementPlanRun>(
+    `${storePath(input.storeId)}/forecast-runs/${encodeURIComponent(input.forecastRunId)}/procurement-plans`,
+    jsonRequest(
+      "POST",
+      {
+        strategies,
+        use_open_purchase_orders: input.useOpenPurchaseOrders ?? true,
+        use_latest_inventory: true,
+        ...(input.budgetOverride !== undefined
+          ? { budget_override: input.budgetOverride }
+          : {}),
+      },
+      {
+        idempotent: true,
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId,
+        signal: input.signal,
+        timeoutMs: input.timeoutMs,
+      },
+    ),
+  );
+}
+
+export async function getProcurementPlans(input: {
+  storeId: string;
+  forecastRunId: string;
+  procurementPlanRunId?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<ProcurementPlanRun> {
+  const query = new URLSearchParams();
+  if (input.procurementPlanRunId) {
+    query.set("procurement_plan_run_id", input.procurementPlanRunId);
+  }
+  return request<ProcurementPlanRun>(
+    `${storePath(input.storeId)}/forecast-runs/${encodeURIComponent(input.forecastRunId)}/procurement-plans${query.size ? `?${query.toString()}` : ""}`,
+    { signal: input.signal, timeoutMs: input.timeoutMs },
   );
 }
 
 export async function createPlanRun(input: {
   storeId: string;
   forecastRunId: string;
-  strategy: ApiStrategy;
+  strategy: LegacyStrategy;
   budgetLimit: number;
   asOfDate: string;
+  includeOpenPurchaseOrders?: boolean;
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<PlanRunResponse> {
   return request<PlanRunResponse>(
     `${storePath(input.storeId)}/plan-runs`,
@@ -496,9 +1023,15 @@ export async function createPlanRun(input: {
         strategy: input.strategy,
         budget_limit: input.budgetLimit,
         as_of_date: input.asOfDate,
-        include_open_purchase_orders: true,
+        include_open_purchase_orders: input.includeOpenPurchaseOrders ?? true,
       },
-      true,
+      {
+        idempotent: true,
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId,
+        signal: input.signal,
+        timeoutMs: input.timeoutMs,
+      },
     ),
   );
 }
@@ -506,55 +1039,133 @@ export async function createPlanRun(input: {
 export async function getPlanRun(
   storeId: string,
   planRunId: string,
+  options: ShelfCashRequestOptions = {},
 ): Promise<PlanRunResponse> {
   return request<PlanRunResponse>(
     `${storePath(storeId)}/plan-runs/${encodeURIComponent(planRunId)}`,
+    options,
   );
 }
 
 export async function getPlanResult(
   storeId: string,
   planRunId: string,
+  options: ShelfCashRequestOptions = {},
 ): Promise<PlanRunResultResponse> {
   return request<PlanRunResultResponse>(
     `${storePath(storeId)}/plan-runs/${encodeURIComponent(planRunId)}/result`,
+    options,
   );
 }
 
-function terminalFailure(status: string): boolean {
-  return ["failed", "cancelled", "canceled", "error"].includes(
-    status.toLowerCase(),
+function exactRunStatus(value: unknown): RunStatus {
+  const status = String(value ?? "").toLowerCase();
+  if (["running", "completed", "blocked", "failed"].includes(status)) {
+    return status as RunStatus;
+  }
+  throw new ShelfCashApiError(
+    {
+      code: "UNEXPECTED_RUN_STATUS",
+      message: "Backend trả trạng thái tác vụ không thuộc contract.",
+      details: { status: value },
+      request_id: null,
+    },
+    502,
   );
 }
 
-async function delay(milliseconds: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+async function delay(
+  milliseconds: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) {
+    throw new ShelfCashApiError(
+      {
+        code: "REQUEST_ABORTED",
+        message: "Yêu cầu đã bị hủy.",
+        details: {},
+        request_id: null,
+      },
+      499,
+    );
+  }
+  await new Promise<void>((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(
+        new ShelfCashApiError(
+          {
+            code: "REQUEST_ABORTED",
+            message: "Yêu cầu đã bị hủy.",
+            details: {},
+            request_id: null,
+          },
+          499,
+        ),
+      );
+    };
+    const finish = () => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timer = setTimeout(finish, milliseconds);
+    signal?.addEventListener("abort", abort, { once: true });
+  });
 }
 
-async function waitForRun<TStatus extends { status: string }, TResult>(
-  getStatus: () => Promise<TStatus>,
-  getResult: () => Promise<TResult>,
+async function waitForRun<
+  TStatus extends {
+    status: string;
+    failure_code?: string | null;
+    failure_message?: string | null;
+  },
+  TResult,
+>(
+  getStatus: (options: ShelfCashRequestOptions) => Promise<TStatus>,
+  getResult: (options: ShelfCashRequestOptions) => Promise<TResult>,
+  options: RunWaitOptions = {},
 ): Promise<TResult> {
-  for (let attempt = 0; attempt < 90; attempt += 1) {
-    const status = await getStatus();
-    if (terminalFailure(status.status)) {
+  const timeoutMs = options.timeoutMs ?? 90_000;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    const status = await getStatus({
+      signal: options.signal,
+      timeoutMs: options.requestTimeoutMs,
+    });
+    const exactStatus = exactRunStatus(status.status);
+    if (exactStatus === "completed") {
+      return getResult({
+        signal: options.signal,
+        timeoutMs: options.requestTimeoutMs,
+      });
+    }
+    if (exactStatus === "blocked" || exactStatus === "failed") {
+      const code =
+        status.failure_code ||
+        (exactStatus === "blocked" ? "RUN_BLOCKED" : "RUN_FAILED");
       throw new ShelfCashApiError(
         {
-          code: "INVALID_STATE_TRANSITION",
-          message: "Backend không thể hoàn tất tác vụ.",
-          details: { status: status.status },
+          code,
+          message:
+            status.failure_message ||
+            (exactStatus === "blocked"
+              ? "Tác vụ bị chặn và sẽ không được tiếp tục tự động."
+              : "Backend không thể hoàn tất tác vụ."),
+          details: { status: exactStatus },
+          request_id: null,
         },
-        409,
+        code === "MODEL_NOT_READY" ? 503 : 409,
       );
     }
-    if (status.status.toLowerCase() === "completed") return getResult();
-    await delay(1_000);
+    await delay(options.pollIntervalMs ?? 1_000, options.signal);
   }
   throw new ShelfCashApiError(
     {
       code: "JOB_TIMEOUT",
       message: "Backend xử lý lâu hơn dự kiến. Bạn có thể thử lại sau.",
-      details: {},
+      details: { timeout_ms: timeoutMs },
+      request_id: null,
     },
     408,
   );
@@ -563,20 +1174,73 @@ async function waitForRun<TStatus extends { status: string }, TResult>(
 export async function waitForForecastResult(
   storeId: string,
   forecastRunId: string,
-): Promise<ForecastRunResultResponse> {
+  options: RunWaitOptions = {},
+): Promise<ForecastRunResult> {
   return waitForRun(
-    () => getForecastRun(storeId, forecastRunId),
-    () => getForecastResult(storeId, forecastRunId),
+    (requestOptions) =>
+      getForecastRun(storeId, forecastRunId, requestOptions),
+    (requestOptions) =>
+      getForecastResult(storeId, forecastRunId, requestOptions),
+    options,
+  );
+}
+
+export async function waitForIngredientDemand(
+  storeId: string,
+  forecastRunId: string,
+  options: RunWaitOptions = {},
+): Promise<IngredientDemandRun> {
+  return waitForRun(
+    (requestOptions) =>
+      getIngredientDemand(storeId, forecastRunId, requestOptions),
+    (requestOptions) =>
+      getIngredientDemand(storeId, forecastRunId, requestOptions),
+    options,
+  );
+}
+
+export async function waitForProcurementPlans(input: {
+  storeId: string;
+  forecastRunId: string;
+  procurementPlanRunId: string;
+  options?: RunWaitOptions;
+}): Promise<ProcurementPlanRun> {
+  return waitForRun(
+    (requestOptions) =>
+      getProcurementPlans({
+        storeId: input.storeId,
+        forecastRunId: input.forecastRunId,
+        procurementPlanRunId: input.procurementPlanRunId,
+        signal: requestOptions.signal ?? undefined,
+        timeoutMs:
+          typeof requestOptions.timeoutMs === "number"
+            ? requestOptions.timeoutMs
+            : undefined,
+      }),
+    (requestOptions) =>
+      getProcurementPlans({
+        storeId: input.storeId,
+        forecastRunId: input.forecastRunId,
+        procurementPlanRunId: input.procurementPlanRunId,
+        signal: requestOptions.signal ?? undefined,
+        timeoutMs:
+          typeof requestOptions.timeoutMs === "number"
+            ? requestOptions.timeoutMs
+            : undefined,
+      }),
+    input.options,
   );
 }
 
 export async function waitForPlanResult(
   storeId: string,
   planRunId: string,
+  options: RunWaitOptions = {},
 ): Promise<PlanRunResultResponse> {
   return waitForRun(
-    () => getPlanRun(storeId, planRunId),
-    () => getPlanResult(storeId, planRunId),
+    (requestOptions) => getPlanRun(storeId, planRunId, requestOptions),
+    (requestOptions) => getPlanResult(storeId, planRunId, requestOptions),
+    options,
   );
 }
 
@@ -587,8 +1251,12 @@ export async function createPurchaseOrders(input: {
     recommendationId: string;
     orderQuantityOverride: number;
   }>;
-}): Promise<ApiRecord> {
-  return request<ApiRecord>(
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<PurchaseOrderCreateResponse> {
+  return request<PurchaseOrderCreateResponse>(
     `${storePath(input.storeId)}/purchase-orders`,
     jsonRequest(
       "POST",
@@ -599,7 +1267,13 @@ export async function createPurchaseOrders(input: {
           order_quantity_override: line.orderQuantityOverride,
         })),
       },
-      true,
+      {
+        idempotent: true,
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId,
+        signal: input.signal,
+        timeoutMs: input.timeoutMs,
+      },
     ),
   );
 }
@@ -618,18 +1292,133 @@ export async function getPurchaseOrders(
   );
 }
 
+export async function getPurchaseOrder(input: {
+  storeId: string;
+  poId: string;
+  signal?: AbortSignal;
+}): Promise<PurchaseOrderRecord> {
+  return request<PurchaseOrderRecord>(
+    `${storePath(input.storeId)}/purchase-orders/${encodeURIComponent(input.poId)}`,
+    { signal: input.signal },
+  );
+}
+
+export async function updatePurchaseOrder(input: {
+  storeId: string;
+  poId: string;
+  version: number;
+  lineUpdates: Array<{
+    poLineId: string;
+    orderQuantity: number;
+  }>;
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
+}): Promise<PurchaseOrderRecord> {
+  return request<PurchaseOrderRecord>(
+    `${storePath(input.storeId)}/purchase-orders/${encodeURIComponent(input.poId)}`,
+    jsonRequest(
+      "PATCH",
+      {
+        version: input.version,
+        line_updates: input.lineUpdates.map((line) => ({
+          po_line_id: line.poLineId,
+          order_quantity: line.orderQuantity,
+        })),
+      },
+      {
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId,
+        signal: input.signal,
+      },
+    ),
+  );
+}
+
 export async function confirmPurchaseOrder(input: {
   storeId: string;
   poId: string;
   version: number;
   confirmedAt: string;
-}): Promise<ApiRecord> {
-  return request<ApiRecord>(
+  idempotencyKey?: string;
+  requestId?: string;
+  signal?: AbortSignal;
+}): Promise<PurchaseOrderRecord> {
+  if (!isTimezoneAwareDateTime(input.confirmedAt)) {
+    throw new RangeError("confirmedAt must include a timezone offset.");
+  }
+  return request<PurchaseOrderRecord>(
     `${storePath(input.storeId)}/purchase-orders/${encodeURIComponent(input.poId)}/confirm`,
-    jsonRequest("POST", {
-      version: input.version,
-      confirmed_at: input.confirmedAt,
-    }),
+    jsonRequest(
+      "POST",
+      {
+        version: input.version,
+        confirmed_at: input.confirmedAt,
+      },
+      {
+        idempotent: true,
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId,
+        signal: input.signal,
+      },
+    ),
+  );
+}
+
+export async function receivePurchaseOrder(input: {
+  storeId: string;
+  poId: string;
+  version: number;
+  receivedAt: string;
+  deliveryReference?: string;
+  lines: Array<{
+    poLineId: string;
+    lots: Array<{
+      quantity: number;
+      expiryDate?: string;
+      supplierLotCode?: string;
+    }>;
+  }>;
+  idempotencyKey: string;
+  requestId?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<PurchaseOrderRecord> {
+  if (!isTimezoneAwareDateTime(input.receivedAt)) {
+    throw new RangeError("receivedAt must include a timezone offset.");
+  }
+  if (!input.idempotencyKey.trim()) {
+    throw new RangeError("Receive requires a stable Idempotency-Key.");
+  }
+  return request<PurchaseOrderRecord>(
+    `${storePath(input.storeId)}/purchase-orders/${encodeURIComponent(input.poId)}/receive`,
+    jsonRequest(
+      "POST",
+      {
+        version: input.version,
+        received_at: input.receivedAt,
+        ...(input.deliveryReference?.trim()
+          ? { delivery_reference: input.deliveryReference.trim() }
+          : {}),
+        lines: input.lines.map((line) => ({
+          po_line_id: line.poLineId,
+          lots: line.lots.map((lot) => ({
+            quantity: lot.quantity,
+            ...(lot.expiryDate ? { expiry_date: lot.expiryDate } : {}),
+            ...(lot.supplierLotCode?.trim()
+              ? { supplier_lot_code: lot.supplierLotCode.trim() }
+              : {}),
+          })),
+        })),
+      },
+      {
+        idempotent: true,
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId,
+        signal: input.signal,
+        timeoutMs: input.timeoutMs,
+      },
+    ),
   );
 }
 

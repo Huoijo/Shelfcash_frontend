@@ -1,5 +1,4 @@
 import { addDays, isWeekend, weekdayName } from "./data";
-import { normalizeText } from "./logic";
 import { normalizeMenuItems } from "./menu";
 import {
   canonicalFieldLabel,
@@ -30,11 +29,34 @@ import type {
 
 export const ignoreField = "__unmapped__";
 
+export const importFileLimits = {
+  maxFiles: 10,
+  maxFileBytes: 12 * 1024 * 1024,
+  maxTotalBytes: 50 * 1024 * 1024,
+  extensions: ["xlsx", "xls", "xlsm", "csv"],
+} as const;
+
+export interface ImportFileSelection {
+  files: File[];
+  errors: string[];
+}
+
 export {
   canonicalFieldLabel,
   selectableSheetTypes,
   sheetTypeLabels,
 };
+
+function normalizeText(value: unknown): string {
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/đ/g, "d")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
 
 function isRecord(value: unknown): value is ApiRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -158,15 +180,28 @@ function suggestionFor(
   index: number,
 ): ApiRecord {
   const suggestions = response.suggested_mappings;
+  const profileId = stringValue(profile, ["profile_id", "id"]);
   if (Array.isArray(suggestions)) {
     const candidates = suggestions.filter(isRecord);
+    if (profileId) {
+      return (
+        candidates.find(
+          (candidate) =>
+            stringValue(candidate, ["profile_id", "id"]) === profileId,
+        ) ?? {}
+      );
+    }
+    if (
+      candidates.some((candidate) =>
+        Boolean(stringValue(candidate, ["profile_id", "id"])),
+      )
+    ) {
+      return {};
+    }
     const sheetName = stringValue(profile, ["sheet_name", "name"]);
-    const profileId = stringValue(profile, ["profile_id", "id"]);
     return (
       candidates.find(
         (candidate) =>
-          (profileId &&
-            stringValue(candidate, ["profile_id", "id"]) === profileId) ||
           (sheetName &&
             stringValue(candidate, ["sheet_name", "name"]) === sheetName),
       ) ??
@@ -175,8 +210,27 @@ function suggestionFor(
     );
   }
   if (isRecord(suggestions)) {
+    if (profileId) {
+      if (isRecord(suggestions[profileId])) {
+        return suggestions[profileId] as ApiRecord;
+      }
+      const matchingValue = Object.values(suggestions)
+        .filter(isRecord)
+        .find(
+          (candidate) =>
+            stringValue(candidate, ["profile_id", "id"]) === profileId,
+        );
+      return matchingValue ?? {};
+    }
+    const nestedCandidates = Object.values(suggestions).filter(isRecord);
+    if (
+      nestedCandidates.some((candidate) =>
+        Boolean(stringValue(candidate, ["profile_id", "id"])),
+      )
+    ) {
+      return {};
+    }
     const keys = [
-      stringValue(profile, ["profile_id", "id"]),
       stringValue(profile, ["sheet_name", "name"]),
       String(index),
     ].filter(Boolean);
@@ -262,6 +316,7 @@ export function applyMappingSuggestion(
   current: EditableSheetMapping,
   suggestion: MappingSuggestion,
 ): EditableSheetMapping {
+  if (!isProcessableSheet(current)) return current;
   const sheetType = normalizeSheetType(
     stringValue(suggestion, ["sheet_type", "type"], current.sheetType) ||
       current.sheetType,
@@ -340,7 +395,7 @@ export function validateSheetMapping(
       duplicateFields: [],
       missingCoreFields: [],
       unknownSheetType: true,
-      complete: false,
+      complete: true,
     };
   }
   const allowedFields = canonicalFieldsForSheetType(sheetType);
@@ -376,9 +431,7 @@ export function validateSheetMapping(
     (field) => !resolvedFields.has(field),
   );
   const complete =
-    unresolvedColumns.length === 0 &&
-    duplicateFields.length === 0 &&
-    missingCoreFields.length === 0;
+    duplicateFields.length === 0 && missingCoreFields.length === 0;
 
   return {
     sheetId: item.id,
@@ -415,9 +468,7 @@ export function validateImportMappings(
     unresolvedColumns: totalColumns - mappedColumns,
     incompleteSheets: processableSheets.filter((sheet) => !sheet.complete)
       .length,
-    complete:
-      processableSheets.length > 0 &&
-      processableSheets.every((sheet) => sheet.complete),
+    complete: sheets.length > 0 && sheets.every((sheet) => sheet.complete),
   };
 }
 
@@ -426,36 +477,111 @@ export function toConfirmMappings(
 ): ConfirmImportMapping[] {
   const validation = validateImportMappings(mappings);
   if (!validation.complete) {
-    if (validation.processableSheets === 0) {
-      throw new Error(
-        "Không tìm thấy bảng dữ liệu có thể xử lý. Hãy chọn loại dữ liệu cho ít nhất một bảng.",
-      );
-    }
     throw new Error(
-      "Chưa thể xác nhận: mọi cột phải được nối với canonical schema và đủ trường bắt buộc.",
+      "Chưa thể xác nhận: hãy bổ sung đủ trường bắt buộc và gỡ canonical field bị trùng.",
     );
   }
-  return mappings
-    .filter(isProcessableSheet)
-    .map((item) => {
-      const columnMapping = Object.fromEntries(
-        item.columns.map((source) => [source, item.mapping[source]]),
+  return mappings.map((item) => {
+    const profileId = stringValue(item.profile, ["profile_id", "id"]);
+    if (!profileId) {
+      throw new Error(
+        `Không thể xác nhận “${item.sheetName}”: backend không trả profile_id.`,
       );
-      const payload: ConfirmImportMapping = {
-        sheet_name: item.sheetName,
-        sheet_type: normalizeSheetType(item.sheetType),
-        column_mapping: columnMapping,
-      };
-      const profileId = stringValue(item.profile, ["profile_id", "id"]);
-      const fileName = stringValue(item.profile, [
-        "file_name",
-        "filename",
-        "source_file",
-      ]);
-      if (profileId) payload.profile_id = profileId;
-      if (fileName) payload.file_name = fileName;
-      return payload;
-    });
+    }
+    const sheetType = normalizeSheetType(item.sheetType);
+    const skip = sheetType === "unknown";
+    const columnMapping = Object.fromEntries(
+      skip
+        ? []
+        : item.columns.map((source) => [
+            source,
+            normalizeCanonicalField(sheetType, item.mapping[source]),
+          ]),
+    );
+    const payload: ConfirmImportMapping = {
+      profile_id: profileId,
+      sheet_type: sheetType,
+      column_mapping: columnMapping,
+      skip,
+    };
+    return payload;
+  });
+}
+
+function importFileKey(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+function supportedImportFile(file: File): boolean {
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return (importFileLimits.extensions as readonly string[]).includes(extension);
+}
+
+export function validateImportFiles(files: File[]): string[] {
+  const errors: string[] = [];
+  files.forEach((file) => {
+    if (!supportedImportFile(file)) {
+      errors.push(
+        `“${file.name}” không được hỗ trợ. Chọn tệp .xlsx, .xls, .xlsm hoặc .csv.`,
+      );
+    }
+    if (file.size > importFileLimits.maxFileBytes) {
+      errors.push(`“${file.name}” vượt quá giới hạn 12 MB mỗi tệp.`);
+    }
+  });
+  if (files.length > importFileLimits.maxFiles) {
+    errors.push(
+      `Đã chọn ${files.length} tệp; mỗi lần nhập chỉ nhận tối đa 10 tệp.`,
+    );
+  }
+  const totalBytes = files.reduce((total, file) => total + file.size, 0);
+  if (totalBytes > importFileLimits.maxTotalBytes) {
+    errors.push("Tổng dung lượng tệp vượt quá giới hạn 50 MB mỗi lần nhập.");
+  }
+  return errors;
+}
+
+export function mergeImportFiles(
+  current: File[],
+  candidates: FileList | File[],
+): ImportFileSelection {
+  const files = [...current];
+  const errors: string[] = [];
+  const known = new Set(files.map(importFileKey));
+  let totalBytes = files.reduce((total, file) => total + file.size, 0);
+
+  for (const file of Array.from(candidates)) {
+    if (known.has(importFileKey(file))) continue;
+    if (!supportedImportFile(file)) {
+      errors.push(
+        `“${file.name}” không được hỗ trợ. Các tệp đã chọn vẫn được giữ; hãy dùng .xlsx, .xls, .xlsm hoặc .csv.`,
+      );
+      continue;
+    }
+    if (file.size > importFileLimits.maxFileBytes) {
+      errors.push(
+        `“${file.name}” vượt quá 12 MB và chưa được thêm. Các tệp đã chọn vẫn được giữ.`,
+      );
+      continue;
+    }
+    if (files.length >= importFileLimits.maxFiles) {
+      errors.push(
+        `Không thể thêm “${file.name}”: mỗi lần nhập tối đa 10 tệp. Các tệp đã chọn vẫn được giữ.`,
+      );
+      continue;
+    }
+    if (totalBytes + file.size > importFileLimits.maxTotalBytes) {
+      errors.push(
+        `Không thể thêm “${file.name}”: tổng dung lượng sẽ vượt 50 MB. Các tệp đã chọn vẫn được giữ.`,
+      );
+      continue;
+    }
+    files.push(file);
+    known.add(importFileKey(file));
+    totalBytes += file.size;
+  }
+
+  return { files, errors };
 }
 
 export function issueMessages(value: unknown): string[] {

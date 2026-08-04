@@ -17,16 +17,20 @@ import {
   canonicalFieldLabel,
   changeSheetMappingType,
   ignoreField,
+  isProcessableSheet,
   issueMessages,
+  mergeImportFiles,
   resultCounts,
   selectableSheetTypes,
   sheetTypeLabels,
   toConfirmMappings,
+  validateImportFiles,
   validateImportMappings,
 } from "../../lib/ingestion";
 import {
   ShelfCashApiError,
   confirmImport,
+  createIdempotencyKey,
   createImport,
   getImport,
   getImportResult,
@@ -48,7 +52,17 @@ import {
   cn,
 } from "../components/ui";
 
-type Phase = "select" | "review" | "confirmed" | "processing" | "done";
+type Phase =
+  | "select"
+  | "review"
+  | "confirmed"
+  | "processing"
+  | "failed"
+  | "done";
+
+function clampForecastHorizon(value: number): number {
+  return Math.min(7, Math.max(1, Number.isFinite(value) ? value : 1));
+}
 
 function sourceLabel(source: string): string {
   if (source === "llm") return "Qwen";
@@ -58,7 +72,12 @@ function sourceLabel(source: string): string {
 
 function errorState(caught: unknown): { message: string; code?: string } {
   if (caught instanceof ShelfCashApiError) {
-    return { message: caught.message, code: caught.code };
+    return {
+      message: caught.requestId
+        ? `${caught.message} · Request ${caught.requestId}`
+        : caught.message,
+      code: caught.code,
+    };
   }
   return {
     message:
@@ -70,6 +89,30 @@ function errorState(caught: unknown): { message: string; code?: string } {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function retryableTransportFailure(caught: unknown): boolean {
+  return (
+    caught instanceof ShelfCashApiError &&
+    ["NETWORK_ERROR", "BACKEND_UNREACHABLE", "REQUEST_TIMEOUT"].includes(
+      caught.code,
+    )
+  );
+}
+
+function importStillProcessing(caught: unknown): boolean {
+  return (
+    caught instanceof ShelfCashApiError &&
+    (caught.status === 409 ||
+      caught.status === 425 ||
+      ["IMPORT_NOT_READY", "IMPORT_PROCESSING"].includes(caught.code))
+  );
+}
+
+function normalizedImportStatus(status: unknown): string {
+  return String(status ?? "")
+    .trim()
+    .toLowerCase();
 }
 
 export function ImportView({
@@ -94,10 +137,16 @@ export function ImportView({
   onImported: (result: IngestionResult, files: File[]) => Promise<void>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const actionInFlight = useRef<string | null>(null);
+  const idempotency = useRef<{
+    upload?: { fingerprint: string; key: string };
+    confirm?: { fingerprint: string; key: string };
+    process?: { importId: string; key: string };
+  }>({});
   const [storeId, setStoreId] = useState(defaultStoreId);
   const [forecastDate, setForecastDate] = useState(defaultForecastDate);
-  const [forecastHorizon, setForecastHorizon] = useState(
-    defaultForecastHorizon,
+  const [forecastHorizon, setForecastHorizon] = useState(() =>
+    clampForecastHorizon(defaultForecastHorizon),
   );
   const [phase, setPhase] = useState<Phase>("select");
   const [created, setCreated] = useState<ImportCreateResponse | null>(null);
@@ -122,7 +171,7 @@ export function ImportView({
         ? 1
         : phase === "confirmed"
           ? 2
-          : phase === "processing"
+          : phase === "processing" || phase === "failed"
             ? 2
             : 3;
   const mappingValidation = useMemo(
@@ -156,28 +205,32 @@ export function ImportView({
     );
   }, [selected]);
 
+  function beginAction(action: string): boolean {
+    if (actionInFlight.current) return false;
+    actionInFlight.current = action;
+    setBusy(action);
+    return true;
+  }
+
+  function finishAction(action: string) {
+    if (actionInFlight.current === action) actionInFlight.current = null;
+    setBusy("");
+  }
+
   function addFiles(nextFiles: FileList | File[]) {
-    const accepted = Array.from(nextFiles).filter((file) =>
-      /\.(xlsx?|csv)$/i.test(file.name),
+    const selection = mergeImportFiles(files, nextFiles);
+    setFiles(selection.files);
+    setError(
+      selection.errors.length
+        ? { message: selection.errors.join(" ") }
+        : null,
     );
-    setFiles((current) => {
-      const known = new Set(
-        current.map((file) => `${file.name}:${file.size}:${file.lastModified}`),
-      );
-      return [
-        ...current,
-        ...accepted.filter(
-          (file) =>
-            !known.has(`${file.name}:${file.size}:${file.lastModified}`),
-        ),
-      ];
-    });
-    setError(null);
     setResult(null);
     setPhase("select");
   }
 
   function resetImport() {
+    idempotency.current = {};
     setCreated(null);
     setMappings([]);
     setSelectedId("");
@@ -192,16 +245,38 @@ export function ImportView({
 
   async function startImport() {
     if (!files.length || !storeId.trim()) return;
-    setBusy("upload");
+    const fileErrors = validateImportFiles(files);
+    if (fileErrors.length) {
+      setError({ message: fileErrors.join(" ") });
+      return;
+    }
+    if (!beginAction("upload")) return;
     setError(null);
     setWarnings([]);
     setErrors([]);
+    const fingerprint = JSON.stringify({
+      storeId: storeId.trim(),
+      forecastDate,
+      forecastHorizon,
+      files: files.map((file) => ({
+        name: file.name,
+        size: file.size,
+        lastModified: file.lastModified,
+      })),
+    });
+    if (idempotency.current.upload?.fingerprint !== fingerprint) {
+      idempotency.current.upload = {
+        fingerprint,
+        key: createIdempotencyKey(),
+      };
+    }
     try {
       const response = await createImport({
         files,
         storeId: storeId.trim(),
         forecastDate: forecastDate || undefined,
         forecastHorizon,
+        idempotencyKey: idempotency.current.upload.key,
       });
       if (!response.import_id) {
         throw new Error("Backend không trả import_id.");
@@ -218,10 +293,14 @@ export function ImportView({
           ? "Backend đã nhận diện đầy đủ. Bạn vẫn có thể kiểm tra trước khi xử lý."
           : "Kiểm tra loại bảng và cách ghép cột.",
       );
+      delete idempotency.current.upload;
     } catch (caught) {
+      if (!retryableTransportFailure(caught)) {
+        delete idempotency.current.upload;
+      }
       setError(errorState(caught));
     } finally {
-      setBusy("");
+      finishAction("upload");
       if (inputRef.current) inputRef.current.value = "";
     }
   }
@@ -238,8 +317,8 @@ export function ImportView({
   }
 
   async function remapWithQwen() {
-    if (!selected) return;
-    setBusy("llm");
+    if (!selected || !isProcessableSheet(selected)) return;
+    if (!beginAction("llm")) return;
     setError(null);
     try {
       const suggestion = await mapSheet(selected.profile);
@@ -248,18 +327,51 @@ export function ImportView({
     } catch (caught) {
       setError(errorState(caught));
     } finally {
-      setBusy("");
+      finishAction("llm");
     }
   }
 
   async function refreshStatus() {
     if (!created?.import_id) return;
-    setBusy("status");
+    if (!beginAction("status")) return;
     setError(null);
     try {
       const response = await getImport(created.import_id);
       setWarnings(issueMessages(response.warnings));
       setErrors(issueMessages(response.errors));
+      const backendStatus = normalizedImportStatus(response.status);
+      if (backendStatus === "failed") {
+        setPhase("failed");
+        delete idempotency.current.process;
+        setStatusText(
+          "Import này đã thất bại. Hãy tạo import mới với các tệp đang được giữ.",
+        );
+        return;
+      }
+      if (
+        ["processed", "completed", "done", "succeeded", "success"].includes(
+          backendStatus,
+        )
+      ) {
+        try {
+          const payload = await getImportResult(created.import_id);
+          await completeImport(payload, phase !== "done" || result === null);
+        } catch (caught) {
+          if (!importStillProcessing(caught)) throw caught;
+          setPhase("processing");
+          setStatusText(
+            "Backend đã xử lý nhưng kết quả chưa sẵn sàng. Hãy bấm Đồng bộ lại sau ít phút.",
+          );
+        }
+        return;
+      }
+      if (backendStatus === "confirmed") {
+        setPhase("confirmed");
+      } else if (
+        ["processing", "running", "queued", "pending"].includes(backendStatus)
+      ) {
+        setPhase("processing");
+      }
       setStatusText(
         response.status
           ? `Trạng thái backend: ${response.status}`
@@ -268,7 +380,25 @@ export function ImportView({
     } catch (caught) {
       setError(errorState(caught));
     } finally {
-      setBusy("");
+      finishAction("status");
+    }
+  }
+
+  async function completeImport(
+    payload: IngestionResult,
+    synchronize: boolean,
+  ) {
+    delete idempotency.current.process;
+    setResult(payload);
+    setPhase("done");
+    setStatusText("Dữ liệu đã được đưa vào ShelfCash.");
+    if (!synchronize) return;
+    try {
+      await onImported(payload, files);
+    } catch (caught) {
+      setError({
+        message: `${errorState(caught).message} Import đã xử lý thành công; hãy đồng bộ lại dữ liệu.`,
+      });
     }
   }
 
@@ -280,27 +410,31 @@ export function ImportView({
       );
       if (firstIncomplete) setSelectedId(firstIncomplete.sheetId);
       setChecked(false);
-      if (mappingValidation.processableSheets === 0) {
-        setStatusText("Chọn loại dữ liệu cho ít nhất một bảng.");
-        setError({
-          message:
-            "Không tìm thấy bảng dữ liệu có thể xử lý. Hãy chọn loại dữ liệu cho ít nhất một bảng.",
-        });
-      } else {
-        setStatusText("Hoàn tất ghép cột trước khi xác nhận.");
-        setError({
-          message:
-            "Chưa thể sang bước tiếp theo. Hãy nối tất cả header và bổ sung đủ các trường bắt buộc cho những bảng dữ liệu cần xử lý.",
-        });
-      }
+      setStatusText("Hoàn tất các field bắt buộc trước khi xác nhận.");
+      setError({
+        message:
+          "Chưa thể sang bước tiếp theo. Hãy bổ sung đủ field bắt buộc và gỡ canonical field bị trùng.",
+      });
       return;
     }
-    setBusy("confirm");
+    if (!beginAction("confirm")) return;
     setError(null);
+    const confirmPayload = toConfirmMappings(mappings);
+    const fingerprint = JSON.stringify({
+      importId: created.import_id,
+      mappings: confirmPayload,
+    });
+    if (idempotency.current.confirm?.fingerprint !== fingerprint) {
+      idempotency.current.confirm = {
+        fingerprint,
+        key: createIdempotencyKey(),
+      };
+    }
     try {
       const response = await confirmImport(
         created.import_id,
-        toConfirmMappings(mappings),
+        confirmPayload,
+        { idempotencyKey: idempotency.current.confirm.key },
       );
       const nextWarnings = issueMessages(response.warnings);
       const nextErrors = issueMessages(response.errors);
@@ -312,10 +446,14 @@ export function ImportView({
       }
       setPhase("confirmed");
       setStatusText("Mapping đã được xác nhận.");
+      delete idempotency.current.confirm;
     } catch (caught) {
+      if (!retryableTransportFailure(caught)) {
+        delete idempotency.current.confirm;
+      }
       setError(errorState(caught));
     } finally {
-      setBusy("");
+      finishAction("confirm");
     }
   }
 
@@ -324,13 +462,7 @@ export function ImportView({
       try {
         return await getImportResult(importId);
       } catch (caught) {
-        const retryable =
-          caught instanceof ShelfCashApiError &&
-          (caught.status === 409 ||
-            caught.status === 425 ||
-            caught.code === "IMPORT_NOT_READY" ||
-            caught.code === "IMPORT_PROCESSING");
-        if (!retryable || attempt === 11) throw caught;
+        if (!importStillProcessing(caught) || attempt === 11) throw caught;
         await delay(800);
       }
     }
@@ -338,31 +470,43 @@ export function ImportView({
   }
 
   async function runProcess() {
-    if (!created?.import_id) return;
-    setBusy("process");
+    if (!created?.import_id || phase !== "confirmed") return;
+    if (!beginAction("process")) return;
     setError(null);
     setPhase("processing");
     setStatusText("Đang chuẩn hóa và kiểm tra dữ liệu…");
+    if (idempotency.current.process?.importId !== created.import_id) {
+      idempotency.current.process = {
+        importId: created.import_id,
+        key: createIdempotencyKey(),
+      };
+    }
     try {
-      const response = await processImport(created.import_id);
+      const response = await processImport(created.import_id, {
+        idempotencyKey: idempotency.current.process.key,
+      });
       const nextErrors = issueMessages(response.errors);
       setWarnings(issueMessages(response.warnings));
       setErrors(nextErrors);
-      if (nextErrors.length) {
-        setPhase("confirmed");
-        setStatusText("Có lỗi cần xử lý trước khi tiếp tục.");
+      if (normalizedImportStatus(response.status) === "failed") {
+        setPhase("failed");
+        setStatusText(
+          "Import này đã thất bại. Hãy tạo import mới với các tệp đang được giữ.",
+        );
+        delete idempotency.current.process;
         return;
       }
       const payload = await waitForResult(created.import_id);
-      setResult(payload);
-      await onImported(payload, files);
-      setPhase("done");
-      setStatusText("Dữ liệu đã được đưa vào ShelfCash.");
+      await completeImport(payload, true);
     } catch (caught) {
-      setPhase("confirmed");
-      setError(errorState(caught));
+      const stillProcessing = importStillProcessing(caught);
+      setPhase("processing");
+      setStatusText(
+        "Backend có thể vẫn đang xử lý. Hãy dùng Đồng bộ để kiểm tra lại; request hiện tại vẫn được giữ an toàn.",
+      );
+      setError(stillProcessing ? null : errorState(caught));
     } finally {
-      setBusy("");
+      finishAction("process");
     }
   }
 
@@ -463,11 +607,11 @@ export function ImportView({
               <input
                 type="number"
                 min={1}
-                max={90}
+                max={7}
                 value={forecastHorizon}
                 onChange={(event) =>
                   setForecastHorizon(
-                    Math.min(90, Math.max(1, Number(event.target.value) || 1)),
+                    clampForecastHorizon(Number(event.target.value) || 1),
                   )
                 }
               />
@@ -477,6 +621,7 @@ export function ImportView({
           <div className="import-top">
             <button
               className={cn("dropzone", busy === "upload" && "dropzone-busy")}
+              disabled={Boolean(busy)}
               onClick={() => inputRef.current?.click()}
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {
@@ -487,7 +632,7 @@ export function ImportView({
               <input
                 ref={inputRef}
                 type="file"
-                accept=".xlsx,.xls,.csv"
+                accept=".xlsx,.xls,.xlsm,.csv"
                 multiple
                 hidden
                 onChange={(event) => {
@@ -551,6 +696,7 @@ export function ImportView({
               variant="primary"
               busy={busy === "upload"}
               disabled={
+                Boolean(busy) ||
                 !files.length ||
                 !storeId.trim() ||
                 connection?.service === "offline"
@@ -612,7 +758,16 @@ export function ImportView({
               <Button
                 variant="secondary"
                 busy={busy === "llm"}
-                disabled={connection?.service === "offline"}
+                disabled={
+                  Boolean(busy) ||
+                  connection?.service === "offline" ||
+                  selectedValidation?.unknownSheetType
+                }
+                title={
+                  selectedValidation?.unknownSheetType
+                    ? "Bảng chưa xác định sẽ được bỏ qua, không cần gợi ý lại"
+                    : undefined
+                }
                 onClick={() => void remapWithQwen()}
               >
                 <Sparkles size={14} />
@@ -719,13 +874,14 @@ export function ImportView({
                 subtitle="Nối từng header trong file với một field thuộc canonical schema."
               />
               {selectedValidation?.unresolvedColumns.length ? (
-                <Notice tone="warning">
-                  Còn {selectedValidation.unresolvedColumns.length} cột Qwen
-                  chưa xác định:{" "}
+                <Notice tone="info">
+                  Có {selectedValidation.unresolvedColumns.length} cột không sử
+                  dụng:{" "}
                   <strong>
                     {selectedValidation.unresolvedColumns.join(", ")}
                   </strong>
-                  . Hãy chọn field phù hợp cho từng cột.
+                  . Các cột này sẽ được gửi với giá trị null và không được xử
+                  lý.
                 </Notice>
               ) : null}
               {selectedValidation?.missingCoreFields.length ? (
@@ -748,8 +904,8 @@ export function ImportView({
               ) : null}
               {selectedValidation?.complete ? (
                 <Notice tone="success">
-                  Bảng này đã nối đủ {selectedValidation.totalColumns} cột và có
-                  đủ field bắt buộc.
+                  Bảng này đã có đủ field bắt buộc và không có canonical field
+                  bị trùng.
                 </Notice>
               ) : null}
               <div className="mapping-grid">
@@ -770,7 +926,7 @@ export function ImportView({
                     >
                       <span>
                         {column}
-                        {unresolved ? <b>Cần nối</b> : null}
+                        {unresolved ? <b>Không sử dụng</b> : null}
                       </span>
                       <select
                         value={selectedField}
@@ -787,7 +943,7 @@ export function ImportView({
                         }
                       >
                         <option value={ignoreField}>
-                          Chưa xác định — chọn field
+                          Không sử dụng — gửi null
                         </option>
                         {selected.targetFields.map((field) => (
                           <option
@@ -804,7 +960,7 @@ export function ImportView({
                       </select>
                       <small>
                         {unresolved
-                          ? "Qwen chưa ghép được cột này."
+                          ? "Cột này sẽ không được xử lý."
                           : `Đã nối tới ${selectedField}.`}
                       </small>
                     </label>
@@ -846,9 +1002,9 @@ export function ImportView({
           {phase === "review" ? (
             <>
               {mappingValidation.processableSheets === 0 ? (
-                <Notice tone="error">
-                  Không tìm thấy bảng dữ liệu có thể xử lý. Hãy chọn loại dữ
-                  liệu cho ít nhất một bảng.
+                <Notice tone="info">
+                  Tất cả bảng đang ở loại “Chưa xác định”. Backend sẽ nhận từng
+                  bảng với skip=true và không xử lý dữ liệu của các bảng này.
                 </Notice>
               ) : (
                 <div
@@ -865,7 +1021,7 @@ export function ImportView({
                     </strong>
                     <small>
                       {mappingValidation.complete
-                        ? "Tất cả bảng dữ liệu đã sẵn sàng để xác nhận."
+                        ? `${mappingValidation.unresolvedColumns} cột không sử dụng sẽ được gửi với giá trị null.`
                         : `Còn ${mappingValidation.incompleteSheets} bảng dữ liệu cần hoàn tất.`}
                     </small>
                   </span>
@@ -876,7 +1032,7 @@ export function ImportView({
                 </div>
               )}
               <div className="confirm-row">
-                {mappingValidation.processableSheets > 0 ? (
+                {mappings.length > 0 ? (
                   <label className="check">
                     <input
                       type="checkbox"
@@ -886,19 +1042,20 @@ export function ImportView({
                     />
                     <span>
                       {mappingValidation.complete
-                        ? "Tôi đã kiểm tra tất cả bảng dữ liệu và mapping."
-                        : "Hoàn tất mapping các bảng dữ liệu để mở khóa xác nhận."}
+                        ? "Tôi đã kiểm tra loại dữ liệu, các field bắt buộc và những bảng sẽ bỏ qua."
+                        : "Bổ sung field bắt buộc và gỡ mapping trùng để mở khóa xác nhận."}
                     </span>
                   </label>
                 ) : (
                   <span className="quiet-copy">
-                    Các bảng “Chưa xác định” sẽ không được gửi đi xử lý.
+                    Chưa có bảng nào để xác nhận.
                   </span>
                 )}
                 <Button
                   variant="primary"
                   busy={busy === "confirm"}
                   disabled={
+                    Boolean(busy) ||
                     !checked ||
                     !mappingValidation.complete ||
                     Boolean(errors.length)
@@ -906,9 +1063,7 @@ export function ImportView({
                   title={
                     mappingValidation.complete
                       ? undefined
-                      : mappingValidation.processableSheets === 0
-                        ? "Cần ít nhất một bảng dữ liệu có thể xử lý"
-                        : "Mọi header của bảng dữ liệu phải được nối trước khi xác nhận"
+                      : "Cần đủ field bắt buộc và không được trùng canonical field"
                   }
                   onClick={() => void confirmMappings()}
                 >
@@ -918,12 +1073,17 @@ export function ImportView({
             </>
           ) : (
             <div className="confirm-row">
-              <Button variant="quiet" onClick={() => setPhase("review")}>
+              <Button
+                variant="quiet"
+                disabled={Boolean(busy)}
+                onClick={() => setPhase("review")}
+              >
                 Sửa mapping
               </Button>
               <Button
                 variant="primary"
                 busy={busy === "process"}
+                disabled={Boolean(busy) || phase !== "confirmed"}
                 onClick={() => void runProcess()}
               >
                 Xử lý dữ liệu
@@ -943,6 +1103,27 @@ export function ImportView({
         </div>
       ) : null}
 
+      {phase === "failed" ? (
+        <>
+          <Notice tone="error">
+            Import này đã kết thúc ở trạng thái thất bại và không thể xử lý lại.
+            Các tệp bạn chọn vẫn được giữ để tạo một import mới.
+          </Notice>
+          <div className="confirm-row">
+            <span className="quiet-copy">
+              Tạo import mới sau khi sửa dữ liệu hoặc mapping cần thiết.
+            </span>
+            <Button
+              variant="primary"
+              disabled={Boolean(busy)}
+              onClick={resetImport}
+            >
+              Tạo import mới
+            </Button>
+          </div>
+        </>
+      ) : null}
+
       {phase === "done" && result ? (
         <>
           <Notice tone="success">Dữ liệu đã sẵn sàng để sử dụng.</Notice>
@@ -956,7 +1137,8 @@ export function ImportView({
           </div>
           <div className="confirm-row">
             <span className="quiet-copy">
-              Kho, công thức và kế hoạch đã được cập nhật.
+              Chỉ các bảng đã xác nhận được xử lý theo đúng loại dữ liệu; lịch
+              sử mua hàng không tự làm tăng tồn kho.
             </span>
             <Button
               variant="secondary"

@@ -19,13 +19,14 @@ việc người dùng cần xử lý.
 - Duyệt mapping do rule hoặc Qwen gợi ý trước khi xử lý.
 - Giữ nguyên tệp và tiến trình nhập khi chuyển giữa các mục trong cùng phiên.
 - Theo dõi health của backend và LLM provider.
-- Quản lý tồn kho, hạn sử dụng và số ngày đủ dùng.
+- Quản lý tồn kho theo lô, hạn sử dụng và trạng thái backend.
 - Quản lý Menu gồm món lẻ, combo, giá bán và thành phần combo.
 - Quản lý sản phẩm, công thức và phiên bản công thức.
-- Dự báo nhu cầu P25/P50/P75.
-- Ba chiến lược nhập: Tiết kiệm, Cân bằng và An toàn.
-- Sửa số lượng nhập và cập nhật rủi ro tức thời.
-- Tạo Draft PO theo nhà cung cấp.
+- Dự báo sản phẩm P25/P50/P75 và interval đã calibration.
+- Chuyển forecast qua BOM thành ingredient demand có contribution drill-down.
+- So sánh ba kịch bản core: lean, balanced và protected.
+- Chạy bridge legacy chỉ ngay trước khi tạo Draft PO theo nhà cung cấp.
+- Sửa Draft, xác nhận, và nhận hàng một phần/nhiều lô đến khi hoàn tất.
 - Xuất PO sang Excel và PDF.
 - Quản lý MOQ, quy cách, lead time, tồn an toàn, alias và ngân sách.
 
@@ -42,6 +43,7 @@ npm run dev
 ```dotenv
 SHELFCASH_BACKEND_URL=http://127.0.0.1:8000
 SHELFCASH_API_KEY=
+SHELFCASH_STORE_ID=
 ```
 
 Sau đó mở địa chỉ được hiển thị trong terminal. Node.js 22 LTS trở lên được
@@ -59,7 +61,8 @@ tại ở server và không được gửi xuống trình duyệt. Lớp proxy h
 - Bootstrap, kho, sản phẩm, recipe, supplier, alias, settings và calendar theo
   `/api/v1/stores/{store_id}/...`
 - Menu qua `GET /menu`, Product CRUD và `PUT /products/{product_id}/components`
-- Forecast run, plan run và Purchase Order theo ShelfCash API Contract v1
+- Forecast run, ingredient demand, core procurement plans, legacy plan bridge và
+  toàn bộ vòng đời Purchase Order theo ShelfCash API Contract v1
 
 Luồng nhập trên giao diện là:
 
@@ -69,12 +72,16 @@ upload nhiều file → duyệt mapping → confirm → process → lấy result
 
 Sau khi import hoàn tất, frontend gọi lại `GET
 /api/v1/stores/{store_id}/bootstrap`. Backend và database là nguồn dữ liệu chính
-thức. Forecast và kế hoạch được tạo qua `forecast-runs` và `plan-runs`; frontend
-không gửi toàn bộ snapshot vận hành để tự tính.
+thức. Frontend không có forecast/planner fallback cục bộ. Quy trình nghiệp vụ là:
 
-Draft PO chỉ gửi `plan_run_id`, `recommendation_id` và số lượng override. Tổng
-tiền, ngày giao, ngân sách còn lại, MOQ và pack size đều được backend kiểm tra và
-tính lại.
+```text
+forecast-runs → ingredient-demand → procurement-plans (3 strategy)
+             → chọn strategy → legacy plan-runs bridge → Draft PO
+```
+
+Draft PO chỉ gửi `plan_run_id`, `recommendation_id` và số lượng override. Backend
+kiểm tra MOQ/pack size; confirm giữ ngân sách; receive tạo inventory lot và chuyển
+chi phí từ reserved sang spent. Retry timeout giữ nguyên `Idempotency-Key`.
 
 Backend vẫn có thể giữ cấu hình:
 
@@ -90,11 +97,12 @@ Do frontend dùng proxy server-to-server, API key không cần xuất hiện tro
 ```bash
 npm run test:logic
 npm run lint
+npm run build
 ```
 
-Bộ kiểm tra bao phủ payload theo contract, adapter bootstrap/forecast/plan/PO,
-allowlist proxy theo route và method, thứ tự quantile, parser Excel/CSV và xuất
-Excel/PDF.
+Bộ kiểm tra bao phủ transport/request ID/idempotency, import state machine,
+adapter bootstrap/lot/forecast/demand/core plan/PO, strategy bridge, model
+readiness, allowlist proxy, parser Excel/CSV và xuất Excel/PDF.
 
 ## Cấu trúc chính
 
@@ -107,8 +115,10 @@ lib/
   data.ts         Dữ liệu khởi tạo
   ingestion.ts    Chuẩn hóa response và đồng bộ vào giao diện
   menu.ts         Adapter, validation và payload contract cho Menu/combo
-  logic.ts        Forecasting, inventory và ordering engine
-  contract-adapters.ts Adapter response database sang view model hiện tại
+  logic.ts        Chỉ nhận diện schema/mapping cho file mẫu cục bộ
+  api-contract.ts Kiểu API canonical và chuẩn hóa Decimal/date
+  planning-workflow.ts Orchestrator forecast → demand → core → PO bridge
+  contract-adapters.ts Adapter response backend sang view model
   shelfcash-client.ts  API client cho ShelfCash API Contract v1
   types.ts        Kiểu dữ liệu dùng chung
 tests/            Kiểm tra logic và API
@@ -126,4 +136,6 @@ loại dữ liệu, nối toàn bộ header, không trùng field và có đủ `
 khi nút xác nhận được mở khóa.
 
 Font DejaVu Sans trong `public/fonts` được dùng để xuất PDF tiếng Việt và tuân
-theo giấy phép của dự án DejaVu Fonts.
+theo giấy phép của dự án DejaVu Fonts. Giao diện web tự phục vụ Noto Sans và
+Noto Serif từ `public/fonts/ui`; cả hai tuân theo SIL Open Font License 1.1 được
+đính kèm trong cùng thư mục.

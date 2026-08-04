@@ -1,5 +1,6 @@
 import { daysBetween, isWeekend, weekdayName } from "./data";
 import { normalizeMenuItems } from "./menu";
+import { toNumber, type ForecastRunResult as CanonicalForecastRunResult } from "./api-contract";
 import type {
   Alias,
   ApiRecord,
@@ -11,9 +12,11 @@ import type {
   ForecastResult,
   ForecastRunResultResponse,
   Ingredient,
+  IngredientDemandResult,
   InventoryItem,
   InventoryStatus,
   PlanResponse,
+  PlanningScenario,
   PlanRunResultResponse,
   Product,
   PurchaseOrder,
@@ -21,6 +24,7 @@ import type {
   RecipeLine,
   StoreBootstrapResponse,
   Strategy,
+  CoreStrategy,
 } from "./types";
 import {
   mergeRecipeIngredients,
@@ -58,12 +62,7 @@ function number(
 ): number {
   for (const key of keys) {
     const value = record[key];
-    const parsed =
-      typeof value === "number"
-        ? value
-        : typeof value === "string"
-          ? Number(value.replaceAll(",", ""))
-          : Number.NaN;
+    const parsed = toNumber(value, Number.NaN);
     if (Number.isFinite(parsed)) return parsed;
   }
   return fallback;
@@ -113,38 +112,44 @@ function optionalNumber(
 
 function inventoryStatus(value: unknown): InventoryStatus | undefined {
   const status = String(value ?? "").trim().toLowerCase();
-  if (
-    ["stockout", "expiring", "low", "overstock", "missing", "normal"].includes(
-      status,
-    )
-  ) {
+  if (["stockout", "expired", "expiring", "healthy", "missing"].includes(status)) {
     return status as InventoryStatus;
   }
   return undefined;
 }
 
 const statusPriority: Record<InventoryStatus, number> = {
-  stockout: 6,
-  expiring: 5,
-  low: 4,
-  overstock: 3,
+  stockout: 5,
+  expired: 4,
+  expiring: 3,
+  healthy: 1,
   missing: 2,
-  normal: 1,
 };
 
 const statusLabels: Record<InventoryStatus, string> = {
   stockout: "Hết hàng",
+  expired: "Đã hết hạn",
   expiring: "Sắp hết hạn",
-  low: "Sắp hết",
-  overstock: "Dư tồn kho",
   missing: "Thiếu dữ liệu",
-  normal: "Bình thường",
+  healthy: "Sử dụng được",
 };
 
 export function strategyToApi(strategy: Strategy): ApiStrategy {
   if (strategy === "Tiết kiệm") return "economy";
   if (strategy === "An toàn") return "safe";
   return "balanced";
+}
+
+export function strategyToCore(strategy: Strategy): CoreStrategy {
+  if (strategy === "Tiết kiệm") return "lean";
+  if (strategy === "An toàn") return "protected";
+  return "balanced";
+}
+
+export function strategyFromCore(value: unknown): Strategy {
+  if (value === "lean") return "Tiết kiệm";
+  if (value === "protected") return "An toàn";
+  return "Cân bằng";
 }
 
 export function strategyFromApi(value: unknown): Strategy {
@@ -173,7 +178,6 @@ function constraintFor(
 
 function normalizeInventory(
   response: StoreBootstrapResponse,
-  today: string,
 ): InventoryItem[] {
   const constraints = records(response.supplier_constraints);
   const grouped = new Map<string, ApiRecord[]>();
@@ -185,7 +189,7 @@ function normalizeInventory(
     grouped.set(key, [...(grouped.get(key) ?? []), lot]);
   }
 
-  return Array.from(grouped.values()).map((lots, index) => {
+  return Array.from(grouped.values()).map((lots) => {
     const first = lots[0] ?? {};
     const constraint = constraintFor(first, constraints);
     const ingredient = text(first, [
@@ -219,6 +223,30 @@ function normalizeInventory(
       (sum, lot) => sum + number(lot, ["expiring_quantity"]),
       0,
     );
+    const expiredQty = lots.reduce(
+      (sum, lot) => sum + number(lot, ["expired_quantity"]),
+      0,
+    );
+    const normalizedLots = lots.map((lot) => ({
+      lotId: text(lot, ["lot_id"]),
+      ingredientId: text(lot, ["ingredient_id"]) || undefined,
+      supplierId: text(lot, ["supplier_id"]) || undefined,
+      ingredient:
+        text(lot, ["ingredient", "ingredient_name", "material"]) || ingredient,
+      sku: text(lot, ["sku"]),
+      unit: text(lot, ["unit", "uom"], "đơn vị"),
+      onHand: number(lot, ["on_hand", "quantity"]),
+      usableQuantity: number(lot, ["usable_quantity"]),
+      expiringQuantity: number(lot, ["expiring_quantity"]),
+      expiredQuantity: number(lot, ["expired_quantity"]),
+      unitCost: number(lot, ["unit_cost"]),
+      receivedDate: text(lot, ["received_date"]),
+      expiryDate: text(lot, ["expiry_date"]),
+      supplier: text(lot, ["supplier", "supplier_name"]),
+      status: inventoryStatus(lot.status) ?? (text(lot, ["status"]) ? "missing" : "missing"),
+      lastCounted: text(lot, ["last_counted_at", "last_counted"]),
+      version: number(lot, ["version"]),
+    }));
 
     return {
       lotId: text(first, ["lot_id"]) || undefined,
@@ -231,20 +259,22 @@ function normalizeInventory(
       constraintVersion:
         optionalNumber(constraint, ["version"]) ?? undefined,
       ingredient,
-      sku:
-        text(first, ["sku"]) ||
-        `NL-${String(index + 1).padStart(3, "0")}`,
+      sku: text(first, ["sku"]),
       unit:
         text(first, ["unit", "uom"]) ||
         text(constraint, ["unit", "uom"], "đơn vị"),
       onHand: Number(onHand.toFixed(3)),
       usableQuantity: Number(usableQuantity.toFixed(3)),
+      expiredQty: Number(expiredQty.toFixed(3)),
+      receivedDate: text(first, ["received_date"]) || undefined,
+      version: Math.max(...normalizedLots.map((lot) => lot.version), 0),
+      lots: normalizedLots,
       unitCost: number(
         constraint,
         ["unit_cost"],
         number(first, ["unit_cost"]),
       ),
-      expiryDate: expiries[0] ?? today,
+      expiryDate: expiries[0] ?? "",
       expiringQty: Number(expiringQty.toFixed(3)),
       safetyStock: null,
       inbound: lots.reduce(
@@ -255,11 +285,11 @@ function normalizeInventory(
         text(constraint, ["supplier", "supplier_name"]) ||
         text(first, ["supplier", "supplier_name"], "Chưa thiết lập"),
       leadTimeDays: number(constraint, ["lead_time_days"]),
-      moq: number(constraint, ["moq"], 1),
-      packSize: number(constraint, ["pack_size"], 1),
-      capacity: Math.max(onHand, 1),
-      lastCounted: latestCount ?? today,
-      backendStatus: statuses[0] ?? "normal",
+      moq: number(constraint, ["moq"]),
+      packSize: number(constraint, ["pack_size"]),
+      capacity: 0,
+      lastCounted: latestCount ?? "",
+      backendStatus: statuses[0] ?? "missing",
       daysSupply: optionalNumber(first, ["days_supply"]),
     };
   });
@@ -519,6 +549,8 @@ function normalizeProducts(
         text(row, ["selling_unit", "unit"]) || undefined,
       recipeStatus: hasRecipe ? "Hoàn chỉnh" : "Thiếu định lượng",
       effectiveDate: effectiveDate || undefined,
+      recipeYieldQuantity: optionalNumber(activeRecipe, ["yield_quantity"]),
+      recipeProcessLossRate: optionalNumber(activeRecipe, ["process_loss_rate"]),
     };
   });
 }
@@ -603,7 +635,7 @@ export function adaptBootstrap(
         Number.isFinite(Number(item.value)) ? Number(item.value) : null,
       ]),
   );
-  const inventory = normalizeInventory(safeResponse, today).map((item) => ({
+  const inventory = normalizeInventory(safeResponse).map((item) => ({
     ...item,
     safetyStock:
       item.ingredientId && safetyByIngredient.has(item.ingredientId)
@@ -657,16 +689,40 @@ export function adaptBootstrap(
         ["monthly_budget"],
         base.settings.monthlyBudget,
       ),
+      reservedBudget: number(
+        settings,
+        ["reserved_budget"],
+        base.settings.reservedBudget,
+      ),
+      spentBudget: number(
+        settings,
+        ["spent_budget"],
+        base.settings.spentBudget,
+      ),
       remainingBudget: number(
         settings,
         ["remaining_budget"],
         base.settings.remainingBudget,
       ),
-      forecastHorizon: number(
-        settings,
-        ["forecast_horizon"],
-        base.settings.forecastHorizon,
+      forecastHorizon: Math.min(
+        7,
+        Math.max(
+          1,
+          number(settings, ["forecast_horizon"], base.settings.forecastHorizon),
+        ),
       ),
+      defaultStrategy:
+        text(settings, ["default_strategy"]) === "economy" ||
+        text(settings, ["default_strategy"]) === "safe"
+          ? (text(settings, ["default_strategy"]) as ApiStrategy)
+          : "balanced",
+      version: number(settings, ["version"], base.settings.version),
+      safetyPolicy:
+        text(settings, ["safety_policy"], base.settings.safetyPolicy ?? "") ||
+        undefined,
+      updatedAt:
+        text(settings, ["updated_at"], base.settings.updatedAt ?? "") ||
+        undefined,
       storeId: text(store, ["store_id"], base.settings.storeId),
       storeName: text(store, ["store_name"], base.settings.storeName),
       timezone:
@@ -686,52 +742,339 @@ export function adaptBootstrap(
 
 function forecastPoint(row: ApiRecord): ForecastPoint {
   return {
-    date: text(row, ["date"]),
+    date: text(row, ["target_date", "date"]),
     actual: optionalNumber(row, ["actual", "quantity"]),
     p25: optionalNumber(row, ["p25"]),
     p50: optionalNumber(row, ["p50"]),
     p75: optionalNumber(row, ["p75"]),
+    intervalLower: optionalNumber(row, ["interval_lower"]),
+    intervalUpper: optionalNumber(row, ["interval_upper"]),
+    baselineP50: optionalNumber(row, ["baseline_p50"]),
+    calibrationSource: text(row, ["calibration_source"]) || undefined,
+    warnings: warningMessages(row.warnings),
     promotion: boolean(row, ["promotion"]),
     weekend: boolean(row, ["weekend"]),
   };
 }
 
-function confidence(value: unknown): ForecastResult["confidence"] {
-  const normalizedValue = String(value ?? "").toLowerCase();
-  if (["good", "high", "tốt"].includes(normalizedValue)) return "Tốt";
-  if (["fair", "medium", "khá"].includes(normalizedValue)) return "Khá";
-  return "Cần thêm dữ liệu";
+function warningMessages(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+        .map((warning) =>
+          isRecord(warning)
+            ? text(warning, ["message", "code"])
+            : String(warning ?? ""),
+        )
+        .filter(Boolean)
+    : [];
 }
 
 export function adaptForecasts(
-  response: ForecastRunResultResponse,
+  response: ForecastRunResultResponse | CanonicalForecastRunResult,
 ): Record<string, ForecastResult> {
+  const responseRecord = response as unknown as ApiRecord;
+  const source = records(response.predictions).length
+    ? records(response.predictions)
+    : records(responseRecord.forecasts);
+  const grouped = new Map<string, ApiRecord[]>();
+  for (const row of source) {
+    const productId = text(row, ["product_id"]);
+    const product = text(row, ["product_name", "product", "name"]);
+    const key = productId || product;
+    if (!key) continue;
+    grouped.set(key, [...(grouped.get(key) ?? []), row]);
+  }
+
   return Object.fromEntries(
-    records(response.forecasts).map((row) => {
-      const ingredient = text(row, ["ingredient", "ingredient_name"]);
-      const totals = isRecord(row.totals) ? row.totals : {};
+    Array.from(grouped.values()).map((rows) => {
+      const first = rows[0] ?? {};
+      const product = text(first, ["product_name", "product", "name"]);
+      const points = rows
+        .map(forecastPoint)
+        .filter((point) => point.date)
+        .sort((left, right) => left.date.localeCompare(right.date));
+      const total = (key: "p25" | "p50" | "p75") =>
+        points.reduce((sum, point) => sum + (point[key] ?? 0), 0);
+      const warnings = Array.from(
+        new Set([
+          ...warningMessages(response.warnings),
+          ...points.flatMap((point) => point.warnings ?? []),
+        ]),
+      );
       const result: ForecastResult = {
-        ingredientId: text(row, ["ingredient_id"]) || undefined,
-        ingredient,
-        unit: text(row, ["unit", "uom"], "đơn vị"),
-        history: records(row.history).map(forecastPoint),
-        forecast: records(row.forecast).map(forecastPoint),
+        productId: text(first, ["product_id"]) || undefined,
+        product,
+        ingredient: product,
+        unit: text(first, ["unit", "uom"], "sản phẩm"),
+        history: [],
+        forecast: points,
         totals: {
-          p25: number(totals, ["p25"]),
-          p50: number(totals, ["p50"]),
-          p75: number(totals, ["p75"]),
+          p25: total("p25"),
+          p50: total("p50"),
+          p75: total("p75"),
         },
-        drivers: Array.isArray(row.drivers)
-          ? row.drivers.map(String)
-          : [],
-        confidence: confidence(row.confidence),
-        dataNotes: Array.isArray(row.data_notes)
-          ? row.data_notes.map(String)
-          : [],
+        drivers: warnings,
+        confidence: warnings.length ? "Khá" : "Tốt",
+        dataNotes: [
+          text(responseRecord, ["model_version"])
+            ? `Model ${text(responseRecord, ["model_version"])}`
+            : "Kết quả persisted từ Forecast Core.",
+        ],
       };
-      return [ingredient, result];
+      return [product || result.productId || "", result];
     }),
   );
+}
+
+export function adaptIngredientDemand(
+  value: unknown,
+): Record<string, IngredientDemandResult> {
+  const response = isRecord(value) ? value : {};
+  const result = isRecord(response.result) ? response.result : response;
+  const grouped = new Map<string, ApiRecord[]>();
+  for (const row of records(result.predictions)) {
+    const ingredientId = text(row, ["ingredient_id"]);
+    const ingredient = text(row, ["ingredient_name", "ingredient", "name"]);
+    const key = ingredientId || ingredient;
+    if (!key) continue;
+    grouped.set(key, [...(grouped.get(key) ?? []), row]);
+  }
+
+  return Object.fromEntries(
+    Array.from(grouped.values()).map((rows) => {
+      const first = rows[0] ?? {};
+      const ingredientId = text(first, ["ingredient_id"]);
+      const ingredient = text(first, ["ingredient_name", "ingredient", "name"]);
+      const forecast = rows
+        .map(forecastPoint)
+        .filter((point) => point.date)
+        .sort((left, right) => left.date.localeCompare(right.date));
+      const contributionRows = rows.flatMap((row) => records(row.contributions));
+      const resultRow: IngredientDemandResult = {
+        ingredientId,
+        ingredient,
+        unit: text(first, ["unit", "uom"], "đơn vị"),
+        forecast,
+        totals: {
+          p25: forecast.reduce((sum, point) => sum + (point.p25 ?? 0), 0),
+          p50: forecast.reduce((sum, point) => sum + (point.p50 ?? 0), 0),
+          p75: forecast.reduce((sum, point) => sum + (point.p75 ?? 0), 0),
+        },
+        contributions: contributionRows.map((row) => ({
+          productId: text(row, ["product_id"]) || undefined,
+          product: text(row, ["product_name", "product", "name"]),
+          p25: number(row, ["p25", "contribution_p25", "demand_p25"]),
+          p50: number(row, ["p50", "contribution_p50", "demand_p50", "quantity"]),
+          p75: number(row, ["p75", "contribution_p75", "demand_p75"]),
+          quantity: optionalNumber(row, ["quantity", "contribution_quantity"]),
+          unit: text(row, ["unit", "uom"]) || undefined,
+        })),
+        warnings: Array.from(
+          new Set([
+            ...warningMessages(result.warnings),
+            ...rows.flatMap((row) => warningMessages(row.warnings)),
+          ]),
+        ),
+      };
+      return [ingredientId || ingredient, resultRow];
+    }),
+  );
+}
+
+function coreRecommendation(
+  data: BootstrapData,
+  demand: Record<string, IngredientDemandResult>,
+  strategy: CoreStrategy,
+  row: ApiRecord,
+): Recommendation {
+  const source = matchingInventory(row, data.inventory);
+  const ingredientId = text(row, ["ingredient_id"]);
+  const demandRow =
+    demand[ingredientId] ??
+    Object.values(demand).find(
+      (item) =>
+        normalized(item.ingredient) ===
+        normalized(text(row, ["ingredient_name", "ingredient"])),
+    );
+  const quantile =
+    strategy === "lean" ? "p25" : strategy === "protected" ? "p75" : "p50";
+  const orderQty = number(row, ["order_quantity"]);
+  const unitCost = number(row, ["unit_cost"]);
+  const reasonCodes = Array.isArray(row.reason_codes)
+    ? row.reason_codes.map(String)
+    : [];
+  const warnings = warningMessages(row.warnings);
+  const statusKey = source?.backendStatus ?? "missing";
+  const supplierId = text(row, ["supplier_id"]);
+  return {
+    ingredientId: ingredientId || source?.ingredientId,
+    supplierId: supplierId || undefined,
+    supplierTermId: text(row, ["supplier_term_id"]) || undefined,
+    ingredient:
+      text(row, ["ingredient_name", "ingredient"]) ||
+      source?.ingredient ||
+      ingredientId,
+    unit: text(row, ["unit", "uom"], source?.unit ?? "đơn vị"),
+    status: statusLabels[statusKey],
+    statusKey,
+    onHand: source?.onHand ?? 0,
+    usableStock: source?.usableQuantity ?? source?.onHand ?? 0,
+    forecastDemand: demandRow?.totals[quantile] ?? 0,
+    safetyStock: 0,
+    configuredSafetyStock: source?.safetyStock ?? null,
+    inbound: source?.inbound ?? 0,
+    recommendedQty: orderQty,
+    orderQty,
+    unitCost,
+    cost: number(row, ["line_cost"], orderQty * unitCost),
+    supplier: supplierId
+      ? text(row, ["supplier_name", "supplier"], supplierId)
+      : "Chưa có nhà cung cấp",
+    moq: number(row, ["moq"]),
+    packSize: number(row, ["pack_size"]),
+    leadTimeDays: number(row, ["lead_time_days"]),
+    expiryRiskQty: 0,
+    capacityWarning: warnings.includes("STORAGE_CAPACITY_NOT_CONFIGURED"),
+    reason: reasonCodes.join(", ") || "Kết quả mô phỏng từ Procurement Core.",
+    reasonCodes,
+    warnings,
+    orderDate: text(row, ["order_date"]) || undefined,
+    expectedArrivalDate:
+      text(row, ["expected_arrival_date"]) || null,
+    rawRequiredQuantity: number(row, ["raw_required_quantity"]),
+    roundingExcess: number(row, ["rounding_excess"]),
+    packCount: optionalNumber(row, ["pack_count"]) ?? null,
+  };
+}
+
+export function adaptCorePlanning(
+  data: BootstrapData,
+  demand: Record<string, IngredientDemandResult>,
+  value: unknown,
+): PlanningScenario[] {
+  const response = isRecord(value) ? value : {};
+  const result = isRecord(response.result) ? response.result : response;
+  return records(result.plans).map((row) => {
+    const metrics = isRecord(row.metrics) ? row.metrics : {};
+    const strategy = text(row, ["strategy"]) as CoreStrategy;
+    const feasibility = text(row, ["feasibility", "status"]).toLowerCase();
+    return {
+      strategy,
+      feasible:
+        row.feasible === true ||
+        row.is_feasible === true ||
+        feasibility === "feasible",
+      cost: number(row, ["cost", "total_cost"], number(metrics, ["cost", "total_cost"])),
+      shortage: number(
+        row,
+        ["shortage", "total_shortage"],
+        number(metrics, ["shortage", "total_shortage"]),
+      ),
+      waste: number(row, ["waste", "total_waste"], number(metrics, ["waste", "total_waste"])),
+      fillRate: number(row, ["fill_rate"], number(metrics, ["fill_rate"])),
+      metrics,
+      warnings: warningMessages(row.warnings),
+      violations: warningMessages(row.violations),
+      recommendations: records(row.lines).map((line) =>
+        coreRecommendation(data, demand, strategy, line),
+      ),
+    };
+  });
+}
+
+export function adaptPlanningWorkflow(
+  data: BootstrapData,
+  strategy: Strategy,
+  forecastValue: unknown,
+  demandValue: unknown,
+  planningValue: unknown,
+): PlanResponse {
+  const forecast = (isRecord(forecastValue) ? forecastValue : {}) as
+    ForecastRunResultResponse;
+  const demandResponse = isRecord(demandValue) ? demandValue : {};
+  const demandResult = isRecord(demandResponse.result)
+    ? demandResponse.result
+    : demandResponse;
+  const planningResponse = isRecord(planningValue) ? planningValue : {};
+  const planningResult = isRecord(planningResponse.result)
+    ? planningResponse.result
+    : planningResponse;
+  const ingredientDemand = adaptIngredientDemand(demandResult);
+  const scenarios = adaptCorePlanning(data, ingredientDemand, planningResult);
+  const selectedCore = strategyToCore(strategy);
+  const selected = scenarios.find((scenario) => scenario.strategy === selectedCore);
+  const status = text(planningResult, ["status"], "completed") as PlanResponse["status"];
+  const warnings = Array.from(
+    new Set([
+      ...warningMessages(forecast.warnings),
+      ...warningMessages(demandResult.warnings),
+      ...warningMessages(planningResult.warnings),
+      ...(selected?.warnings ?? []),
+      ...(selected?.violations ?? []),
+    ]),
+  );
+  return {
+    strategy,
+    status,
+    engineStatus: text(forecast, ["engine_status"]) || undefined,
+    failureCode:
+      text(planningResult, ["failure_code"]) ||
+      text(demandResult, ["failure_code"]) ||
+      text(forecast, ["failure_code"]) ||
+      null,
+    failureMessage:
+      text(planningResult, ["failure_message"]) ||
+      text(demandResult, ["failure_message"]) ||
+      text(forecast, ["failure_message"]) ||
+      null,
+    cutoffDate: text(forecast, ["cutoff_date"]) || undefined,
+    horizonDays: optionalNumber(forecast, ["horizon_days"]),
+    createdAt: text(planningResult, ["created_at"]) || undefined,
+    completedAt: text(planningResult, ["completed_at"]) || undefined,
+    enrichedInventory: enrichedInventory(data, selected?.recommendations ?? []),
+    recommendations: selected?.recommendations ?? [],
+    forecasts: adaptForecasts(forecast),
+    ingredientDemand,
+    scenarios,
+    recommendedStrategy:
+      (text(planningResult, ["recommended_strategy"]) as CoreStrategy) || null,
+    forecastRunId: text(forecast, ["forecast_run_id"]) || undefined,
+    ingredientDemandRunId:
+      text(demandResult, ["ingredient_demand_run_id"]) || undefined,
+    procurementPlanRunId:
+      text(planningResult, ["procurement_plan_run_id"]) || undefined,
+    budget: selected
+      ? {
+          limit: data.settings.remainingBudget,
+          plannedCost: selected.cost,
+          remainingAfterPlan: data.settings.remainingBudget - selected.cost,
+        }
+      : undefined,
+    warnings,
+  };
+}
+
+/** Selects one already-computed core scenario without creating another run. */
+export function selectPlanningScenario(
+  data: BootstrapData,
+  plan: PlanResponse,
+  strategy: Strategy,
+): PlanResponse {
+  const selected = plan.scenarios.find(
+    (scenario) => scenario.strategy === strategyToCore(strategy),
+  );
+  if (!selected) return { ...plan, strategy };
+  return {
+    ...plan,
+    strategy,
+    recommendations: selected.recommendations,
+    enrichedInventory: enrichedInventory(data, selected.recommendations),
+    budget: {
+      limit: data.settings.remainingBudget,
+      plannedCost: selected.cost,
+      remainingAfterPlan: data.settings.remainingBudget - selected.cost,
+    },
+  };
 }
 
 function reasonText(row: ApiRecord): {
@@ -791,7 +1134,7 @@ function normalizeRecommendations(
         text(row, ["recommendation_id"]) || undefined,
       ingredientId:
         text(row, ["ingredient_id"]) || source?.ingredientId,
-      supplierId: text(row, ["supplier_id"]) || source?.supplierId,
+      supplierId: text(row, ["supplier_id"]) || undefined,
       ingredient:
         text(row, ["ingredient", "ingredient_name"]) ||
         source?.ingredient ||
@@ -825,11 +1168,9 @@ function normalizeRecommendations(
         ["cost"],
         orderQty * number(row, ["unit_cost"], source?.unitCost ?? 0),
       ),
-      supplier: text(
-        row,
-        ["supplier", "supplier_name"],
-        source?.supplier ?? "Chưa thiết lập",
-      ),
+      supplier:
+        text(row, ["supplier", "supplier_name"]) ||
+        (text(row, ["supplier_id"]) ? text(row, ["supplier_id"]) : "Chưa có nhà cung cấp"),
       moq: number(row, ["moq"], source?.moq ?? 0),
       packSize: number(row, ["pack_size"], source?.packSize ?? 1),
       leadTimeDays: number(
@@ -862,8 +1203,12 @@ function enrichedInventory(
       ...item,
       averageDailyUsage: 0,
       daysSupply: item.daysSupply ?? 999,
-      expiryDays: daysBetween(data.today, item.expiryDate),
-      countAgeDays: daysBetween(item.lastCounted.slice(0, 10), data.today),
+      expiryDays: item.expiryDate
+        ? daysBetween(data.today, item.expiryDate)
+        : Number.NaN,
+      countAgeDays: item.lastCounted
+        ? daysBetween(item.lastCounted.slice(0, 10), data.today)
+        : Number.NaN,
       statusKey,
       status: recommendation?.status ?? statusLabels[statusKey],
       dataQuality: item.lastCounted
@@ -879,9 +1224,12 @@ export function emptyBackendPlan(
 ): PlanResponse {
   return {
     strategy,
+    status: "idle",
     enrichedInventory: enrichedInventory(data, []),
     recommendations: [],
     forecasts: {},
+    ingredientDemand: {},
+    scenarios: [],
     warnings: [],
   };
 }
@@ -889,18 +1237,21 @@ export function emptyBackendPlan(
 export function adaptPlan(
   data: BootstrapData,
   strategy: Strategy,
-  forecastResponse: ForecastRunResultResponse,
+  forecastResponse: ForecastRunResultResponse | CanonicalForecastRunResult,
   planResponse: PlanRunResultResponse,
 ): PlanResponse {
   const recommendations = normalizeRecommendations(data, planResponse);
   const budget = isRecord(planResponse.budget) ? planResponse.budget : {};
   return {
     strategy,
+    status: planResponse.status,
     forecastRunId: forecastResponse.forecast_run_id,
     planRunId: planResponse.plan_run_id,
     enrichedInventory: enrichedInventory(data, recommendations),
     recommendations,
     forecasts: adaptForecasts(forecastResponse),
+    ingredientDemand: {},
+    scenarios: [],
     budget: {
       limit: number(budget, ["limit"], data.settings.remainingBudget),
       plannedCost: number(budget, ["planned_cost"]),
@@ -942,6 +1293,7 @@ function orderLine(
   ]);
   const unitCost = number(row, ["unit_cost"], source?.unitCost ?? 0);
   return {
+    poLineId: text(row, ["po_line_id", "line_id"]) || undefined,
     recommendationId: recommendationId || source?.recommendationId,
     ingredientId:
       text(row, ["ingredient_id"]) || source?.ingredientId,
@@ -949,7 +1301,7 @@ function orderLine(
     ingredient: ingredient || source?.ingredient || "Nguyên liệu",
     unit: text(row, ["unit", "uom"], source?.unit ?? "đơn vị"),
     status: source?.status ?? "Đã duyệt",
-    statusKey: source?.statusKey ?? "normal",
+    statusKey: source?.statusKey ?? "missing",
     onHand: source?.onHand ?? 0,
     usableStock: source?.usableStock ?? 0,
     forecastDemand: source?.forecastDemand ?? 0,
@@ -974,6 +1326,12 @@ function orderLine(
     capacityWarning: source?.capacityWarning ?? false,
     reason: source?.reason ?? "Dòng đơn hàng do backend xác nhận.",
     reasonCodes: source?.reasonCodes,
+    receivedQuantity: number(row, ["received_quantity", "quantity_received"]),
+    remainingQuantity: number(
+      row,
+      ["remaining_quantity"],
+      Math.max(0, orderQty - number(row, ["received_quantity", "quantity_received"])),
+    ),
   };
 }
 
@@ -995,18 +1353,25 @@ export function adaptOrders(
       supplierId: text(row, ["supplier_id"]) || undefined,
       supplier: text(row, ["supplier", "supplier_name"]),
       orderDate: text(row, ["order_date"]),
-      deliveryDate: text(row, ["delivery_date"]),
+      deliveryDate: text(row, ["delivery_date", "expected_delivery_date"]),
       strategy: strategyFromApi(apiStrategy),
       lines: records(row.lines).map((line) =>
         orderLine(line, recommendations),
       ),
-      total: number(row, ["total"]),
+      total: number(row, ["total", "total_amount", "total_cost"]),
       budgetAfter: number(row, ["budget_after"]),
-      status:
-        text(row, ["status"]).toLowerCase() === "ordered"
-          ? "Đã đặt hàng"
-          : "Bản nháp",
+      status: (() => {
+        const status = text(row, ["status"]).toLowerCase();
+        return status === "ordered" ||
+          status === "partially_received" ||
+          status === "received"
+          ? status
+          : "draft";
+      })(),
       version: optionalNumber(row, ["version"]),
+      confirmedAt: text(row, ["confirmed_at"]) || undefined,
+      receivedAt: text(row, ["received_at"]) || undefined,
+      deliveryReference: text(row, ["delivery_reference"]) || undefined,
     };
   });
 }

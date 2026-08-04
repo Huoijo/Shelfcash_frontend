@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   componentSignature,
@@ -167,4 +168,31 @@ test("Menu validation blocks empty, duplicate and invalid combo components", () 
     ),
     [],
   );
+
+  const inactiveSingle = { ...items[0]!, status: "inactive" as const };
+  const inactiveIssues = validateMenuDraft(
+    {
+      ...valid,
+      components: [
+        {
+          componentProductId: inactiveSingle.productId,
+          quantity: 1,
+        },
+      ],
+    },
+    [inactiveSingle],
+  );
+  assert.ok(inactiveIssues.some((issue) => /món lẻ đang bán/i.test(issue)));
+});
+
+test("Menu view never invents a version and refreshes version conflicts", () => {
+  const source = readFileSync(
+    new URL("../app/views/MenuView.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.doesNotMatch(source, /editor\.item\.version\s*\+\s*1/);
+  assert.match(source, /caught\.code === "VERSION_CONFLICT"/);
+  assert.match(source, /const refreshedItems = await refreshMenu\(\)/);
+  assert.match(source, /hãy xem lại các giá trị trong biểu mẫu rồi gửi lại/i);
 });

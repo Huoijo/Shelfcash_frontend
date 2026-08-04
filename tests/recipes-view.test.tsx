@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { RecipesView } from "../app/views/RecipesView.tsx";
@@ -8,7 +9,11 @@ import type { StoreBootstrapResponse } from "../lib/types.ts";
 import { bootstrapRecipesComponentsFixture } from "./fixtures/bootstrap-recipes-components.ts";
 
 function renderRecipes(
-  options: { recipes?: StoreBootstrapResponse["recipes"] } = {
+  options: {
+    recipes?: StoreBootstrapResponse["recipes"];
+    recipeYieldQuantity?: number;
+    recipeProcessLossRate?: number;
+  } = {
     recipes: bootstrapRecipesComponentsFixture.recipes,
   },
 ) {
@@ -16,6 +21,12 @@ function renderRecipes(
     ...bootstrapRecipesComponentsFixture,
     recipes: options.recipes,
   });
+  if (data.products[0]) {
+    Object.assign(data.products[0], {
+      recipeYieldQuantity: options.recipeYieldQuantity,
+      recipeProcessLossRate: options.recipeProcessLossRate,
+    });
+  }
   return renderToStaticMarkup(
     <RecipesView
       data={data}
@@ -43,7 +54,6 @@ test("RecipesView shows ID-linked counts, backend metadata and ingredient option
   }
   assert.match(html, /01\/06\/2026/);
   assert.match(html, />v1</);
-  assert.doesNotMatch(html, /31\/07\/2026/);
 
   const ingredientSelect = html.match(
     /<select[^>]*aria-label="Nguyên liệu dòng 1"[^>]*>(.*?)<\/select>/s,
@@ -84,4 +94,36 @@ test("RecipesView does not crash when the bootstrap payload is malformed", () =>
       />,
     ),
   );
+});
+
+test("RecipesView renders effective date, yield and process-loss controls from backend detail", () => {
+  const html = renderRecipes({
+    recipes: bootstrapRecipesComponentsFixture.recipes,
+    recipeYieldQuantity: 2,
+    recipeProcessLossRate: 0.05,
+  });
+
+  assert.match(html, /aria-label="Ngày hiệu lực công thức"/);
+  assert.match(
+    html,
+    /aria-label="Sản lượng công thức"[^>]*value="2"/,
+  );
+  assert.match(
+    html,
+    /aria-label="Tỷ lệ hao hụt công thức"[^>]*value="0\.05"/,
+  );
+  assert.doesNotMatch(html, /Phiên bản trước/);
+});
+
+test("RecipesView passes the canonical recipe metadata and starts without a recipe at version zero", () => {
+  const source = readFileSync(
+    new URL("../app/views/RecipesView.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /version: product\.recipeVersion \?\? 0/);
+  assert.match(source, /effectiveFrom,/);
+  assert.match(source, /yieldQuantity,/);
+  assert.match(source, /processLossRate,/);
+  assert.doesNotMatch(source, /productVersions/);
 });

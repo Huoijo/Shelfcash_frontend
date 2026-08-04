@@ -16,7 +16,6 @@ import {
   componentSignature,
   createMenuPayload,
   menuSellingUnits,
-  normalizeMenuItem,
   normalizeMenuItems,
   patchMenuPayload,
   summarizeMenu,
@@ -63,7 +62,9 @@ const emptyDraft: MenuItemDraft = {
 
 function errorMessage(caught: unknown): string {
   if (caught instanceof ShelfCashApiError) {
-    return `${caught.message}${caught.code ? ` (${caught.code})` : ""}`;
+    return `${caught.message}${caught.code ? ` (${caught.code})` : ""}${
+      caught.requestId ? ` · Request ${caught.requestId}` : ""
+    }`;
   }
   return caught instanceof Error
     ? caught.message
@@ -110,7 +111,7 @@ export function MenuView({
   const [success, setSuccess] = useState("");
   const [editor, setEditor] = useState<MenuEditor | null>(null);
 
-  const refreshMenu = useCallback(async () => {
+  const refreshMenu = useCallback(async (): Promise<MenuItem[] | null> => {
     setLoading(true);
     try {
       const response = await getMenu(data.settings.storeId, {
@@ -119,10 +120,13 @@ export function MenuView({
         page: 1,
         pageSize: 100,
       });
-      setItems(normalizeMenuItems(response));
+      const refreshedItems = normalizeMenuItems(response);
+      setItems(refreshedItems);
       setError("");
+      return refreshedItems;
     } catch (caught) {
       setError(errorMessage(caught));
+      return null;
     } finally {
       setLoading(false);
     }
@@ -289,12 +293,20 @@ export function MenuView({
             productId: editor.item.productId,
             payload: patchMenuPayload(editor.item, editor.draft),
           });
-          const updated = normalizeMenuItem(response);
-          version =
-            updated?.version ??
-            (typeof response.version === "number"
+          const responseVersion =
+            typeof response.version === "number" &&
+            Number.isInteger(response.version)
               ? response.version
-              : editor.item.version + 1);
+              : null;
+          if (responseVersion === null) {
+            const refreshedItems = await refreshMenu();
+            throw new Error(
+              refreshedItems
+                ? "Backend chưa trả phiên bản mới. Menu đã được tải lại; hãy mở món và kiểm tra trước khi gửi lại."
+                : "Backend chưa trả phiên bản mới và chưa thể tải lại Menu. Hãy làm mới trước khi gửi lại.",
+            );
+          }
+          version = responseVersion;
           changed = true;
         }
         const componentsChanged =
@@ -332,7 +344,34 @@ export function MenuView({
       setEditor(null);
       await onMenuChanged(message);
     } catch (caught) {
-      setError(errorMessage(caught));
+      if (
+        caught instanceof ShelfCashApiError &&
+        caught.code === "VERSION_CONFLICT"
+      ) {
+        const refreshedItems = await refreshMenu();
+        const refreshedItem = editor.item?.productId && refreshedItems
+          ? refreshedItems.find(
+              (item) => item.productId === editor.item?.productId,
+            )
+          : undefined;
+        if (refreshedItem) {
+          setEditor((current) =>
+            current
+              ? {
+                  ...current,
+                  item: refreshedItem,
+                }
+              : current,
+          );
+        }
+        setError(
+          refreshedItems
+            ? "Món đã thay đổi ở nơi khác. Menu mới nhất đã được tải lại; hãy xem lại các giá trị trong biểu mẫu rồi gửi lại."
+            : "Món đã thay đổi ở nơi khác nhưng chưa thể tải lại Menu. Hãy làm mới trước khi gửi lại.",
+        );
+      } else {
+        setError(errorMessage(caught));
+      }
     } finally {
       setSaving(false);
     }

@@ -99,6 +99,15 @@ const routeRules: RouteRule[] = [
     methods: methods("GET"),
   },
   {
+    pattern:
+      /^\/api\/v1\/stores\/[^/]+\/forecast-runs\/[^/]+\/(?:ingredient-demand|procurement-plans)$/,
+    methods: methods("GET", "POST"),
+  },
+  {
+    pattern: /^\/api\/v1\/forecast-models\/train$/,
+    methods: methods("POST"),
+  },
+  {
     pattern: /^\/api\/v1\/stores\/[^/]+\/plan-runs$/,
     methods: methods("POST"),
   },
@@ -130,9 +139,18 @@ function errorResponse(
   code: string,
   message: string,
   details: Record<string, unknown> = {},
+  requestId: string | null = null,
 ): Response {
-  const body: ShelfCashApiErrorBody = { code, message, details };
-  return Response.json(body, { status });
+  const body: ShelfCashApiErrorBody = {
+    code,
+    message,
+    details,
+    request_id: requestId,
+  };
+  return Response.json(body, {
+    status,
+    headers: requestId ? { "X-Request-ID": requestId } : undefined,
+  });
 }
 
 export function resolveBackendPath(
@@ -179,13 +197,18 @@ function backendBaseUrl(): string | null {
   }
 }
 
-function forwardedHeaders(request: Request, path: string): Headers {
+function forwardedHeaders(
+  request: Request,
+  path: string,
+  requestId: string,
+): Headers {
   const headers = new Headers();
   for (const name of [
     "content-type",
     "accept",
     "idempotency-key",
     "if-match",
+    "x-request-id",
   ]) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
@@ -194,6 +217,7 @@ function forwardedHeaders(request: Request, path: string): Headers {
   const publicPath =
     path === "/health" || path === "/api/v1/llm/health";
   if (apiKey && !publicPath) headers.set("X-ShelfCash-Key", apiKey);
+  headers.set("X-Request-ID", requestId);
   return headers;
 }
 
@@ -201,6 +225,11 @@ export async function forwardShelfCashRequest(
   request: Request,
   segments: string[],
 ): Promise<Response> {
+  const requestId =
+    request.headers.get("X-Request-ID") ||
+    (globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID()
+      : `shelfcash-proxy-${Date.now()}`);
   const method = request.method.toUpperCase();
   const path = resolveBackendPath(segments, method);
   if (!path) {
@@ -208,6 +237,8 @@ export async function forwardShelfCashRequest(
       404,
       "ENDPOINT_NOT_ALLOWED",
       "Endpoint hoặc HTTP method không thuộc ShelfCash API contract.",
+      {},
+      requestId,
     );
   }
   const baseUrl = backendBaseUrl();
@@ -217,6 +248,7 @@ export async function forwardShelfCashRequest(
       "BACKEND_NOT_CONFIGURED",
       "Chưa cấu hình địa chỉ ShelfCash backend.",
       { environment: "SHELFCASH_BACKEND_URL" },
+      requestId,
     );
   }
 
@@ -226,7 +258,7 @@ export async function forwardShelfCashRequest(
     targetUrl.search = incomingUrl.search;
     const response = await fetch(targetUrl, {
       method,
-      headers: forwardedHeaders(request, path),
+      headers: forwardedHeaders(request, path, requestId),
       body:
         method === "GET" || method === "HEAD"
           ? undefined
@@ -244,6 +276,7 @@ export async function forwardShelfCashRequest(
       const value = response.headers.get(name);
       if (value) headers.set(name, value);
     }
+    if (!headers.has("X-Request-ID")) headers.set("X-Request-ID", requestId);
     return new Response(await response.arrayBuffer(), {
       status: response.status,
       headers,
@@ -257,6 +290,7 @@ export async function forwardShelfCashRequest(
         reason:
           caught instanceof Error ? caught.message : "Unknown network error",
       },
+      requestId,
     );
   }
 }

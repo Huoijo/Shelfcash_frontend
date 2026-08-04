@@ -9,6 +9,7 @@ fi
 
 worker="${SITES_PROJECT_ROOT}/dist/server/index.js"
 hosting="${SITES_PROJECT_ROOT}/dist/.openai/hosting.json"
+font_dir="${SITES_PROJECT_ROOT}/dist/client/fonts/ui"
 
 [[ -f "${worker}" ]] || {
   echo "Missing Sites Worker entry: dist/server/index.js" >&2
@@ -19,12 +20,28 @@ hosting="${SITES_PROJECT_ROOT}/dist/.openai/hosting.json"
   exit 66
 }
 
-node --input-type=module - "${worker}" "${hosting}" <<'NODE'
+node --input-type=module - "${worker}" "${hosting}" "${font_dir}" <<'NODE'
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
-const [workerPath, hostingPath] = process.argv.slice(2);
+const [workerPath, hostingPath, fontDirectory] = process.argv.slice(2);
 JSON.parse(await readFile(hostingPath, "utf8"));
+
+const requiredFonts = [
+  "noto-sans-vietnamese.woff2",
+  "noto-sans-latin-ext.woff2",
+  "noto-sans-latin.woff2",
+  "noto-serif-vietnamese.woff2",
+  "noto-serif-latin-ext.woff2",
+  "noto-serif-latin.woff2",
+];
+
+for (const fontName of requiredFonts) {
+  const font = await readFile(`${fontDirectory}/${fontName}`);
+  if (font.length < 4 || font.subarray(0, 4).toString("ascii") !== "wOF2") {
+    throw new Error(`Invalid packaged WOFF2 font: ${fontName}`);
+  }
+}
 
 const workerUrl = pathToFileURL(workerPath);
 workerUrl.searchParams.set("sites-validation", `${process.pid}-${Date.now()}`);
@@ -34,4 +51,4 @@ if (!worker.default || typeof worker.default.fetch !== "function") {
 }
 NODE
 
-echo "Validated Sites artifact: ESM Worker default.fetch and hosting manifest are present."
+echo "Validated Sites artifact: Worker, hosting manifest, and UI fonts are present."
