@@ -700,10 +700,7 @@ function normalizedInventory(
       stringValue(first, ["unit", "uom"]) || existing?.unit || "đơn vị";
     const moq = constraint?.moq || existing?.moq || 1;
     const packSize = constraint?.packSize || existing?.packSize || moq || 1;
-    const safetyStock =
-      numberValue(first, ["safety_stock"], existing?.safetyStock ?? 0) ||
-      existing?.safetyStock ||
-      0;
+    const safetyStock = existing?.safetyStock ?? null;
     return {
       ingredient,
       sku:

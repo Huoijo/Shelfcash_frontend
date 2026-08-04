@@ -110,8 +110,6 @@ const bootstrapResponse: StoreBootstrapResponse = {
       moq: 12,
       pack_size: 12,
       lead_time_days: 2,
-      safety_stock: 4,
-      capacity: 60,
       unit: "lít",
       version: 2,
     },
@@ -745,4 +743,25 @@ test("purchase order trusts backend totals and versions", () => {
   assert.equal(orders[0]?.budgetAfter, 1532000);
   assert.equal(orders[0]?.version, 1);
   assert.equal(orders[0]?.lines[0]?.orderQty, 24);
+});
+
+test("planning trace preserves missing safety stock and maps its warning", () => {
+  const data = adaptBootstrap(buildBootstrapData(), bootstrapResponse);
+  const missing = adaptPlan(data, "Cân bằng", forecastResponse, {
+    ...planResponse,
+    recommendations: [{
+      ...planResponse.recommendations[0],
+      safety_stock: undefined,
+      constraint_trace: {
+        configured_safety_stock: null,
+        effective_safety_stock: 0,
+        fallback_policy: "ZERO_WITH_WARNING",
+      },
+    }],
+    warnings: [{ code: "SAFETY_STOCK_NOT_CONFIGURED" }],
+  });
+  assert.equal(missing.recommendations[0]?.configuredSafetyStock, null);
+  assert.equal(missing.recommendations[0]?.safetyStock, 0);
+  assert.equal(missing.recommendations[0]?.fallbackPolicy, "ZERO_WITH_WARNING");
+  assert.ok(missing.warnings?.[0]?.includes("Chưa cấu hình"));
 });

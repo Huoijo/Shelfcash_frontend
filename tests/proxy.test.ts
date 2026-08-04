@@ -19,6 +19,10 @@ test("proxy only accepts the ShelfCash API contract", () => {
     "/api/v1/imports/abc/confirm",
   );
   assert.equal(
+    resolveBackendPath(["api", "v1", "stores", "STORE_001", "inventory-constraints"], "GET"),
+    "/api/v1/stores/STORE_001/inventory-constraints",
+  );
+  assert.equal(
     resolveBackendPath(
       ["api", "v1", "imports", "abc", "result"],
       "GET",

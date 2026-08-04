@@ -23,7 +23,7 @@ const routeRules: RouteRule[] = [
   },
   {
     pattern:
-      /^\/api\/v1\/stores\/[^/]+\/(?:bootstrap|dashboard|inventory|inventory-movements|ingredients|products|menu|supplier-constraints|aliases|settings|calendar-features|imports)$/,
+      /^\/api\/v1\/stores\/[^/]+\/(?:bootstrap|dashboard|inventory|inventory-movements|ingredients|products|menu|supplier-constraints|inventory-constraints|aliases|settings|calendar-features|imports)$/,
     methods: methods("GET"),
   },
   {

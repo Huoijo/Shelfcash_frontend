@@ -7,9 +7,9 @@
   },
   "scripts": {
     "install:ci": "bash scripts/install-ci.sh",
-    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vite",
+    "dev": "vite",
     "build": "bash scripts/build-verified.sh",
-    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
+    "start": "vinext start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "test:logic": "node --import tsx --test tests/logic.test.ts tests/api.test.ts tests/ingestion.test.ts tests/menu.test.ts tests/proxy.test.ts tests/contract.test.ts tests/client-contract.test.ts tests/recipes-view.test.tsx tests/import-view.test.tsx",
     "validate:artifact": "bash scripts/validate-artifact.sh",

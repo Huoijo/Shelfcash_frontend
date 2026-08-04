@@ -3,13 +3,15 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { Plus, Save, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { buildProcurementSettingsRows } from "../../lib/procurement-settings";
 import type {
   Alias,
   BootstrapData,
   CalendarDay,
   ImportLog,
-  InventoryItem,
+  InventoryConstraint,
+  SupplierConstraintRow,
   RecipeVersion,
   Settings,
 } from "../../lib/types";
@@ -25,6 +27,7 @@ import {
 
 const tabs = [
   "Nhà cung cấp",
+  "Ngưỡng tồn kho",
   "Tên thay thế",
   "Ngân sách & lịch",
   "Lịch sử",
@@ -37,20 +40,28 @@ export function SettingsView({
   onSaveInventory,
   onSaveAliases,
   onSaveContext,
+  inventoryConstraints,
+  inventoryConstraintsError,
+  inventoryConstraintsLoading,
+  initialTab = "Nhà cung cấp",
 }: {
   data: BootstrapData;
   importLogs: ImportLog[];
   recipeVersions: RecipeVersion[];
-  onSaveInventory: (items: InventoryItem[]) => Promise<boolean>;
+  onSaveInventory: (items: SupplierConstraintRow[]) => Promise<boolean>;
   onSaveAliases: (aliases: Alias[]) => Promise<boolean>;
   onSaveContext: (
     settings: Settings,
     calendar: CalendarDay[],
   ) => Promise<boolean>;
+  inventoryConstraints: InventoryConstraint[];
+  inventoryConstraintsError: string | null;
+  inventoryConstraintsLoading: boolean;
+  initialTab?: (typeof tabs)[number];
 }) {
-  const [tab, setTab] = useState<(typeof tabs)[number]>("Nhà cung cấp");
-  const [inventory, setInventory] = useState(
-    data.inventory.map((item) => ({ ...item })),
+  const [tab, setTab] = useState<(typeof tabs)[number]>(initialTab);
+  const [supplierTerms, setSupplierTerms] = useState(
+    data.supplierConstraints.map((item) => ({ ...item })),
   );
   const [aliases, setAliases] = useState(data.aliases.map((alias) => ({ ...alias })));
   const [settings, setSettings] = useState({ ...data.settings });
@@ -59,20 +70,20 @@ export function SettingsView({
   );
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState("");
+  const procurementRows = useMemo(
+    () => buildProcurementSettingsRows(data.supplierConstraints, inventoryConstraints, data.today),
+    [data.supplierConstraints, data.today, inventoryConstraints],
+  );
 
   useEffect(() => {
-    setInventory(data.inventory.map((item) => ({ ...item })));
+    setSupplierTerms(data.supplierConstraints.map((item) => ({ ...item })));
     setAliases(data.aliases.map((alias) => ({ ...alias })));
     setSettings({ ...data.settings });
     setCalendar(data.futureCalendar.map((day) => ({ ...day })));
   }, [data]);
 
-  function updateInventory(index: number, patch: Partial<InventoryItem>) {
-    setInventory((current) =>
-      current.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, ...patch } : item,
-      ),
-    );
+  function updateSupplierTerm(index: number, patch: Partial<SupplierConstraintRow>) {
+    setSupplierTerms((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
     setMessage("");
   }
 
@@ -102,15 +113,18 @@ export function SettingsView({
                   <th>Lead time</th>
                   <th>MOQ</th>
                   <th>Quy cách</th>
-                  <th>Tồn an toàn</th>
+                  <th>Đơn vị đặt</th>
+                  <th>Đơn vị cơ sở</th>
+                  <th>Ngày hiệu lực</th>
+                  <th>Trạng thái</th>
                 </tr>
               </thead>
               <tbody>
-                {inventory.map((item, index) => (
-                  <tr key={item.ingredient}>
+                {supplierTerms.map((item, index) => (
+                  <tr key={item.constraintId ?? `${item.ingredientId}-${item.supplierId}-${index}`}>
                     <td>
                       <strong>{item.ingredient}</strong>
-                      <small>{item.unit}</small>
+                      <small>{item.orderUnit ?? item.baseUnit ?? "—"}</small>
                     </td>
                     <td>
                       <input
@@ -120,7 +134,7 @@ export function SettingsView({
                         step="1000"
                         aria-label={`Đơn giá ${item.ingredient}`}
                         onChange={(event) =>
-                          updateInventory(index, {
+                          updateSupplierTerm(index, {
                             unitCost: Number(event.target.value),
                           })
                         }
@@ -131,7 +145,7 @@ export function SettingsView({
                         value={item.supplier}
                         aria-label={`Nhà cung cấp ${item.ingredient}`}
                         onChange={(event) =>
-                          updateInventory(index, {
+                          updateSupplierTerm(index, {
                             supplier: event.target.value,
                           })
                         }
@@ -145,7 +159,7 @@ export function SettingsView({
                         step="1"
                         aria-label={`Lead time ${item.ingredient}`}
                         onChange={(event) =>
-                          updateInventory(index, {
+                          updateSupplierTerm(index, {
                             leadTimeDays: Number(event.target.value),
                           })
                         }
@@ -159,7 +173,7 @@ export function SettingsView({
                         step="0.5"
                         aria-label={`MOQ ${item.ingredient}`}
                         onChange={(event) =>
-                          updateInventory(index, {
+                          updateSupplierTerm(index, {
                             moq: Number(event.target.value),
                           })
                         }
@@ -173,26 +187,16 @@ export function SettingsView({
                         step="0.5"
                         aria-label={`Quy cách ${item.ingredient}`}
                         onChange={(event) =>
-                          updateInventory(index, {
+                          updateSupplierTerm(index, {
                             packSize: Number(event.target.value),
                           })
                         }
                       />
                     </td>
-                    <td>
-                      <input
-                        type="number"
-                        value={item.safetyStock}
-                        min="0"
-                        step="0.5"
-                        aria-label={`Tồn an toàn ${item.ingredient}`}
-                        onChange={(event) =>
-                          updateInventory(index, {
-                            safetyStock: Number(event.target.value),
-                          })
-                        }
-                      />
-                    </td>
+                    <td>{item.orderUnit ?? "—"}</td>
+                    <td>{item.baseUnit ?? "—"}</td>
+                    <td>{item.effectiveDate ? formatDate(item.effectiveDate) : "—"}</td>
+                    <td>{item.active === false ? "Ngừng hiệu lực" : "Đang hiệu lực"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -206,7 +210,7 @@ export function SettingsView({
                 void (async () => {
                   setSaving("suppliers");
                   try {
-                    if (await onSaveInventory(inventory)) {
+                    if (await onSaveInventory(supplierTerms)) {
                       setMessage("Đã lưu quy tắc nhập hàng.");
                     }
                   } finally {
@@ -219,6 +223,40 @@ export function SettingsView({
               Lưu thay đổi
             </Button>
           </div>
+        </>
+      ) : null}
+
+      {tab === "Ngưỡng tồn kho" ? (
+        <>
+          <SectionHeading
+            title="Ngưỡng tồn kho"
+            subtitle="Safety stock và maximum stock là chính sách tồn kho, độc lập với điều kiện nhà cung cấp."
+          />
+          {inventoryConstraintsLoading ? (
+            <p className="quiet-help">Đang tải ngưỡng tồn kho...</p>
+          ) : inventoryConstraintsError ? (
+            <Notice tone="error">{inventoryConstraintsError}</Notice>
+          ) : procurementRows.length === 0 ? (
+            <p className="quiet-help">Chưa cấu hình ngưỡng tồn kho.</p>
+          ) : (
+            <div className="table-wrap settings-table">
+              <table>
+                <thead><tr><th>Nguyên liệu</th><th>Safety stock</th><th>Maximum stock</th><th>Ngày hiệu lực</th><th>Version</th><th>Trạng thái</th></tr></thead>
+                <tbody>
+                  {procurementRows.map((row) => (
+                    <tr key={row.ingredientId}>
+                      <td>{row.ingredientName}</td>
+                      <td>{row.safetyStock ? `${row.safetyStock.value} ${row.safetyStock.unit ?? ""}`.trim() : "Chưa cấu hình"}</td>
+                      <td>{row.maximumStock ? `${row.maximumStock.value} ${row.maximumStock.unit ?? ""}`.trim() : "Chưa cấu hình"}</td>
+                      <td>{row.safetyStock?.effectiveDate ? formatDate(row.safetyStock.effectiveDate) : "—"}</td>
+                      <td>{row.safetyStock?.version ?? row.maximumStock?.version ?? "—"}</td><td>{row.safetyStock || row.maximumStock ? "Đang hiệu lực" : "Chưa cấu hình"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="quiet-help">Dữ liệu chỉ đọc; cập nhật qua import Business Rules / Điều kiện vận hành.</p>
         </>
       ) : null}
 

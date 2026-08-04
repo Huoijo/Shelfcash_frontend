@@ -246,7 +246,7 @@ function normalizeInventory(
       ),
       expiryDate: expiries[0] ?? today,
       expiringQty: Number(expiringQty.toFixed(3)),
-      safetyStock: number(constraint, ["safety_stock"]),
+      safetyStock: null,
       inbound: lots.reduce(
         (sum, lot) => sum + number(lot, ["inbound", "incoming"]),
         0,
@@ -257,7 +257,7 @@ function normalizeInventory(
       leadTimeDays: number(constraint, ["lead_time_days"]),
       moq: number(constraint, ["moq"], 1),
       packSize: number(constraint, ["pack_size"], 1),
-      capacity: number(constraint, ["capacity"], Math.max(onHand, 1)),
+      capacity: Math.max(onHand, 1),
       lastCounted: latestCount ?? today,
       backendStatus: statuses[0] ?? "normal",
       daysSupply: optionalNumber(first, ["days_supply"]),
@@ -595,7 +595,21 @@ export function adaptBootstrap(
     : records(safeResponse.menu);
   const recipeRows = records(safeResponse.recipes);
   const recipes = recipeLinesFrom(recipeRows, productRows);
-  const inventory = normalizeInventory(safeResponse, today);
+  const safetyByIngredient = new Map(
+    base.inventoryConstraints
+      .filter((item) => item.ingredientId && item.constraintType === "safety_stock")
+      .map((item) => [
+        item.ingredientId,
+        Number.isFinite(Number(item.value)) ? Number(item.value) : null,
+      ]),
+  );
+  const inventory = normalizeInventory(safeResponse, today).map((item) => ({
+    ...item,
+    safetyStock:
+      item.ingredientId && safetyByIngredient.has(item.ingredientId)
+        ? safetyByIngredient.get(item.ingredientId) ?? null
+        : null,
+  }));
   const ingredients = mergeRecipeIngredients(
     normalizeIngredients(safeResponse),
     inventory,
@@ -613,14 +627,25 @@ export function adaptBootstrap(
     purchaseHistory: [],
     supplierConstraints: records(safeResponse.supplier_constraints).map(
       (row) => ({
+        constraintId: text(row, ["constraint_id"]) || undefined,
+        storeId: text(row, ["store_id"]) || safeResponse.store.store_id,
+        supplierId: text(row, ["supplier_id"]) || undefined,
+        ingredientId: text(row, ["ingredient_id"]) || undefined,
         ingredient: text(row, ["ingredient", "ingredient_name"]),
         supplier: text(row, ["supplier", "supplier_name"]),
         unitCost: number(row, ["unit_cost"]),
         moq: number(row, ["moq"]),
         packSize: number(row, ["pack_size"]),
         leadTimeDays: number(row, ["lead_time_days"]),
+        orderUnit: text(row, ["order_unit"]) || undefined,
+        baseUnit: text(row, ["base_unit"]) || undefined,
+        version: optionalNumber(row, ["version"]) ?? undefined,
+        active: row.active !== false,
+        effectiveDate: text(row, ["effective_date"]) || null,
+        endDate: text(row, ["end_date"]) || null,
       }),
     ),
+    inventoryConstraints: base.inventoryConstraints,
     businessConstraints: Object.keys(settings).length ? [settings] : [],
     validationSummary: {},
     ingestionMetadata: { source: "bootstrap" },
@@ -756,6 +781,11 @@ function normalizeRecommendations(
     const statusKey =
       inventoryStatus(row.status) ?? source?.backendStatus ?? "missing";
     const orderQty = number(row, ["order_quantity", "order_qty"]);
+    const trace = isRecord(row.constraint_trace) ? row.constraint_trace : {};
+    const configuredSafetyStock =
+      optionalNumber(trace, ["configured_safety_stock"]) ??
+      optionalNumber(row, ["configured_safety_stock", "safety_stock"]);
+    const fallbackPolicy = text(trace, ["fallback_policy"]) || null;
     return {
       recommendationId:
         text(row, ["recommendation_id"]) || undefined,
@@ -778,9 +808,11 @@ function normalizeRecommendations(
       forecastDemand: number(row, ["forecast_demand"]),
       safetyStock: number(
         row,
-        ["safety_stock"],
-        source?.safetyStock ?? 0,
+        ["effective_safety_stock", "safety_stock"],
+        optionalNumber(trace, ["effective_safety_stock"]) ?? source?.safetyStock ?? 0,
       ),
+      configuredSafetyStock: configuredSafetyStock ?? null,
+      fallbackPolicy,
       inbound: number(row, ["inbound"], source?.inbound ?? 0),
       recommendedQty: number(row, [
         "raw_recommended_quantity",
@@ -879,7 +911,14 @@ export function adaptPlan(
       ),
     },
     warnings: Array.isArray(planResponse.warnings)
-      ? planResponse.warnings.map(String)
+      ? planResponse.warnings.map((warning) => {
+          const code = isRecord(warning) ? text(warning, ["code"]) : String(warning);
+          if (code === "SAFETY_STOCK_NOT_CONFIGURED") return "Chưa cấu hình tồn kho an toàn cho nguyên liệu này.";
+          if (code === "BUSINESS_CONSTRAINT_NOT_FOUND") return "Không tìm thấy cấu hình tồn kho phù hợp.";
+          if (code === "BUSINESS_CONSTRAINT_AMBIGUOUS") return "Có nhiều cấu hình cùng hiệu lực.";
+          if (code === "BUSINESS_CONSTRAINT_UNIT_INVALID" || code === "SAFETY_STOCK_UNIT_CONVERSION_FAILED") return "Đơn vị safety stock không thể quy đổi.";
+          return isRecord(warning) ? text(warning, ["message"], code) : code;
+        })
       : [],
   };
 }

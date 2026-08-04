@@ -477,8 +477,8 @@ export function enrichInventory(data: BootstrapData): EnrichedInventoryItem[] {
     if (!Number.isFinite(item.onHand) || !item.unit) statusKey = "missing";
     else if (item.onHand <= 0) statusKey = "stockout";
     else if (expiryDays <= 3 && item.expiringQty > 0) statusKey = "expiring";
-    else if (item.onHand < item.safetyStock + leadNeed) statusKey = "low";
-    else if (daysSupply > 21 && item.onHand > item.safetyStock * 2)
+    else if (item.onHand < (item.safetyStock ?? 0) + leadNeed) statusKey = "low";
+    else if (daysSupply > 21 && item.onHand > (item.safetyStock ?? 0) * 2)
       statusKey = "overstock";
 
     return {
@@ -533,7 +533,8 @@ export function buildPlan(
     .map((item) => {
       const forecast = forecasts[item.ingredient];
       const demand = forecast.totals[config.quantile];
-      const safetyStock = item.safetyStock * config.safetyMultiplier;
+      // The local demo planner mirrors the backend's explicit ZERO_WITH_WARNING fallback.
+      const safetyStock = (item.safetyStock ?? 0) * config.safetyMultiplier;
       const expiresWithinHorizon =
         daysBetween(data.today, item.expiryDate) <=
         data.settings.forecastHorizon;

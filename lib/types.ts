@@ -31,7 +31,7 @@ export interface InventoryItem {
   unitCost: number;
   expiryDate: string;
   expiringQty: number;
-  safetyStock: number;
+  safetyStock: number | null;
   inbound: number;
   supplier: string;
   leadTimeDays: number;
@@ -202,6 +202,7 @@ export interface BootstrapData {
   usageHistory: UsageHistoryRow[];
   purchaseHistory: PurchaseHistoryRow[];
   supplierConstraints: SupplierConstraintRow[];
+  inventoryConstraints: InventoryConstraint[];
   businessConstraints: Record<string, unknown>[];
   validationSummary: Record<string, unknown>;
   ingestionMetadata: Record<string, unknown>;
@@ -235,12 +236,61 @@ export interface PurchaseHistoryRow {
 }
 
 export interface SupplierConstraintRow {
+  constraintId?: string;
+  storeId?: string;
+  supplierId?: string;
+  ingredientId?: string;
   ingredient: string;
   supplier: string;
   unitCost: number;
   moq: number;
   packSize: number;
   leadTimeDays: number;
+  orderUnit?: string;
+  baseUnit?: string;
+  version?: number;
+  active?: boolean;
+  effectiveDate?: string | null;
+  endDate?: string | null;
+}
+
+export type InventoryConstraintType =
+  | "safety_stock"
+  | "maximum_stock"
+  | "minimum_stock"
+  | "shelf_life_target"
+  | "storage_capacity"
+  | "maximum_storage_volume"
+  | (string & {});
+
+export interface InventoryConstraint {
+  constraintId: string;
+  storeId: string;
+  ingredientId: string | null;
+  ingredientName?: string | null;
+  constraintType: InventoryConstraintType;
+  value: number | string;
+  unit: string | null;
+  effectiveDate: string | null;
+  endDate: string | null;
+  version: number;
+  active: boolean;
+}
+
+export interface QuantitySetting {
+  value: number;
+  unit: string | null;
+  constraintId: string;
+  effectiveDate: string | null;
+  version: number;
+}
+
+export interface ProcurementSettingsRow {
+  ingredientId: string;
+  ingredientName: string;
+  safetyStock: QuantitySetting | null;
+  maximumStock: QuantitySetting | null;
+  supplierTerms: SupplierConstraintRow[];
 }
 
 export interface ForecastPoint {
@@ -281,6 +331,8 @@ export interface Recommendation {
   usableStock: number;
   forecastDemand: number;
   safetyStock: number;
+  configuredSafetyStock?: number | null;
+  fallbackPolicy?: string | null;
   inbound: number;
   recommendedQty: number;
   orderQty: number;

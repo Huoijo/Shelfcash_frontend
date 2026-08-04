@@ -349,7 +349,9 @@ export function PlanView({
                 <span>
                   Nhu cầu {formatQuantity(item.forecastDemand, item.unit)} · tồn
                   dùng được {formatQuantity(item.usableStock, item.unit)} · tồn
-                  an toàn {formatQuantity(item.safetyStock, item.unit)}
+                  an toàn {item.configuredSafetyStock == null
+                    ? "Chưa cấu hình — planner tạm dùng 0"
+                    : formatQuantity(item.configuredSafetyStock, item.unit)}
                 </span>
                 <small>{item.reason}</small>
               </div>

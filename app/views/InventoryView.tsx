@@ -138,7 +138,7 @@ export function InventoryView({
                   {row.daysSupply >= 999 ? "—" : `${row.daysSupply.toFixed(1)} ngày`}
                 </td>
                 <td>{formatDate(row.expiryDate)}</td>
-                <td>{formatQuantity(row.safetyStock, row.unit)}</td>
+                <td>{row.safetyStock == null ? "Chưa cấu hình" : formatQuantity(row.safetyStock, row.unit)}</td>
                 <td>
                   <StatusPill status={row.statusKey} label={row.status} />
                 </td>
@@ -197,7 +197,7 @@ export function InventoryView({
                     {formatQuantity(item.averageDailyUsage, item.unit)}/ngày.
                   </li>
                   <li>
-                    Tồn an toàn {formatQuantity(item.safetyStock, item.unit)}.
+                    Tồn an toàn {item.safetyStock == null ? "chưa cấu hình" : formatQuantity(item.safetyStock, item.unit)}.
                   </li>
                   <li>Hàng đang về {formatQuantity(item.inbound, item.unit)}.</li>
                   <li>

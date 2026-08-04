@@ -8,6 +8,7 @@ import type {
   ImportCreateResponse,
   ImportStatusResponse,
   IngestionResult,
+  InventoryConstraint,
   MenuComponentDraft,
   MenuItemDraft,
   MenuListResponse,
@@ -289,6 +290,41 @@ export async function getSupplierConstraints(
   return request<unknown>(`${storePath(storeId)}/supplier-constraints`);
 }
 
+export async function getInventoryConstraints(input: {
+  storeId: string;
+  ingredientId?: string | null;
+  constraintType?: string | null;
+  asOfDate?: string | null;
+}): Promise<InventoryConstraint[]> {
+  const query = new URLSearchParams();
+  if (input.ingredientId?.trim()) query.set("ingredient_id", input.ingredientId.trim());
+  if (input.constraintType?.trim()) query.set("constraint_type", input.constraintType.trim());
+  if (input.asOfDate?.trim()) query.set("as_of_date", input.asOfDate.trim());
+  const response = await request<unknown>(
+    `${storePath(input.storeId)}/inventory-constraints${query.size ? `?${query}` : ""}`,
+  );
+  const source = Array.isArray(response)
+    ? response
+    : isRecord(response) && Array.isArray(response.items)
+      ? response.items
+      : isRecord(response) && Array.isArray(response.inventory_constraints)
+        ? response.inventory_constraints
+        : [];
+  return source.filter(isRecord).map((row) => ({
+    constraintId: String(row.constraint_id ?? ""),
+    storeId: String(row.store_id ?? input.storeId),
+    ingredientId: row.ingredient_id == null ? null : String(row.ingredient_id),
+    ingredientName: row.ingredient_name == null ? null : String(row.ingredient_name),
+    constraintType: String(row.constraint_type ?? ""),
+    value: typeof row.value === "number" || typeof row.value === "string" ? row.value : "",
+    unit: row.unit == null ? null : String(row.unit),
+    effectiveDate: row.effective_date == null ? null : String(row.effective_date),
+    endDate: row.end_date == null ? null : String(row.end_date),
+    version: Number(row.version ?? 0),
+    active: row.active !== false,
+  }));
+}
+
 export async function saveRecipe(input: {
   storeId: string;
   productId: string;
@@ -319,12 +355,28 @@ export async function saveSupplierConstraint(input: {
   constraintId?: string;
   payload: ApiRecord;
 }): Promise<ApiRecord> {
+  const source = input.payload;
+  const payload: ApiRecord = {
+    supplier_id: source.supplier_id,
+    ingredient_id: source.ingredient_id,
+    unit_cost: source.unit_cost,
+    moq: source.moq,
+    pack_size: source.pack_size,
+    order_unit: source.order_unit,
+    base_unit: source.base_unit,
+    lead_time_days: source.lead_time_days,
+    effective_date: source.effective_date,
+  };
+  if (source.version !== undefined) payload.version = source.version;
+  for (const key of Object.keys(payload)) {
+    if (payload[key] === undefined) delete payload[key];
+  }
   const path = input.constraintId
     ? `${storePath(input.storeId)}/supplier-constraints/${encodeURIComponent(input.constraintId)}`
     : `${storePath(input.storeId)}/supplier-constraints`;
   return request<ApiRecord>(
     path,
-    jsonRequest(input.constraintId ? "PUT" : "POST", input.payload),
+    jsonRequest(input.constraintId ? "PUT" : "POST", payload),
   );
 }
 

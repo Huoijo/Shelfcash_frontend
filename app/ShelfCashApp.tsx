@@ -28,6 +28,7 @@ import {
   getBootstrap,
   getConnectionHealth,
   getForecastResult,
+  getInventoryConstraints,
   getPlanResult,
   getPurchaseOrders,
   saveAliases as saveAliasesApi,
@@ -52,7 +53,8 @@ import type {
   CalendarDay,
   ImportLog,
   IngestionResult,
-  InventoryItem,
+  InventoryConstraint,
+  SupplierConstraintRow,
   PlanResponse,
   Product,
   PurchaseOrder,
@@ -95,6 +97,14 @@ const navigation: Array<{
 
 function errorMessage(caught: unknown, fallback: string): string {
   if (caught instanceof ShelfCashApiError) {
+    const messages: Record<string, string> = {
+      SAFETY_STOCK_NOT_CONFIGURED: "Chưa cấu hình tồn kho an toàn cho nguyên liệu này.",
+      BUSINESS_CONSTRAINT_NOT_FOUND: "Không tìm thấy cấu hình tồn kho phù hợp.",
+      BUSINESS_CONSTRAINT_AMBIGUOUS: "Có nhiều cấu hình cùng hiệu lực.",
+      BUSINESS_CONSTRAINT_UNIT_INVALID: "Đơn vị safety stock không hợp lệ.",
+      SAFETY_STOCK_UNIT_CONVERSION_FAILED: "Đơn vị safety stock không thể quy đổi.",
+    };
+    if (messages[caught.code]) return messages[caught.code];
     return `${caught.message}${caught.code ? ` (${caught.code})` : ""}`;
   }
   return caught instanceof Error ? caught.message : fallback;
@@ -211,6 +221,11 @@ export function ShelfCashApp({
     tone: "success" | "error";
   } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [inventoryConstraints, setInventoryConstraints] = useState<InventoryConstraint[]>(
+    initialData.inventoryConstraints,
+  );
+  const [inventoryConstraintsError, setInventoryConstraintsError] = useState<string | null>(null);
+  const [inventoryConstraintsLoading, setInventoryConstraintsLoading] = useState(false);
   const operationSequence = useRef(0);
 
   const reloadFromBackend = useCallback(
@@ -223,8 +238,41 @@ export function ShelfCashApp({
       const operation = ++operationSequence.current;
       setRefreshing(true);
       try {
-        const bootstrap = await getBootstrap(storeId);
+        setInventoryConstraintsLoading(true);
+        const [bootstrap, inventoryResult] = await Promise.all([
+          getBootstrap(storeId),
+          getInventoryConstraints({ storeId, asOfDate: baseData.today }).then(
+            (value) => ({ value, error: null as string | null }),
+            (caught) => ({
+              value: null,
+              error: errorMessage(caught, "Không tải được ngưỡng tồn kho."),
+            }),
+          ),
+        ]);
         const nextData = adaptBootstrap(baseData, bootstrap);
+        if (inventoryResult.value) {
+          nextData.inventoryConstraints = inventoryResult.value;
+          const safetyByIngredient = new Map(
+            inventoryResult.value
+              .filter((item) => item.ingredientId && item.constraintType === "safety_stock")
+              .map((item) => [
+                item.ingredientId,
+                Number.isFinite(Number(item.value)) ? Number(item.value) : null,
+              ]),
+          );
+          nextData.inventory = nextData.inventory.map((item) => ({
+            ...item,
+            safetyStock: item.ingredientId && safetyByIngredient.has(item.ingredientId)
+              ? safetyByIngredient.get(item.ingredientId) ?? null
+              : null,
+          }));
+          setInventoryConstraints(inventoryResult.value);
+        } else {
+          nextData.inventoryConstraints = [];
+          nextData.inventory = nextData.inventory.map((item) => ({ ...item, safetyStock: null }));
+          setInventoryConstraints([]);
+        }
+        setInventoryConstraintsError(inventoryResult.error);
         if (operation !== operationSequence.current) return false;
         setData(nextData);
         setPlan(emptyBackendPlan(nextData, requestedStrategy));
@@ -281,7 +329,10 @@ export function ShelfCashApp({
         }
         return false;
       } finally {
-        if (operation === operationSequence.current) setRefreshing(false);
+        if (operation === operationSequence.current) {
+          setRefreshing(false);
+          setInventoryConstraintsLoading(false);
+        }
       }
     },
     [],
@@ -490,14 +541,14 @@ export function ShelfCashApp({
   }
 
   async function saveInventory(
-    inventory: InventoryItem[],
+    inventory: SupplierConstraintRow[],
   ): Promise<boolean> {
     try {
       await Promise.all(
         inventory.map((item) => {
-          if (!item.ingredientId) {
+          if (!item.ingredientId || !item.supplierId) {
             throw new Error(
-              `Bootstrap chưa trả ingredient_id cho ${item.ingredient}.`,
+              `Bootstrap chưa trả ingredient_id/supplier_id cho ${item.ingredient}.`,
             );
           }
           return saveSupplierConstraint({
@@ -505,18 +556,16 @@ export function ShelfCashApp({
             constraintId: item.constraintId,
             payload: {
               ingredient_id: item.ingredientId,
-              ...(item.supplierId
-                ? { supplier_id: item.supplierId }
-                : { supplier: item.supplier }),
+              supplier_id: item.supplierId,
               unit_cost: item.unitCost,
               moq: item.moq,
               pack_size: item.packSize,
               lead_time_days: item.leadTimeDays,
-              safety_stock: item.safetyStock,
-              capacity: item.capacity,
-              unit: item.unit,
-              ...(item.constraintVersion !== undefined
-                ? { version: item.constraintVersion }
+              order_unit: item.orderUnit,
+              base_unit: item.baseUnit,
+              effective_date: item.effectiveDate,
+              ...(item.version !== undefined
+                ? { version: item.version }
                 : {}),
             },
           });
@@ -732,6 +781,9 @@ export function ShelfCashApp({
             onSaveInventory={saveInventory}
             onSaveAliases={saveAliases}
             onSaveContext={saveContext}
+            inventoryConstraints={inventoryConstraints}
+            inventoryConstraintsError={inventoryConstraintsError}
+            inventoryConstraintsLoading={inventoryConstraintsLoading}
           />
         );
     }
