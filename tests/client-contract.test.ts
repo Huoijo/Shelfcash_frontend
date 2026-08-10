@@ -5,6 +5,7 @@ import {
   confirmImport,
   confirmPurchaseOrder,
   createForecastRun,
+  createDecisionRun,
   createIdempotencyKey,
   createIngredientDemand,
   createInventoryAdjustment,
@@ -14,6 +15,8 @@ import {
   createProcurementPlans,
   createPurchaseOrders,
   getBootstrap,
+  getDecisionRun,
+  getDecisionExplanation,
   getIngredientDemand,
   getInventoryMovements,
   getMenu,
@@ -37,6 +40,54 @@ import {
   toNumber,
   toTimezoneAwareIso,
 } from "../lib/api-contract.ts";
+
+test("decision runs use the canonical store-scoped create and global result endpoints", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
+  globalThis.fetch = async (input, init) => {
+    calls.push({
+      url: String(input),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {},
+    });
+    return Response.json({ decision_run_id: "decision-1", status: "completed" });
+  };
+  try {
+    await createDecisionRun({
+      storeId: "STORE_001",
+      request: {
+        forecast_run_id: "forecast-1",
+        as_of_date: "2026-08-10",
+        horizon_days: 7,
+        engine_mode: "deterministic",
+        include_open_purchase_orders: true,
+        budget_override: 5_000_000,
+        scenario_count: 100,
+        random_seed: 42,
+      },
+    });
+    await getDecisionRun("decision-1");
+    await getDecisionExplanation("decision-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(calls.map(({ url, method }) => ({ url, method })), [
+    { url: "/api/shelfcash/api/v1/stores/STORE_001/decision-runs", method: "POST" },
+    { url: "/api/shelfcash/api/v1/decision-runs/decision-1", method: "GET" },
+    { url: "/api/shelfcash/api/v1/decision-runs/decision-1/explanation", method: "POST" },
+  ]);
+  assert.deepEqual(calls[0]?.body, {
+    forecast_run_id: "forecast-1",
+    as_of_date: "2026-08-10",
+    horizon_days: 7,
+    engine_mode: "deterministic",
+    include_open_purchase_orders: true,
+    budget_override: 5_000_000,
+    scenario_count: 100,
+    random_seed: 42,
+  });
+  assert.deepEqual(calls[2]?.body, { language: "vi", detail_level: "simple" });
+});
 
 test("confirm import preserves explicit unknown skips and nullable columns", async () => {
   const originalFetch = globalThis.fetch;

@@ -6,15 +6,15 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "install:ci": "bash scripts/install-ci.sh",
+    "install:ci": "node scripts/sites.mjs install",
     "dev": "vite",
-    "build": "bash scripts/build-verified.sh",
+    "build": "node scripts/sites.mjs build",
     "start": "vinext start",
     "test": "npm run test:logic && npm run build && node --test tests/rendered-html.test.mjs",
     "test:logic": "node --import tsx --test tests/*.test.ts tests/*.test.tsx",
-    "validate:artifact": "bash scripts/validate-artifact.sh",
-    "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"
+    "validate:artifact": "node scripts/sites.mjs validate",
+    "lint": "node scripts/sites.mjs run eslint . --ignore-pattern dist --ignore-pattern .next",
+    "db:generate": "node scripts/sites.mjs run drizzle-kit generate"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",

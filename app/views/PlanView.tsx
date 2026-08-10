@@ -20,12 +20,14 @@ import type {
   ForecastResult,
   IngredientDemandResult,
   PlanResponse,
+  DecisionPackage,
   PlanningScenario,
   PurchaseOrder,
   Recommendation,
   Strategy,
 } from "../../lib/types";
 import { ForecastChart } from "../components/ForecastChart";
+import { DecisionCenter } from "../components/DecisionCenter";
 import {
   Button,
   Details,
@@ -215,6 +217,7 @@ function ScenarioCard({
 export function PlanView({
   data,
   plan,
+  decision,
   strategy,
   initialIngredient,
   draftOrders,
@@ -228,6 +231,7 @@ export function PlanView({
 }: {
   data: BootstrapData;
   plan: PlanResponse;
+  decision: DecisionPackage | null;
   strategy: Strategy;
   initialIngredient?: string;
   draftOrders: PurchaseOrder[];
@@ -579,6 +583,24 @@ export function PlanView({
     } finally {
       setActionBusy("");
     }
+  }
+
+  if (decision) {
+    const isRunning = runBusy || decision.status === "running" || decision.status === "queued";
+    return (
+      <>
+        <PageHeader
+          title="Kế hoạch nhập hàng"
+          subtitle="Khuyến nghị nhập hàng dựa trên kế hoạch đã được tính toán."
+          action={<Button variant="primary" busy={isRunning} onClick={() => void runPlanning()} aria-label="Chạy lại kế hoạch nhập hàng"><Play size={16} />Chạy lại kế hoạch</Button>}
+        />
+        <div className="plan-controls">
+          <label className="field"><span>Số ngày dự báo (1–7)</span><input type="number" min="1" max="7" step="1" value={horizonDays} onChange={(event) => setHorizonDays(clampHorizon(Number(event.target.value)))} /></label>
+          <div className="plan-status"><span>Trạng thái</span><strong>{isRunning ? "Đang lập kế hoạch..." : decision.status === "completed" ? "Hoàn tất" : "Cần kiểm tra"}</strong></div>
+        </div>
+        <DecisionCenter key={decision.decision_run_id} decision={decision} running={isRunning} />
+      </>
+    );
   }
 
   return (

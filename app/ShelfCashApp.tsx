@@ -29,8 +29,10 @@ import {
   createInventoryAdjustment,
   createInventoryCount,
   confirmPurchaseOrder,
+  createDecisionRun,
   getBootstrap,
   getConnectionHealth,
+  getDecisionRun,
   getInventory,
   getInventoryConstraints,
   getPurchaseOrder,
@@ -45,6 +47,7 @@ import {
   ShelfCashApiError,
   trainForecastModel,
   updatePurchaseOrder,
+  waitForDecisionRun,
 } from "../lib/shelfcash-client";
 import {
   createDraftOrdersFromLegacyPlan,
@@ -72,6 +75,7 @@ import type {
   IngestionResult,
   InventoryConstraint,
   PlanResponse,
+  DecisionPackage,
   Product,
   PurchaseOrder,
   RecipeLine,
@@ -178,6 +182,14 @@ function AppNavigation({
 function errorMessage(caught: unknown, fallback: string): string {
   if (caught instanceof ShelfCashApiError) {
     const messages: Record<string, string> = {
+      ENDPOINT_NOT_ALLOWED: "Frontend đang gọi một API không được backend hỗ trợ.",
+      MISSING_FORECAST: "Chưa có dự báo phù hợp để lập kế hoạch.",
+      MISSING_RECIPE: "Một số sản phẩm chưa có công thức hiệu lực.",
+      INVALID_RECIPE_UNIT: "Đơn vị trong công thức không hợp lệ.",
+      INVENTORY_STATE_INCOMPLETE: "Dữ liệu tồn kho chưa đủ để lập kế hoạch.",
+      NO_VALID_SUPPLIER: "Chưa có nhà cung cấp phù hợp cho một số nguyên liệu.",
+      OPTIMIZATION_INFEASIBLE: "Không tìm được kế hoạch nhập hàng thỏa các ràng buộc hiện tại.",
+      CRITIC_REJECTED_ALL_PLANS: "Không có phương án đủ điều kiện để khuyến nghị.",
       MODEL_NOT_READY: "Mô hình dự báo chưa sẵn sàng. Hãy thiết lập trong phần quản trị rồi chạy lại.",
       RECIPE_NOT_FOUND: "Một sản phẩm chưa có công thức có hiệu lực.",
       RECIPE_NOT_EFFECTIVE: "Một công thức không có hiệu lực trong ngày dự báo.",
@@ -303,6 +315,16 @@ export function ShelfCashApp({
   );
   const [data, setData] = useState(initialData);
   const [plan, setPlan] = useState(initialPlan);
+  const [decision, setDecision] = useState<DecisionPackage | null>(null);
+  useEffect(() => {
+    const storeId = data.settings.storeId;
+    if (!storeId) return;
+    const decisionRunId = window.localStorage.getItem(`shelfcash:decision-run:${storeId}`);
+    if (!decisionRunId) return;
+    void getDecisionRun(decisionRunId).then(setDecision, () => undefined);
+  // The persisted package is a convenience; a failed reload must not block the app.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [strategy, setStrategy] = useState<Strategy>(
     strategyFromApi(initialData.settings.defaultStrategy),
   );
@@ -849,6 +871,59 @@ export function ShelfCashApp({
       throw new Error("Hãy cấu hình hoặc import một store trước.");
     }
     const operation = ++operationSequence.current;
+    const forecastRunId = plan.forecastRunId || data.settings.latestForecastRunId;
+    if (!forecastRunId || forecastRunId === "FORECAST_RUN_ID") {
+      throw new Error("Chưa có lượt dự báo hợp lệ để lập kế hoạch nhập hàng.");
+    }
+    setRefreshing(true);
+    setDecision((current) => current
+      ? { ...current, status: "running" }
+      : { decision_run_id: "pending", status: "running", horizon_days: horizonDays });
+    try {
+      const created = await createDecisionRun({
+        storeId: data.settings.storeId,
+        request: {
+          forecast_run_id: forecastRunId,
+          as_of_date: data.today,
+          horizon_days: horizonDays,
+          engine_mode: "deterministic",
+          include_open_purchase_orders: true,
+          budget_override: 5_000_000,
+          scenario_count: 100,
+          random_seed: 42,
+        },
+      });
+      if (operation !== operationSequence.current) return;
+      const fetched = await getDecisionRun(created.decision_run_id);
+      const resolved = ["queued", "running"].includes(fetched.status)
+        ? await waitForDecisionRun(created.decision_run_id, fetched)
+        : fetched;
+      if (operation === operationSequence.current) {
+        setDecision(resolved);
+        if (resolved.decision_run_id) {
+          window.localStorage.setItem(
+            `shelfcash:decision-run:${data.settings.storeId}`,
+            resolved.decision_run_id,
+          );
+        }
+      }
+    } catch (caught) {
+      if (operation === operationSequence.current) {
+        setDecision({
+          decision_run_id: "unavailable",
+          status: "failed",
+          horizon_days: horizonDays,
+          failure_code: caught instanceof ShelfCashApiError ? caught.code : "NETWORK_ERROR",
+          failure_message: retryableTransportFailure(caught)
+            ? "Không thể kết nối máy chủ. Dữ liệu đang hiển thị có thể chưa phải bản mới nhất."
+            : errorMessage(caught, "Không thể lập kế hoạch vì thiếu dữ liệu hoặc ràng buộc."),
+        });
+      }
+      throw caught;
+    } finally {
+      if (operation === operationSequence.current) setRefreshing(false);
+    }
+    return;
     const fingerprint = [
       data.settings.storeId,
       data.today,
@@ -1383,6 +1458,7 @@ export function ShelfCashApp({
           <PlanView
             data={data}
             plan={plan}
+            decision={decision}
             strategy={strategy}
             initialIngredient={planIngredient}
             draftOrders={draftOrders}

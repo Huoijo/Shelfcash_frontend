@@ -32,9 +32,9 @@ việc người dùng cần xử lý.
 
 ## Chạy trên máy
 
-```bash
+```powershell
 npm install
-cp .env.example .env.local
+Copy-Item .env.example .env.local
 npm run dev
 ```
 
@@ -48,6 +48,10 @@ SHELFCASH_STORE_ID=
 
 Sau đó mở địa chỉ được hiển thị trong terminal. Node.js 22 LTS trở lên được
 khuyến nghị.
+
+Trên Windows PowerShell có thể chặn file `npm.ps1` theo Execution Policy. Khi đó
+dùng `npm.cmd install`, `npm.cmd run dev` và các lệnh `npm.cmd run ...` tương ứng;
+không cần thay đổi Execution Policy của máy.
 
 ## Kết nối ShelfCash backend
 

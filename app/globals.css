@@ -2537,6 +2537,70 @@ td > small {
   margin-bottom: 23px;
 }
 
+.plan-status {
+  align-self: center;
+  border-left: 2px solid var(--pine);
+  display: grid;
+  gap: 4px;
+  padding-left: 13px;
+}
+
+.plan-status span,
+.eyebrow {
+  color: var(--muted);
+  font-size: var(--font-caption);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.decision-center {
+  display: grid;
+  gap: 26px;
+}
+
+.decision-summary {
+  background: rgba(236, 244, 237, .7);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--pine);
+  border-radius: 11px;
+  padding: 20px;
+}
+
+.decision-summary h2 { margin: 6px 0; }
+
+.recommendation-badge {
+  background: var(--pine);
+  border-radius: 999px;
+  color: #fff;
+  display: inline-block;
+  font-size: var(--font-caption);
+  font-weight: 700;
+  margin-bottom: 16px;
+  padding: 4px 9px;
+}
+
+.strategy-choice {
+  background: rgba(251, 251, 248, .68);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: inherit;
+  cursor: pointer;
+  padding: 14px;
+  text-align: left;
+}
+
+.strategy-choice.active { border: 2px solid var(--pine); }
+.strategy-choice > span { color: var(--pine); display: block; font-size: var(--font-caption); margin-top: 4px; }
+.strategy-metrics { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
+.strategy-metrics .stat-card { min-height: 0; padding: 10px; }
+.strategy-metrics .stat-card strong { font-size: var(--font-control); }
+.decision-list { margin: 6px 0 14px; padding-left: 20px; }
+.decision-explanation p { margin-top: 0; }
+.technical-list { display: grid; gap: 8px; margin: 0; }
+.technical-list div { display: grid; gap: 8px; grid-template-columns: minmax(150px, 1fr) 2fr; }
+.technical-list dt { color: var(--muted); text-transform: capitalize; }
+.technical-list dd { margin: 0; }
+
 .segmented {
   border: 0;
   margin: 0;
@@ -3210,6 +3274,13 @@ td > small {
   }
 
   .menu-derived-price {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .strategy-metrics,
+  .technical-list div {
     grid-template-columns: 1fr;
   }
 }

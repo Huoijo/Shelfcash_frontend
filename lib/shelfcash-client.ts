@@ -12,6 +12,9 @@ import type {
   MappingSuggestion,
   PlanRunResponse,
   PlanRunResultResponse,
+  DecisionExplanation,
+  DecisionPackage,
+  CreateDecisionRunRequest,
   SheetProfile,
   StoreBootstrapResponse,
 } from "./types";
@@ -230,6 +233,63 @@ function jsonRequest(
 }
 
 const request = requestShelfCash;
+
+function decisionPath(decisionRunId: string): string {
+  return `/api/v1/decision-runs/${encodeURIComponent(decisionRunId)}`;
+}
+
+export async function createDecisionRun(input: {
+  storeId: string;
+  request: CreateDecisionRunRequest;
+  signal?: AbortSignal;
+}): Promise<DecisionPackage> {
+  return request<DecisionPackage>(
+    `${storePath(input.storeId)}/decision-runs`,
+    jsonRequest("POST", input.request, {
+      signal: input.signal,
+      timeoutMs: 120_000,
+    }),
+  );
+}
+
+export async function getDecisionRun(
+  decisionRunId: string,
+  options: ShelfCashRequestOptions = {},
+): Promise<DecisionPackage> {
+  return request<DecisionPackage>(decisionPath(decisionRunId), options);
+}
+
+export async function getDecisionExplanation(
+  decisionRunId: string,
+): Promise<DecisionExplanation> {
+  return request<DecisionExplanation>(
+    `${decisionPath(decisionRunId)}/explanation`,
+    jsonRequest("POST", { language: "vi", detail_level: "simple" }),
+  );
+}
+
+export async function getDecisionWhatIf(decisionRunId: string): Promise<DecisionPackage> {
+  return request<DecisionPackage>(
+    `${decisionPath(decisionRunId)}/what-if`,
+    jsonRequest("POST", {}),
+  );
+}
+
+export async function waitForDecisionRun(
+  decisionRunId: string,
+  initial?: DecisionPackage,
+): Promise<DecisionPackage> {
+  let result = initial;
+  const startedAt = Date.now();
+  while (!result || ["queued", "running"].includes(result.status)) {
+    if (Date.now() - startedAt > 90_000) {
+      throw new ShelfCashApiError({ code: "JOB_TIMEOUT", message: "Lập kế hoạch đang mất nhiều thời gian hơn dự kiến.", details: {}, request_id: null }, 408);
+    }
+    await delay(2_000);
+    result = await getDecisionRun(decisionRunId, { timeoutMs: 30_000 });
+  }
+  return result;
+}
 
 function storePath(storeId: string): string {
   return `/api/v1/stores/${encodeURIComponent(storeId)}`;

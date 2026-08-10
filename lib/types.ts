@@ -466,6 +466,117 @@ export interface PlanResponse {
   warnings?: string[];
 }
 
+/** Persisted, user-facing output of the Decision Package API. */
+export type DecisionRunStatus = "queued" | "running" | "completed" | "failed" | "blocked";
+export type DecisionStrategyKey = "lean" | "balanced" | "protected" | string;
+
+export interface CreateDecisionRunRequest {
+  forecast_run_id: string;
+  as_of_date: string;
+  horizon_days: number;
+  engine_mode: "legacy" | "deterministic" | "stochastic";
+  include_open_purchase_orders: boolean;
+  budget_override?: number | null;
+  scenario_count?: number;
+  random_seed?: number;
+}
+
+export interface DecisionBusinessMetrics {
+  projected_purchase_cost?: number | null;
+  stockout_probability?: number | null;
+  expected_fill_rate?: number | null;
+  expected_waste_quantity?: number | null;
+}
+
+export interface DecisionPlanItem {
+  ingredient_id?: string;
+  ingredient_name?: string;
+  ingredient?: string;
+  quantity?: number | null;
+  order_quantity?: number | null;
+  unit?: string;
+  supplier?: string | null;
+  supplier_name?: string | null;
+  supplier_id?: string | null;
+  order_date?: string | null;
+  expected_arrival_date?: string | null;
+  estimated_cost?: number | null;
+}
+
+export interface DecisionStrategy {
+  strategy: DecisionStrategyKey;
+  business_metrics?: DecisionBusinessMetrics | null;
+  recommended_plan?: { items?: DecisionPlanItem[] | null; valid?: boolean | null } | null;
+  feasible?: boolean | null;
+  warnings?: string[] | null;
+  violations?: string[] | null;
+}
+
+export interface DecisionInventoryRisk {
+  ingredient_id?: string;
+  ingredient_name?: string;
+  ingredient?: string;
+  stockout_probability?: number | null;
+  expected_shortage?: number | null;
+  expected_waste?: number | null;
+  days_of_supply?: number | null;
+  risk_date?: string | null;
+  risk_category?: string | null;
+  unit?: string;
+}
+
+export interface DecisionCriticFinding {
+  status?: "pass" | "warning" | "fail" | string;
+  code?: string;
+  message?: string;
+  severity?: "critical" | "warning" | "info" | string;
+}
+
+export interface DecisionTechnicalMetrics {
+  engine_mode?: string;
+  baseline_engine?: string;
+  optimizer_type?: string;
+  scenario_method?: string;
+  scenario_count?: number | null;
+  stochastic_saa_enabled?: boolean | null;
+  random_seed?: number | null;
+  cvar?: number | null;
+  core_version?: string;
+}
+
+export interface DecisionStressResult {
+  name?: string;
+  label?: string;
+  description?: string;
+  business_metrics?: DecisionBusinessMetrics | null;
+}
+
+export interface DecisionPackage {
+  decision_run_id: string;
+  status: DecisionRunStatus;
+  horizon_days?: number | null;
+  recommended_strategy?: DecisionStrategyKey | null;
+  business_metrics?: DecisionBusinessMetrics | null;
+  recommended_plan?: { items?: DecisionPlanItem[] | null; valid?: boolean | null } | null;
+  strategies?: DecisionStrategy[] | null;
+  inventory_risk?: DecisionInventoryRisk[] | null;
+  critic?: { findings?: DecisionCriticFinding[] | null; status?: string } | null;
+  technical_metrics?: DecisionTechnicalMetrics | null;
+  stress_results?: DecisionStressResult[] | null;
+  warnings?: string[] | null;
+  failure_code?: string | null;
+  failure_message?: string | null;
+  request_id?: string | null;
+}
+
+export interface DecisionExplanation {
+  summary?: string;
+  why_this_plan?: string[];
+  main_risks?: string[];
+  tradeoffs?: string[];
+  important_assumptions?: string[];
+}
+
 export interface PurchaseOrder {
   poId: string;
   supplierId?: string;
