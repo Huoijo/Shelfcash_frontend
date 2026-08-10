@@ -119,7 +119,7 @@ test("TodayView renders real lot alerts and the backend planning state", () => {
 
   assert.match(html, /Bột cacao: 2 kg đã hết hạn/);
   assert.match(html, /Bột cacao: 2 kg gần hết hạn/);
-  assert.match(html, /Kế hoạch đang bị chặn/);
+  assert.match(html, /Chưa thể lập kế hoạch/);
   assert.match(html, /Mô hình của cửa hàng chưa sẵn sàng/);
   assert.doesNotMatch(html, /Kế hoạch nhập dự kiến/);
 });
@@ -152,7 +152,10 @@ test("ForecastChart identifies products and shades persisted interval bounds", (
     "utf8",
   );
 
-  assert.match(html, /aria-label="Dự báo Cacao đá"/);
+  assert.match(
+    html,
+    /aria-label="Biểu đồ số liệu thực tế và dự báo cho Cacao đá, đơn vị ly"/,
+  );
   assert.match(html, /data-forecast-series-id="product-cocoa"/);
   assert.match(source, /dataKey="confidenceRange"/);
   assert.match(source, /point\.intervalLower/);

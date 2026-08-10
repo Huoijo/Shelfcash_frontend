@@ -3,6 +3,7 @@
 import {
   AlertCircle,
   CheckCircle2,
+  CircleHelp,
   LoaderCircle,
   X,
 } from "lucide-react";
@@ -39,20 +40,22 @@ export function PageHeader({
   action,
 }: {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   context?: string;
   action?: ReactNode;
 }) {
   return (
     <header className="page-header">
-      <div>
+      <div className="page-header-copy">
         <h1>{title}</h1>
-        <p>{subtitle}</p>
+        {subtitle ? <p>{subtitle}</p> : null}
       </div>
-      <div className="page-header-side">
-        {action}
-        {context ? <span>{context}</span> : null}
-      </div>
+      {action || context ? (
+        <div className="page-header-side">
+          {action}
+          {context ? <span className="page-header-context">{context}</span> : null}
+        </div>
+      ) : null}
     </header>
   );
 }
@@ -77,6 +80,84 @@ export function SectionHeading({
   );
 }
 
+export type StatCardStatus =
+  | "neutral"
+  | "success"
+  | "warning"
+  | "danger"
+  | "info";
+
+export type StatCardProps = {
+  label: string;
+  value: ReactNode;
+  description?: string;
+  status?: StatCardStatus;
+  icon?: ReactNode;
+  loading?: boolean;
+  className?: string;
+  children?: ReactNode;
+};
+
+export function StatCard({
+  label,
+  value,
+  description,
+  status = "neutral",
+  icon,
+  loading = false,
+  className,
+  children,
+}: StatCardProps) {
+  return (
+    <article
+      className={cn("stat-card", `stat-card-${status}`, className)}
+      aria-busy={loading || undefined}
+    >
+      <div className="stat-card-label">
+        <span>{label}</span>
+        {icon ? (
+          <span className="stat-card-icon">{icon}</span>
+        ) : (
+          <i aria-hidden="true" />
+        )}
+      </div>
+      <strong>
+        {loading ? (
+          <span className="stat-card-skeleton" aria-label="Đang tải" />
+        ) : value == null ? (
+          "—"
+        ) : (
+          value
+        )}
+      </strong>
+      {description ? <small>{description}</small> : null}
+      {children}
+    </article>
+  );
+}
+
+export function SummaryGrid({
+  children,
+  columns,
+  className,
+}: {
+  children: ReactNode;
+  columns?: 2 | 3 | 4 | 5;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "summary-grid",
+        columns && `summary-grid-${columns}`,
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function Metric({
   label,
   value,
@@ -88,15 +169,21 @@ export function Metric({
   note: string;
   tone?: "pine" | "red" | "amber" | "blue";
 }) {
+  const status: StatCardStatus =
+    tone === "red"
+      ? "danger"
+      : tone === "amber"
+        ? "warning"
+        : tone === "blue"
+          ? "info"
+          : "neutral";
   return (
-    <article className={`metric metric-${tone}`}>
-      <div className="metric-label">
-        <span>{label}</span>
-        <i />
-      </div>
-      <strong>{value}</strong>
-      <small>{note}</small>
-    </article>
+    <StatCard
+      label={label}
+      value={value}
+      description={note}
+      status={status}
+    />
   );
 }
 
@@ -140,16 +227,16 @@ export function AlertRow({
   onClick,
 }: {
   title: string;
-  body: string;
+  body?: ReactNode;
   tone?: "pine" | "red" | "amber" | "blue";
   onClick?: () => void;
 }) {
   const content = (
     <>
-      <i className={`alert-accent alert-${tone}`} />
+      <i aria-hidden="true" className={`alert-accent alert-${tone}`} />
       <span>
         <strong>{title}</strong>
-        <small>{body}</small>
+        {body ? <small>{body}</small> : null}
       </span>
     </>
   );
@@ -161,6 +248,23 @@ export function AlertRow({
     );
   }
   return <div className="alert-row">{content}</div>;
+}
+
+export function InfoTip({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className="info-tip">
+      <summary aria-label={label}>
+        <CircleHelp aria-hidden="true" size={17} />
+      </summary>
+      <span role="tooltip">{children}</span>
+    </details>
+  );
 }
 
 export function Confidence({

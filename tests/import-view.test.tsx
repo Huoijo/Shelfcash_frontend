@@ -47,7 +47,7 @@ test("failed imports expose only a retained-file new-import flow", () => {
     new URL("../app/views/ImportView.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(source, /phase === "failed"[\s\S]*Tạo import mới/);
+  assert.match(source, /phase === "failed"[\s\S]*Tạo lần nhập mới/);
   assert.match(source, /onClick=\{resetImport\}/);
   assert.match(source, /if \(!beginAction\("process"\)\) return/);
   assert.match(source, /selectedValidation\?\.unknownSheetType/);

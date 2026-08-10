@@ -14,11 +14,12 @@ import {
   Button,
   Confidence,
   Details,
-  Metric,
   Notice,
   PageHeader,
   SectionHeading,
+  StatCard,
   StatusPill,
+  SummaryGrid,
   TabList,
   formatDate,
   formatQuantity,
@@ -37,7 +38,7 @@ const statusLabels: Record<InventoryStatus, string> = {
   stockout: "Hết hàng",
   expired: "Hết hạn",
   expiring: "Gần hết hạn",
-  healthy: "Khỏe",
+  healthy: "Bình thường",
   missing: "Thiếu dữ liệu",
 };
 
@@ -177,7 +178,7 @@ export function InventoryView({
         unit: selectedLot.unit,
         note: countNote,
       });
-      setMutationMessage("Backend đã ghi nhận kiểm kho và trả snapshot mới.");
+      setMutationMessage("Đã ghi nhận kết quả kiểm kho và cập nhật tồn kho.");
     } catch (caught) {
       setMutationError(
         caught instanceof Error ? caught.message : "Không thể ghi kiểm kho.",
@@ -202,11 +203,11 @@ export function InventoryView({
       (negativeReasons.has(adjustmentReason) && delta >= 0) ||
       (adjustmentReason === "correction_increase" && delta <= 0);
     if (invalidSign) {
-      setMutationError("Dấu của quantity delta không phù hợp với reason đã chọn.");
+      setMutationError("Mức điều chỉnh không phù hợp với lý do đã chọn.");
       return;
     }
     if (adjustmentReason === "other" && !adjustmentNote.trim()) {
-      setMutationError("Reason other bắt buộc có ghi chú.");
+      setMutationError("Vui lòng nhập ghi chú khi chọn lý do “Khác”.");
       return;
     }
     setMutationBusy("adjust");
@@ -222,10 +223,10 @@ export function InventoryView({
         note: adjustmentNote,
         reference: adjustmentReference,
       });
-      setMutationMessage("Backend đã ghi adjustment và tải lại version của lot.");
+      setMutationMessage("Đã lưu điều chỉnh và cập nhật dữ liệu lô.");
     } catch (caught) {
       setMutationError(
-        caught instanceof Error ? caught.message : "Không thể điều chỉnh lot.",
+        caught instanceof Error ? caught.message : "Không thể điều chỉnh lô.",
       );
     } finally {
       setMutationBusy("");
@@ -234,51 +235,43 @@ export function InventoryView({
 
   return (
     <>
-      <PageHeader
-        title="Kho"
-        subtitle="Tồn kho theo lô, hạn dùng và thứ tự xuất FEFO."
-        context={data.settings.storeName}
-      />
+      <PageHeader title="Kho" />
 
-      <SectionHeading
-        title="Tình trạng lô"
-        subtitle={`${allLots.length} lô do backend trả về`}
-      />
-      <div className="metric-grid inventory-status-metrics">
-        <Metric
+      <SectionHeading title="Tình trạng lô" />
+      <SummaryGrid columns={5}>
+        <StatCard
           label="Hết hàng"
           value={statusCounts.stockout}
-          note="Lô có trạng thái stockout"
-          tone="red"
+          status="danger"
         />
-        <Metric
+        <StatCard
           label="Hết hạn"
           value={statusCounts.expired}
-          note="Không tính vào tồn khả dụng"
-          tone="red"
+          description="Không tính vào tồn khả dụng"
+          status="danger"
         />
-        <Metric
+        <StatCard
           label="Gần hết hạn"
           value={statusCounts.expiring}
-          note="Ưu tiên xuất trước theo FEFO"
-          tone="amber"
+          description="Ưu tiên xuất trước theo hạn dùng"
+          status="warning"
         />
-        <Metric
-          label="Khỏe"
+        <StatCard
+          label="Bình thường"
           value={statusCounts.healthy}
-          note="Lô còn khả dụng"
+          status="success"
         />
-        <Metric
+        <StatCard
           label="Thiếu dữ liệu"
           value={statusCounts.missing}
-          note="Bản ghi chưa có dữ liệu lô"
-          tone="blue"
+          description="Bản ghi chưa có dữ liệu lô"
+          status="info"
         />
-      </div>
+      </SummaryGrid>
 
       <SectionHeading
         title="Nguyên liệu"
-        subtitle="Bảng tổng hợp; chọn một dòng để xem đầy đủ từng lô."
+        subtitle="Chọn một dòng để xem chi tiết từng lô."
       />
       <div className="filter-row">
         <label className="field field-inline">
@@ -289,7 +282,7 @@ export function InventoryView({
               setStatus(event.target.value as InventoryStatus | "all")
             }
           >
-            <option value="all">Tất cả ({allLots.length})</option>
+            <option value="all">Tất cả nguyên liệu</option>
             {statuses.map((value) => (
               <option value={value} key={value}>
                 {statusLabels[value]} ({statusCounts[value]})
@@ -341,7 +334,10 @@ export function InventoryView({
                   <td>{row.lots?.length ?? 0}</td>
                   <td>{formatBackendDate(row.expiryDate)}</td>
                   <td>
-                    <StatusPill status={row.statusKey} label={row.status} />
+                    <StatusPill
+                      status={row.statusKey}
+                      label={statusLabels[row.statusKey]}
+                    />
                   </td>
                 </tr>
               );
@@ -349,7 +345,9 @@ export function InventoryView({
           </tbody>
         </table>
         {filtered.length === 0 ? (
-          <div className="table-empty">Không có nguyên liệu phù hợp.</div>
+          <div className="table-empty">
+            Không tìm thấy nguyên liệu phù hợp với bộ lọc.
+          </div>
         ) : null}
       </div>
 
@@ -365,37 +363,35 @@ export function InventoryView({
               </Button>
             }
           />
-          <div className="metric-grid">
-            <Metric
+          <SummaryGrid columns={3}>
+            <StatCard
               label="Tổng tồn"
               value={formatQuantity(item.onHand, item.unit)}
-              note="Tổng hợp từ các lô bên dưới"
             />
-            <Metric
+            <StatCard
               label="Tồn khả dụng"
               value={
                 item.usableQuantity == null
                   ? "—"
                   : formatQuantity(item.usableQuantity, item.unit)
               }
-              note="Không bao gồm lượng hết hạn"
-              tone="blue"
+              status="info"
             />
-            <Metric
+            <StatCard
               label="Nhu cầu P50"
               value={
                 demand
                   ? formatQuantity(demand.totals.p50, demand.unit)
                   : "Chưa có"
               }
-              note={
+              description={
                 demand
                   ? `${plan.horizonDays ?? data.settings.forecastHorizon} ngày của lần chạy hiện tại`
                   : "Chạy dự báo và nhu cầu nguyên liệu để xem"
               }
-              tone="amber"
+              status={demand ? "info" : "neutral"}
             />
-          </div>
+          </SummaryGrid>
 
           <TabList items={tabs} value={tab} onChange={setTab} />
           {tab === "Lô FEFO" ? (
@@ -442,7 +438,7 @@ export function InventoryView({
               </table>
               {lots.length === 0 ? (
                 <div className="table-empty">
-                  Backend chưa trả dữ liệu lô cho nguyên liệu này.
+                  Chưa có dữ liệu lô cho nguyên liệu này.
                 </div>
               ) : null}
             </div>
@@ -473,6 +469,12 @@ export function InventoryView({
                     </tbody>
                   </table>
                 </div>
+                <Details summary="Giải thích các mức dự báo">
+                  <p className="quiet-copy">
+                    P25 là mức thấp, P50 là trung vị và P75 là mức cao của dự
+                    báo nhu cầu.
+                  </p>
+                </Details>
                 <Details summary="Đóng góp nhu cầu theo sản phẩm">
                   {demand.contributions.length > 0 ? (
                     <ul className="warning-list">
@@ -504,17 +506,28 @@ export function InventoryView({
           {tab === "Dữ liệu" ? (
             <>
               <div className="confidence-grid">
-                <Confidence title="Nguồn tồn kho" detail={item.dataQuality} />
+                <Confidence
+                  title="Trạng thái tổng hợp"
+                  detail={statusLabels[item.statusKey]}
+                />
                 <Confidence
                   title="Kiểm kho gần nhất"
-                  detail={formatBackendDate(item.lastCounted)}
+                  detail={
+                    item.lastCounted
+                      ? formatBackendDate(item.lastCounted)
+                      : "Chưa ghi nhận"
+                  }
                 />
                 <Confidence
                   title="Phiên bản lô"
-                  detail={`${lots.filter((lot) => Number.isInteger(lot.version)).length}/${lots.length} lô có version`}
+                  detail={
+                    lots.length > 0
+                      ? `${lots.filter((lot) => Number.isInteger(lot.version)).length}/${lots.length} lô có số phiên bản`
+                      : "Chưa có lô"
+                  }
                 />
               </div>
-              <Details summary="Ràng buộc nhập hàng (chỉ đọc)">
+              <Details summary="Điều kiện nhập hàng (chỉ đọc)">
                 <ul className="warning-list">
                   <li>
                     Tồn an toàn: {item.safetyStock == null
@@ -522,15 +535,17 @@ export function InventoryView({
                       : formatQuantity(item.safetyStock, item.unit)}
                   </li>
                   <li>Hàng đang về: {formatQuantity(item.inbound, item.unit)}</li>
-                  <li>MOQ: {formatQuantity(item.moq, item.unit)}</li>
+                  <li>
+                    Số lượng đặt tối thiểu (MOQ): {formatQuantity(item.moq, item.unit)}
+                  </li>
                   <li>Quy cách đóng gói: {formatQuantity(item.packSize, item.unit)}</li>
-                  <li>Lead time: {item.leadTimeDays} ngày</li>
+                  <li>Thời gian giao hàng: {item.leadTimeDays} ngày</li>
                 </ul>
               </Details>
               {selectedLot && (onCountLot || onAdjustLot) ? (
-                <Details summary="Kiểm kho và điều chỉnh lot" open>
+                <Details summary="Kiểm kho và điều chỉnh lô" open>
                   <label className="field">
-                    <span>Lot thao tác</span>
+                    <span>Lô cần cập nhật</span>
                     <select
                       value={selectedLot.lotId}
                       onChange={(event) => {
@@ -548,7 +563,7 @@ export function InventoryView({
                     >
                       {lots.map((lot) => (
                         <option value={lot.lotId} key={lot.lotId}>
-                          {lot.lotId} · v{lot.version} · {lot.status}
+                          {lot.lotId} · v{lot.version} · {statusLabels[lot.status]}
                         </option>
                       ))}
                     </select>
@@ -562,8 +577,8 @@ export function InventoryView({
                   {onCountLot ? (
                     <div className="panel">
                       <SectionHeading
-                        title="Physical count"
-                        subtitle="Backend tính delta từ balance hiện tại."
+                        title="Kiểm kho thực tế"
+                        subtitle="Hệ thống tự tính chênh lệch so với tồn hiện tại."
                       />
                       <div className="two-column compact-gap">
                         <label className="field">
@@ -591,19 +606,21 @@ export function InventoryView({
                         busy={mutationBusy === "count"}
                         onClick={() => void submitCount()}
                       >
-                        Ghi kiểm kho
+                        {mutationBusy === "count"
+                          ? "Đang ghi kiểm kho…"
+                          : "Ghi kiểm kho"}
                       </Button>
                     </div>
                   ) : null}
                   {onAdjustLot ? (
                     <div className="panel">
                       <SectionHeading
-                        title="Manual adjustment"
-                        subtitle={`Gửi expected_version=${selectedLot.version}; VERSION_CONFLICT sẽ tải lại lot.`}
+                        title="Điều chỉnh thủ công"
+                        subtitle="Hệ thống kiểm tra phiên bản trước khi lưu và tải lại nếu dữ liệu đã thay đổi."
                       />
                       <div className="two-column compact-gap">
                         <label className="field">
-                          <span>Quantity delta ({selectedLot.unit})</span>
+                          <span>Mức điều chỉnh ({selectedLot.unit})</span>
                           <input
                             type="number"
                             value={adjustmentDelta}
@@ -614,27 +631,27 @@ export function InventoryView({
                           />
                         </label>
                         <label className="field">
-                          <span>Reason</span>
+                          <span>Lý do</span>
                           <select
                             value={adjustmentReason}
                             onChange={(event) =>
                               setAdjustmentReason(event.target.value)
                             }
                           >
-                            <option value="waste">waste</option>
-                            <option value="expired">expired</option>
-                            <option value="damaged">damaged</option>
+                            <option value="waste">Hao hụt</option>
+                            <option value="expired">Hết hạn</option>
+                            <option value="damaged">Hư hỏng</option>
                             <option value="correction_decrease">
-                              correction_decrease
+                              Điều chỉnh giảm
                             </option>
                             <option value="correction_increase">
-                              correction_increase
+                              Điều chỉnh tăng
                             </option>
-                            <option value="other">other</option>
+                            <option value="other">Khác</option>
                           </select>
                         </label>
                         <label className="field">
-                          <span>Reference</span>
+                          <span>Mã tham chiếu</span>
                           <input
                             value={adjustmentReference}
                             onChange={(event) =>
@@ -662,7 +679,9 @@ export function InventoryView({
                         busy={mutationBusy === "adjust"}
                         onClick={() => void submitAdjustment()}
                       >
-                        Ghi điều chỉnh
+                        {mutationBusy === "adjust"
+                          ? "Đang lưu điều chỉnh…"
+                          : "Ghi điều chỉnh"}
                       </Button>
                     </div>
                   ) : null}

@@ -17,6 +17,7 @@ import type {
 } from "../../lib/types";
 import {
   Button,
+  InfoTip,
   Notice,
   PageHeader,
   SectionHeading,
@@ -131,11 +132,7 @@ export function SettingsView({
 
   return (
     <>
-      <PageHeader
-        title="Cài đặt"
-        subtitle="Nhà cung cấp, ngân sách và các quy tắc nhập hàng."
-        context={data.settings.storeName}
-      />
+      <PageHeader title="Cài đặt" />
       <TabList items={tabs} value={tab} onChange={setTab} />
       {message ? <Notice tone="success">{message}</Notice> : null}
 
@@ -143,7 +140,12 @@ export function SettingsView({
         <>
           <SectionHeading
             title="Quy tắc theo nguyên liệu"
-            subtitle="Các giá trị này được dùng khi lập kế hoạch nhập."
+            action={
+              <InfoTip label="Giải thích quy tắc nhập hàng">
+                Đơn giá, nhà cung cấp, số lượng tối thiểu và thời gian giao được
+                dùng khi lập kế hoạch nhập hàng.
+              </InfoTip>
+            }
           />
           <div className="table-wrap settings-table">
             <table>
@@ -152,9 +154,9 @@ export function SettingsView({
                   <th>Nguyên liệu</th>
                   <th>Đơn giá</th>
                   <th>Nhà cung cấp</th>
-                  <th>Lead time</th>
-                  <th>MOQ</th>
-                  <th>Quy cách</th>
+                  <th>Thời gian giao (ngày)</th>
+                  <th>Đặt tối thiểu</th>
+                  <th>Quy cách đóng gói</th>
                   <th>Đơn vị đặt</th>
                   <th>Đơn vị cơ sở</th>
                   <th>Ngày hiệu lực</th>
@@ -184,11 +186,9 @@ export function SettingsView({
                     </td>
                     <td>
                       <strong>{item.supplier || "Chưa thiết lập"}</strong>
-                      <small>
-                        {item.supplierId
-                          ? `ID ${item.supplierId}`
-                          : "Tạo nhà cung cấp qua import"}
-                      </small>
+                      {!item.supplierId ? (
+                        <small>Thêm nhà cung cấp qua Nhập dữ liệu</small>
+                      ) : null}
                     </td>
                     <td>
                       <input
@@ -196,7 +196,7 @@ export function SettingsView({
                         value={item.leadTimeDays}
                         min="0"
                         step="1"
-                        aria-label={`Lead time ${item.ingredient}`}
+                        aria-label={`Thời gian giao ${item.ingredient}`}
                         onChange={(event) =>
                           updateSupplierTerm(index, {
                             leadTimeDays: Number(event.target.value),
@@ -210,7 +210,7 @@ export function SettingsView({
                         value={item.moq}
                         min="0"
                         step="0.5"
-                        aria-label={`MOQ ${item.ingredient}`}
+                        aria-label={`Số lượng đặt tối thiểu ${item.ingredient}`}
                         onChange={(event) =>
                           updateSupplierTerm(index, {
                             moq: Number(event.target.value),
@@ -269,18 +269,25 @@ export function SettingsView({
         <>
           <SectionHeading
             title="Ngưỡng tồn kho"
-            subtitle="Safety stock và maximum stock là chính sách tồn kho, độc lập với điều kiện nhà cung cấp."
+            action={
+              <InfoTip label="Giải thích ngưỡng tồn kho">
+                Tồn kho an toàn và tồn kho tối đa được áp dụng độc lập với điều
+                kiện nhà cung cấp.
+              </InfoTip>
+            }
           />
           {inventoryConstraintsLoading ? (
             <p className="quiet-help">Đang tải ngưỡng tồn kho...</p>
           ) : inventoryConstraintsError ? (
-            <Notice tone="error">{inventoryConstraintsError}</Notice>
+            <Notice tone="error">
+              Không tải được ngưỡng tồn kho. Vui lòng thử lại.
+            </Notice>
           ) : procurementRows.length === 0 ? (
             <p className="quiet-help">Chưa cấu hình ngưỡng tồn kho.</p>
           ) : (
             <div className="table-wrap settings-table">
               <table>
-                <thead><tr><th>Nguyên liệu</th><th>Safety stock</th><th>Maximum stock</th><th>Ngày hiệu lực</th><th>Version</th><th>Trạng thái</th></tr></thead>
+                <thead><tr><th>Nguyên liệu</th><th>Tồn kho an toàn</th><th>Tồn kho tối đa</th><th>Ngày hiệu lực</th><th>Phiên bản</th><th>Trạng thái</th></tr></thead>
                 <tbody>
                   {procurementRows.map((row) => (
                     <tr key={row.ingredientId}>
@@ -295,7 +302,10 @@ export function SettingsView({
               </table>
             </div>
           )}
-          <p className="quiet-help">Dữ liệu chỉ đọc; cập nhật qua import Business Rules / Điều kiện vận hành.</p>
+          <p className="quiet-help">
+            Thông tin này chỉ đọc. Để cập nhật, hãy vào Nhập dữ liệu → Ràng
+            buộc kinh doanh.
+          </p>
         </>
       ) : null}
 
@@ -310,7 +320,7 @@ export function SettingsView({
               <div className="alias-row" key={`${alias.sourceName}-${index}`}>
                 <input
                   value={alias.sourceName}
-                  placeholder="Tên trong Excel"
+                  placeholder="Tên trong tệp nguồn"
                   aria-label={`Tên thay thế ${index + 1}`}
                   onChange={(event) =>
                     setAliases((current) =>
@@ -387,7 +397,7 @@ export function SettingsView({
               }
             >
               <Plus size={15} />
-              Thêm tên
+              Thêm tên thay thế
             </Button>
           </div>
           <div className="settings-action">
@@ -438,7 +448,7 @@ export function SettingsView({
               <small>{formatVnd(settings.monthlyBudget)}</small>
             </label>
             <label className="field">
-              <span>Đã giữ chỗ</span>
+              <span>Đã giữ cho đơn đã xác nhận</span>
               <input
                 type="number"
                 readOnly
@@ -491,7 +501,7 @@ export function SettingsView({
                   }))
                 }
               />
-              <small>Forecast Core hiện hỗ trợ từ 1 đến 7 ngày.</small>
+              <small>Hệ thống hỗ trợ dự báo từ 1 đến 7 ngày.</small>
             </label>
             <label className="field">
               <span>Chiến lược mặc định</span>
@@ -509,14 +519,10 @@ export function SettingsView({
                 <option value="balanced">Cân bằng</option>
                 <option value="safe">An toàn</option>
               </select>
-              <small>Phiên bản cài đặt {settings.version}</small>
             </label>
           </div>
 
-          <SectionHeading
-            title="Lịch 14 ngày tới"
-            subtitle="Đánh dấu ngày lễ hoặc khuyến mãi."
-          />
+          <SectionHeading title="Lịch 14 ngày tới" />
           <div className="calendar-grid">
             {calendar.map((day, index) => (
               <div className="calendar-day" key={day.date}>
@@ -589,7 +595,7 @@ export function SettingsView({
                   setSaving("context");
                   try {
                     if (await onSaveContext(settings, calendar)) {
-                      setMessage("Đã lưu ngân sách và lịch.");
+                      setMessage("Đã lưu ngân sách, dự báo và lịch vận hành.");
                     }
                   } finally {
                     setSaving("");
@@ -598,7 +604,7 @@ export function SettingsView({
               }}
             >
               <Save size={16} />
-              Lưu ngân sách và lịch
+              Lưu cài đặt
             </Button>
           </div>
         </>
@@ -614,7 +620,7 @@ export function SettingsView({
                   <thead>
                     <tr>
                       <th>Tệp</th>
-                      <th>Sheet</th>
+                      <th>Trang tính</th>
                       <th>Loại dữ liệu</th>
                       <th>Số dòng</th>
                       <th>Thời điểm</th>

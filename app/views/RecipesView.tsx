@@ -20,11 +20,12 @@ import {
 } from "../../lib/recipes";
 import {
   Button,
-  Metric,
   Notice,
   PageHeader,
   SectionHeading,
+  StatCard,
   StatusPill,
+  SummaryGrid,
   formatDate,
   formatVnd,
 } from "../components/ui";
@@ -168,7 +169,7 @@ export function RecipesView({
           setDetailsError(
             caught instanceof Error
               ? caught.message
-              : "Không tải được recipe chi tiết.",
+              : "Không tải được chi tiết công thức.",
           );
         }
       },
@@ -213,11 +214,7 @@ export function RecipesView({
 
   return (
     <>
-      <PageHeader
-        title="Công thức"
-        subtitle="Định lượng nguyên liệu cho mỗi sản phẩm."
-        context={data.settings.storeName}
-      />
+      <PageHeader title="Công thức" />
 
       <div className="table-wrap product-table">
         <table>
@@ -225,7 +222,7 @@ export function RecipesView({
             <tr>
               <th>Sản phẩm</th>
               <th>Giá bán</th>
-              <th>Thành phần</th>
+              <th>Số nguyên liệu</th>
               <th>Trạng thái</th>
             </tr>
           </thead>
@@ -264,8 +261,8 @@ export function RecipesView({
             {!products.length ? (
               <tr>
                 <td className="table-empty" colSpan={4}>
-                  Chưa có món lẻ để tạo công thức. Combo được quản lý bằng thành
-                  phần trong mục Menu.
+                  Chưa có món lẻ để thiết lập công thức. Thành phần combo
+                  được quản lý tại trang Menu.
                 </td>
               </tr>
             ) : null}
@@ -277,32 +274,32 @@ export function RecipesView({
         <>
           {detailsError ? <Notice tone="error">{detailsError}</Notice> : null}
           <SectionHeading
-            title={`Chỉnh sửa · ${product.product}`}
-            subtitle="Định lượng cho một sản phẩm bán ra."
+            title={`Thiết lập công thức · ${product.product}`}
+            subtitle="Thiết lập định lượng, hiệu lực và hao hụt."
           />
-          <div className="metric-grid">
-            <Metric
+          <SummaryGrid columns={4}>
+            <StatCard
               label="Giá bán"
               value={formatVnd(product.price)}
-              note={product.sku}
+              description={product.sku}
             />
-            <Metric
-              label="Thành phần"
+            <StatCard
+              label="Nguyên liệu"
               value={rows.length}
-              note={`${rows.length} nguyên liệu`}
-              tone="blue"
+              status="info"
             />
-            <Metric
-              label="Có hiệu lực từ"
+            <StatCard
+              label="Hiệu lực hiện tại"
               value={
                 product.effectiveDate
                   ? formatDate(product.effectiveDate)
                   : "Chưa có"
               }
-              note="Theo công thức backend"
-              tone={product.recipeStatus === "Hoàn chỉnh" ? "pine" : "amber"}
+              status={
+                product.recipeStatus === "Hoàn chỉnh" ? "success" : "warning"
+              }
             />
-            <Metric
+            <StatCard
               label="Phiên bản"
               value={
                 product.recipeVersionLabel ??
@@ -310,15 +307,17 @@ export function RecipesView({
                   ? String(product.recipeVersion)
                   : "Chưa có")
               }
-              note={product.recipeStatus}
-              tone={product.recipeStatus === "Hoàn chỉnh" ? "pine" : "amber"}
+              description={product.recipeStatus}
+              status={
+                product.recipeStatus === "Hoàn chỉnh" ? "success" : "warning"
+              }
             />
-          </div>
+          </SummaryGrid>
 
           <div className="recipe-editor">
             <div className="two-column">
               <label className="field">
-                <span>Ngày hiệu lực</span>
+                <span>Ngày bắt đầu hiệu lực</span>
                 <input
                   type="date"
                   aria-label="Ngày hiệu lực công thức"
@@ -336,12 +335,12 @@ export function RecipesView({
                 />
                 <small>
                   {product.recipeVersion === undefined
-                    ? "Chưa có công thức hiện tại."
-                    : `Tạo version sau version ${product.recipeVersion}.`}
+                    ? "Món này chưa có công thức."
+                    : `Phiên bản hiện tại: ${product.recipeVersion}.`}
                 </small>
               </label>
               <label className="field">
-                <span>Sản lượng công thức</span>
+                <span>Sản lượng đầu ra</span>
                 <input
                   type="number"
                   min="0.001"
@@ -354,7 +353,7 @@ export function RecipesView({
                     setSaved("");
                   }}
                 />
-                <small>Phải lớn hơn 0.</small>
+                <small>Giá trị phải lớn hơn 0.</small>
               </label>
             </div>
             <label className="field">
@@ -372,7 +371,7 @@ export function RecipesView({
                   setSaved("");
                 }}
               />
-              <small>Nhập tỷ lệ từ 0 đến nhỏ hơn 1, ví dụ 0,05.</small>
+              <small>Nhập từ 0 đến dưới 1; ví dụ 0,05 tương đương 5%.</small>
             </label>
             <div className="recipe-editor-head">
               <span>Nguyên liệu</span>
@@ -500,13 +499,20 @@ export function RecipesView({
               <Plus size={15} />
               Thêm nguyên liệu
             </Button>
+            {!ingredientOptions.length ? (
+              <p className="quiet-copy">
+                Chưa có nguyên liệu để thêm. Hãy nhập danh mục nguyên liệu
+                trước.
+              </p>
+            ) : null}
           </div>
 
           {invalid ? (
             <Notice tone="warning">
-              Mỗi nguyên liệu chỉ xuất hiện một lần; định lượng và sản lượng phải
-              lớn hơn 0; tỷ lệ hao hụt phải từ 0 đến nhỏ hơn 1; ngày hiệu lực mới
-              phải sau công thức hiện tại.
+              Công thức cần ít nhất một nguyên liệu hợp lệ. Mỗi nguyên
+              liệu chỉ xuất hiện một lần; định lượng và sản lượng
+              phải lớn hơn 0; tỷ lệ hao hụt phải từ 0 đến dưới 1;
+              ngày bắt đầu hiệu lực phải sau công thức hiện tại.
             </Notice>
           ) : null}
           {saved ? <Notice tone="success">{saved}</Notice> : null}
@@ -519,7 +525,7 @@ export function RecipesView({
                 onChange={(event) => setConfirmed(event.target.checked)}
               />
               <span>
-                Áp dụng công thức từ{" "}
+                Tôi xác nhận áp dụng công thức từ{" "}
                 {effectiveFrom ? formatDate(effectiveFrom) : "ngày đã chọn"}.
               </span>
             </label>
@@ -552,7 +558,7 @@ export function RecipesView({
                       );
                       if (success) {
                         setSaved(
-                          `Đã lưu công thức mới cho ${product.product}.`,
+                          `Đã lưu công thức cho “${product.product}”.`,
                         );
                         setConfirmed(false);
                       }

@@ -46,7 +46,7 @@ export function ForecastChart({
     <div
       className={compact ? "chart chart-compact" : "chart"}
       role="img"
-      aria-label={`Dự báo ${seriesName}`}
+      aria-label={`Biểu đồ số liệu thực tế và dự báo cho ${seriesName}, đơn vị ${forecast.unit}`}
       data-forecast-series-id={seriesId}
     >
       <ResponsiveContainer width="100%" height="100%">
@@ -62,13 +62,13 @@ export function ForecastChart({
             dataKey="label"
             axisLine={false}
             tickLine={false}
-            tick={{ fill: "#84908c", fontSize: 11 }}
+            tick={{ fill: "#6b7773", fontSize: 13 }}
             minTickGap={22}
           />
           <YAxis
             axisLine={false}
             tickLine={false}
-            tick={{ fill: "#84908c", fontSize: 11 }}
+            tick={{ fill: "#6b7773", fontSize: 13 }}
             width={45}
           />
           <Tooltip
@@ -76,17 +76,18 @@ export function ForecastChart({
               border: "1px solid #d7d7cf",
               borderRadius: 10,
               boxShadow: "0 10px 28px rgba(36,48,45,.08)",
-              fontSize: 12,
+              fontSize: 13,
             }}
+            labelFormatter={(label) => `Ngày ${String(label)}`}
             formatter={(value, name) => [
               formatQuantity(Number(value), forecast.unit),
               name === "actual"
-                ? "Thực tế"
+                ? "Số liệu thực tế"
                 : name === "p50"
-                  ? "Trung vị"
+                  ? "Dự báo trung vị (P50)"
                   : name === "intervalLower"
-                    ? "Cận tin cậy dưới"
-                    : "Cận tin cậy trên",
+                    ? "Cận dưới dự báo"
+                    : "Cận trên dự báo",
             ]}
           />
           <Area

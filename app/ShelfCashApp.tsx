@@ -5,10 +5,13 @@ import {
   CalendarClock,
   Coffee,
   Home,
+  Menu as MenuIcon,
   Package,
   Settings,
   ShoppingCart,
+  Store,
   Upload,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -98,40 +101,99 @@ type PageKey =
   | "plan"
   | "settings";
 
-const navigation: Array<{
-  key: PageKey;
-  label: string;
-  icon: typeof Home;
+const navigationGroups: Array<{
+  label?: string;
+  items: Array<{
+    key: PageKey;
+    label: string;
+    icon: typeof Home;
+  }>;
 }> = [
-  { key: "today", label: "Hôm nay", icon: Home },
-  { key: "import", label: "Nhập dữ liệu", icon: Upload },
-  { key: "inventory", label: "Kho", icon: Package },
-  { key: "menu", label: "Menu", icon: Coffee },
-  { key: "recipes", label: "Công thức", icon: BookOpen },
-  { key: "plan", label: "Kế hoạch nhập", icon: ShoppingCart },
-  { key: "settings", label: "Cài đặt", icon: Settings },
+  {
+    items: [{ key: "today", label: "Tổng quan", icon: Home }],
+  },
+  {
+    label: "Vận hành",
+    items: [
+      { key: "import", label: "Nhập dữ liệu", icon: Upload },
+      { key: "inventory", label: "Kho", icon: Package },
+      { key: "menu", label: "Menu", icon: Coffee },
+      { key: "recipes", label: "Công thức", icon: BookOpen },
+      { key: "plan", label: "Kế hoạch nhập hàng", icon: ShoppingCart },
+    ],
+  },
+  {
+    label: "Hệ thống",
+    items: [{ key: "settings", label: "Cài đặt", icon: Settings }],
+  },
 ];
+
+const navigation = navigationGroups.flatMap((group) => group.items);
+
+function AppNavigation({
+  page,
+  hasStore,
+  importDraftCount,
+  onSelect,
+}: {
+  page: PageKey;
+  hasStore: boolean;
+  importDraftCount: number;
+  onSelect: (page: PageKey) => void;
+}) {
+  return (
+    <nav aria-label="Điều hướng chính">
+      {navigationGroups.map((group) => (
+        <div className="nav-group" key={group.label ?? group.items[0]?.key}>
+          {group.label ? <span className="nav-label">{group.label}</span> : null}
+          <div className="nav-group-items">
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  aria-current={page === item.key ? "page" : undefined}
+                  className={cn(page === item.key && "active")}
+                  disabled={
+                    !hasStore && item.key !== "today" && item.key !== "import"
+                  }
+                  key={item.key}
+                  onClick={() => onSelect(item.key)}
+                  type="button"
+                >
+                  <Icon aria-hidden="true" size={18} strokeWidth={1.8} />
+                  <span>{item.label}</span>
+                  {item.key === "import" && importDraftCount ? (
+                    <b className="nav-count">{importDraftCount}</b>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </nav>
+  );
+}
 
 function errorMessage(caught: unknown, fallback: string): string {
   if (caught instanceof ShelfCashApiError) {
     const messages: Record<string, string> = {
-      MODEL_NOT_READY: "Model chưa sẵn sàng. Hãy train model trong màn hình quản trị rồi chạy lại.",
+      MODEL_NOT_READY: "Mô hình dự báo chưa sẵn sàng. Hãy thiết lập trong phần quản trị rồi chạy lại.",
       RECIPE_NOT_FOUND: "Một sản phẩm chưa có công thức có hiệu lực.",
-      RECIPE_NOT_EFFECTIVE: "Công thức không có hiệu lực trong ngày forecast.",
-      RECIPE_YIELD_INVALID: "Yield của công thức không hợp lệ.",
-      RECIPE_LINE_INVALID: "Một dòng công thức không hợp lệ.",
+      RECIPE_NOT_EFFECTIVE: "Một công thức không có hiệu lực trong ngày dự báo.",
+      RECIPE_YIELD_INVALID: "Sản lượng đầu ra của công thức không hợp lệ.",
+      RECIPE_LINE_INVALID: "Có dòng nguyên liệu chưa hợp lệ.",
       INGREDIENT_UNIT_CONVERSION_FAILED: "Không thể quy đổi đơn vị nguyên liệu.",
-      INGREDIENT_SCOPE_NO_MATCH: "Scope nguyên liệu không khớp; đây không phải là nhu cầu bằng 0.",
-      SAFETY_STOCK_NOT_CONFIGURED: "Chưa cấu hình tồn kho an toàn; backend đang dùng fallback 0.",
+      INGREDIENT_SCOPE_NO_MATCH: "Không có nguyên liệu phù hợp với phạm vi đã chọn; đây không phải là nhu cầu bằng 0.",
+      SAFETY_STOCK_NOT_CONFIGURED: "Chưa cấu hình tồn kho an toàn; hệ thống tạm tính mức này là 0.",
       BUSINESS_CONSTRAINT_NOT_FOUND: "Không tìm thấy cấu hình tồn kho phù hợp.",
       BUSINESS_CONSTRAINT_AMBIGUOUS: "Có nhiều cấu hình cùng hiệu lực.",
-      BUSINESS_CONSTRAINT_UNIT_INVALID: "Đơn vị safety stock không hợp lệ.",
-      SAFETY_STOCK_UNIT_CONVERSION_FAILED: "Đơn vị safety stock không thể quy đổi.",
-      VERSION_CONFLICT: "Dữ liệu đã được cập nhật ở nơi khác. ShelfCash vừa tải version mới; hãy kiểm tra lại.",
+      BUSINESS_CONSTRAINT_UNIT_INVALID: "Đơn vị tồn kho an toàn không hợp lệ.",
+      SAFETY_STOCK_UNIT_CONVERSION_FAILED: "Không thể quy đổi đơn vị tồn kho an toàn.",
+      VERSION_CONFLICT: "Dữ liệu đã thay đổi ở phiên làm việc khác. ShelfCash đã tải bản mới nhất; hãy kiểm tra lại.",
       BUDGET_EXCEEDED: "Ngân sách còn lại không đủ để xác nhận đơn.",
     };
-    const base = messages[caught.code] ?? `${caught.message}${caught.code ? ` (${caught.code})` : ""}`;
-    return caught.requestId ? `${base} · Request ${caught.requestId}` : base;
+    return messages[caught.code] ?? fallback;
   }
   return caught instanceof Error ? caught.message : fallback;
 }
@@ -198,7 +260,7 @@ function planFailure(
         ? "model_unavailable"
         : current.engineStatus,
     failureCode: isApiError ? caught.code : "PLANNING_FAILED",
-    failureMessage: errorMessage(caught, "Không thể hoàn tất planning."),
+    failureMessage: errorMessage(caught, "Không thể hoàn tất kế hoạch nhập hàng."),
     forecastRunId:
       isApiError && typeof caught.details.forecast_run_id === "string"
         ? caught.details.forecast_run_id
@@ -235,6 +297,10 @@ export function ShelfCashApp({
   initialPlan: PlanResponse;
 }) {
   const [page, setPage] = useState<PageKey>("today");
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
+  const [initialDashboardLoading, setInitialDashboardLoading] = useState(
+    Boolean(initialData.settings.storeId.trim()),
+  );
   const [data, setData] = useState(initialData);
   const [plan, setPlan] = useState(initialPlan);
   const [strategy, setStrategy] = useState<Strategy>(
@@ -284,6 +350,8 @@ export function ShelfCashApp({
   );
   const inventoryMutationKeys = useRef(new Map<string, string>());
   const trainingIdempotencyKeys = useRef(new Map<string, string>());
+  const mobileMenuButton = useRef<HTMLButtonElement>(null);
+  const mobileCloseButton = useRef<HTMLButtonElement>(null);
 
   const reloadFromBackend = useCallback(
     async (
@@ -304,7 +372,7 @@ export function ShelfCashApp({
             (value) => ({ value, error: null as string | null }),
             (caught) => ({
               value: null,
-              error: errorMessage(caught, "Không tải được danh sách lot đầy đủ."),
+              error: errorMessage(caught, "Không tải được danh sách lô đầy đủ."),
             }),
           ),
           getInventoryConstraints({
@@ -360,7 +428,7 @@ export function ShelfCashApp({
           setToast({
             message: errorMessage(
               caught,
-              "Không thể đọc dữ liệu cửa hàng từ backend.",
+              "Không thể tải dữ liệu cửa hàng.",
             ),
             tone: "error",
           });
@@ -378,6 +446,8 @@ export function ShelfCashApp({
 
   useEffect(() => {
     let active = true;
+    const shouldHydrateStore = Boolean(initialData.settings.storeId.trim());
+    setInitialDashboardLoading(shouldHydrateStore);
     void (async () => {
       const health = await getConnectionHealth();
       if (!active) return;
@@ -392,12 +462,58 @@ export function ShelfCashApp({
           strategyFromApi(initialData.settings.defaultStrategy),
         );
       }
+      if (active) setInitialDashboardLoading(false);
     })();
     return () => {
       active = false;
       operationSequence.current += 1;
     };
   }, [initialData, reloadFromBackend]);
+
+  useEffect(() => {
+    if (!mobileNavigationOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    mobileCloseButton.current?.focus();
+
+    const handleDrawerKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileNavigationOpen(false);
+        requestAnimationFrame(() => mobileMenuButton.current?.focus());
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const drawer = document.getElementById("mobile-navigation");
+      const focusable = Array.from(
+        drawer?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    const closeAtDesktop = () => {
+      if (window.innerWidth > 860) setMobileNavigationOpen(false);
+    };
+    window.addEventListener("keydown", handleDrawerKeydown);
+    window.addEventListener("resize", closeAtDesktop);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleDrawerKeydown);
+      window.removeEventListener("resize", closeAtDesktop);
+    };
+  }, [mobileNavigationOpen]);
 
   async function refreshConnection() {
     setConnection(null);
@@ -440,8 +556,8 @@ export function ShelfCashApp({
       ...current,
       {
         file: files.map((file) => file.name).join(", "),
-        sheet: "Backend chuẩn hóa",
-        dataType: "Import đã xử lý",
+        sheet: "Hệ thống chuẩn hóa",
+        dataType: "Đã nhập dữ liệu",
         rows: rowCount,
         importedAt: new Date().toISOString(),
       },
@@ -456,12 +572,12 @@ export function ShelfCashApp({
     setToast(
       synchronized
         ? {
-            message: `Import đã xử lý ${rowCount.toLocaleString("vi-VN")} bản ghi; snapshot backend đã được tải lại.`,
+            message: `Đã nhập ${rowCount.toLocaleString("vi-VN")} bản ghi và cập nhật dữ liệu cửa hàng.`,
             tone: "success",
           }
         : {
             message:
-              "Import đã xử lý nhưng frontend chưa đọc lại được bootstrap.",
+              "Dữ liệu đã được nhập nhưng màn hình chưa tải được bản mới nhất. Hãy thử làm mới.",
             tone: "error",
           },
     );
@@ -513,7 +629,7 @@ export function ShelfCashApp({
     try {
       if (!product?.productId) {
         throw new Error(
-          "Bootstrap chưa trả product_id nên chưa thể lưu recipe.",
+          "Dữ liệu món chưa đầy đủ nên chưa thể lưu công thức. Hãy đồng bộ lại.",
         );
       }
       const ingredients = mergeRecipeIngredients(
@@ -525,7 +641,7 @@ export function ShelfCashApp({
         const ingredientId = row.ingredientId ?? ingredient?.ingredientId;
         if (!ingredientId) {
           throw new Error(
-            `Bootstrap chưa trả ingredient_id cho ${row.ingredient}.`,
+            `Nguyên liệu “${row.ingredient}” chưa có đủ thông tin để lưu công thức.`,
           );
         }
         return {
@@ -551,7 +667,7 @@ export function ShelfCashApp({
       );
       if (synchronized) {
         setToast({
-          message: `Đã lưu công thức mới cho ${product.product}.`,
+          message: `Đã lưu công thức cho “${product.product}”.`,
           tone: "success",
         });
       }
@@ -575,7 +691,7 @@ export function ShelfCashApp({
     setToast({
       message: synchronized
         ? message
-        : `${message} Chưa thể tải lại menu từ backend.`,
+        : `${message} Chưa thể tải dữ liệu menu mới nhất.`,
       tone: synchronized ? "success" : "error",
     });
   }
@@ -589,14 +705,14 @@ export function ShelfCashApp({
       );
       if (invalid) {
         throw new Error(
-          `Thiếu ingredient_id/supplier_id cho ${invalid.ingredient}.`,
+          `Nguyên liệu “${invalid.ingredient}” chưa được liên kết đầy đủ với nhà cung cấp.`,
         );
       }
       const results = await Promise.allSettled(
         inventory.map((item) => {
           if (!item.ingredientId || !item.supplierId) {
             throw new Error(
-              `Thiếu ingredient_id/supplier_id cho ${item.ingredient}.`,
+              `Nguyên liệu “${item.ingredient}” chưa được liên kết đầy đủ với nhà cung cấp.`,
             );
           }
           return saveSupplierConstraint({
@@ -631,7 +747,7 @@ export function ShelfCashApp({
       );
       if (failures.length) {
         throw new Error(
-          `${failures.length}/${results.length} quy tắc không lưu được. Snapshot backend đã được tải lại để phản ánh các thay đổi đã commit.`,
+          `${failures.length}/${results.length} quy tắc chưa lưu được. Dữ liệu mới nhất đã được tải lại để bạn kiểm tra.`,
         );
       }
       if (synchronized) {
@@ -657,7 +773,7 @@ export function ShelfCashApp({
           )?.ingredientId;
         if (!ingredientId) {
           throw new Error(
-            `Không tìm thấy ingredient_id cho ${alias.canonicalName}.`,
+            `Không tìm thấy “${alias.canonicalName}” trong danh mục nguyên liệu.`,
           );
         }
         return { ...alias, ingredientId };
@@ -709,12 +825,12 @@ export function ShelfCashApp({
       );
       if (failures.length) {
         throw new Error(
-          "Settings hoặc calendar chỉ lưu được một phần. Snapshot backend đã được tải lại; hãy kiểm tra trước khi thử lại.",
+          "Một phần cài đặt chưa được lưu. Dữ liệu mới nhất đã được tải lại; hãy kiểm tra trước khi thử lại.",
         );
       }
       if (synchronized) {
         setToast({
-          message: "Đã lưu settings và lịch vận hành.",
+          message: "Đã lưu ngân sách, dự báo và lịch vận hành.",
           tone: "success",
         });
       }
@@ -787,7 +903,7 @@ export function ShelfCashApp({
       setPlan(adapted);
       setToast({
         message:
-          "Forecast, nhu cầu nguyên liệu và ba kịch bản planning đã hoàn tất.",
+          "Đã hoàn tất dự báo, nhu cầu nguyên liệu và ba kịch bản nhập hàng.",
         tone: "success",
       });
     } catch (caught) {
@@ -797,7 +913,7 @@ export function ShelfCashApp({
       if (operation === operationSequence.current) {
         setPlan((current) => planFailure(current, caught));
         setToast({
-          message: errorMessage(caught, "Không thể chạy planning."),
+          message: errorMessage(caught, "Không thể lập kế hoạch nhập hàng."),
           tone: "error",
         });
       }
@@ -827,7 +943,7 @@ export function ShelfCashApp({
       plan.status !== "completed"
     ) {
       throw new Error(
-        "Hãy chạy hoàn tất forecast và planning trước khi tạo đơn.",
+        "Hãy hoàn tất dự báo và kế hoạch nhập hàng trước khi tạo đơn.",
       );
     }
     const fingerprint = JSON.stringify({
@@ -901,7 +1017,7 @@ export function ShelfCashApp({
         ];
       });
       setToast({
-        message: `Backend đã tạo ${orders.length} đơn nháp theo nhà cung cấp.`,
+        message: `Đã tạo ${orders.length} đơn nháp, nhóm theo nhà cung cấp.`,
         tone: "success",
       });
       return orders;
@@ -1120,7 +1236,7 @@ export function ShelfCashApp({
       inventoryMutationKeys.current.delete(fingerprint);
       await reloadFromBackend(data, data.settings.storeId, strategy, true);
       setToast({
-        message: `Đã ghi kiểm kho cho lot ${input.lotId}.`,
+        message: `Đã ghi kiểm kho cho lô ${input.lotId}.`,
         tone: "success",
       });
     } catch (caught) {
@@ -1158,7 +1274,7 @@ export function ShelfCashApp({
       inventoryMutationKeys.current.delete(fingerprint);
       await reloadFromBackend(data, data.settings.storeId, strategy, true);
       setToast({
-        message: `Đã điều chỉnh lot ${input.lotId}.`,
+        message: `Đã điều chỉnh lô ${input.lotId}.`,
         tone: "success",
       });
     } catch (caught) {
@@ -1200,14 +1316,14 @@ export function ShelfCashApp({
       });
       trainingIdempotencyKeys.current.delete(fingerprint);
       setToast({
-        message: "Model đã train thành công. Hãy chạy lại planning để tạo forecast mới.",
+        message: "Mô hình dự báo đã sẵn sàng. Hãy chạy lại kế hoạch.",
         tone: "success",
       });
     } catch (caught) {
       if (!retryableTransportFailure(caught)) {
         trainingIdempotencyKeys.current.delete(fingerprint);
       }
-      throw new Error(errorMessage(caught, "Không thể train forecast model."));
+      throw new Error(errorMessage(caught, "Không thể huấn luyện mô hình dự báo."));
     }
   }
 
@@ -1216,7 +1332,7 @@ export function ShelfCashApp({
     if (!hasStore && page !== "today" && page !== "import") {
       return (
         <Notice tone="warning">
-          Domain này cần store_id hợp lệ. Hãy hoàn tất import trước.
+          Chưa có cửa hàng để làm việc. Hãy nhập dữ liệu cửa hàng trước.
         </Notice>
       );
     }
@@ -1226,6 +1342,7 @@ export function ShelfCashApp({
           <TodayView
             data={data}
             plan={plan}
+            loading={initialDashboardLoading}
             onNavigate={(target) =>
               target === "plan" ? openPlan() : setPage("inventory")
             }
@@ -1295,14 +1412,29 @@ export function ShelfCashApp({
     }
   })();
 
+  const currentNavigation =
+    navigation.find((item) => item.key === page) ?? navigation[0];
+  const CurrentPageIcon = currentNavigation.icon;
+  const connectionLabel = refreshing
+    ? "Đang tải dữ liệu mới"
+    : !connection
+      ? "Đang kiểm tra kết nối"
+      : connection.service === "offline"
+        ? "Mất kết nối"
+        : null;
+  const closeMobileNavigation = () => {
+    setMobileNavigationOpen(false);
+    requestAnimationFrame(() => mobileMenuButton.current?.focus());
+  };
+
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className="sidebar" aria-label="Thanh bên ShelfCash">
         <div className="brand">
           <i>SC</i>
           <span>
             <strong>ShelfCash</strong>
-            <small>Quản lý kho nhẹ nhàng</small>
+            <small>Vận hành cửa hàng</small>
           </span>
         </div>
         <label className="store-select">
@@ -1313,105 +1445,181 @@ export function ShelfCashApp({
             </option>
           </select>
         </label>
-        <span className="nav-label">Điều hướng</span>
-        <nav>
-          {navigation.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.key}
-                className={cn(page === item.key && "active")}
-                disabled={
-                  !hasStore && item.key !== "today" && item.key !== "import"
-                }
-                onClick={() => setPage(item.key)}
-              >
-                <Icon size={17} strokeWidth={1.8} />
-                <span>{item.label}</span>
-                {item.key === "import" && importDraftFiles.length ? (
-                  <b className="nav-count">
-                    {importDraftFiles.length}
-                  </b>
-                ) : null}
-              </button>
-            );
-          })}
-        </nav>
-        <div className="sync-status">
-          <span
-            className={cn(
-              "sync-dot",
-              (refreshing || !connection) && "syncing",
-              connection?.service === "offline" && "offline",
-            )}
-          />
-          <strong>
-            {refreshing
-              ? "Đang cập nhật"
-              : !connection
-                ? "Đang kiểm tra"
-                : connection.service === "online"
-                  ? "Backend đã kết nối"
-                  : "Backend chưa kết nối"}
-          </strong>
+        <AppNavigation
+          page={page}
+          hasStore={hasStore}
+          importDraftCount={importDraftFiles.length}
+          onSelect={setPage}
+        />
+        <div className={cn("sync-status", !connectionLabel && "is-quiet")}>
+          {connectionLabel ? (
+            <>
+              <span
+                className={cn(
+                  "sync-dot",
+                  (refreshing || !connection) && "syncing",
+                  connection?.service === "offline" && "offline",
+                )}
+              />
+              <strong>{connectionLabel}</strong>
+            </>
+          ) : null}
           <small>
-            <CalendarClock size={13} />
+            <CalendarClock aria-hidden="true" size={15} />
             Hôm nay · {data.today.split("-").reverse().join("/")}
           </small>
         </div>
       </aside>
 
-      <main className="main-content">
-        {!hasStore ? (
-          <Notice tone="warning">
-            Chưa có store hợp lệ. Hãy cấu hình SHELFCASH_STORE_ID hoặc
-            hoàn tất import có store_id; các domain query đang được dừng.
-          </Notice>
-        ) : null}
-        <section hidden={page !== "import"}
-          aria-hidden={page !== "import"}
-        >
-          <ImportView
-            store={data.settings.storeName}
-            defaultStoreId={data.settings.storeId}
-            defaultForecastDate={data.today}
-            defaultForecastHorizon={data.settings.forecastHorizon}
-            connection={connection}
-            files={importDraftFiles}
-            setFiles={setImportDraftFiles}
-            onRefreshConnection={refreshConnection}
-            onImported={importResult}
-          />
-        </section>
-        {page === "import" ? null : selectedPage}
-      </main>
-
-      <nav className="mobile-nav" aria-label="Điều hướng di động">
-        {navigation.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              aria-label={item.label}
-              key={item.key}
-              className={page === item.key ? "active" : ""}
-              disabled={
-                !hasStore && item.key !== "today" && item.key !== "import"
-              }
-              onClick={() => setPage(item.key)}
-            >
-              <Icon size={19} />
-              <span>
-                {item.key === "plan" ? "Kế hoạch" : item.label}
-              </span>
-              {item.key === "import" && importDraftFiles.length ? (
-                <b className="mobile-nav-count">
-                  {importDraftFiles.length}
-                </b>
+      <div className="app-workspace">
+        <header className="top-header">
+          <div className="top-header-inner">
+            <div className="top-header-leading">
+              <button
+                aria-controls="mobile-navigation"
+                aria-expanded={mobileNavigationOpen}
+                aria-label="Mở điều hướng"
+                className="mobile-menu-button"
+                onClick={() => setMobileNavigationOpen(true)}
+                ref={mobileMenuButton}
+                type="button"
+              >
+                <MenuIcon aria-hidden="true" size={20} />
+              </button>
+              <div className="top-header-page">
+                <CurrentPageIcon aria-hidden="true" size={18} strokeWidth={1.8} />
+                <span>{currentNavigation.label}</span>
+              </div>
+            </div>
+            <div className="top-header-meta">
+              <div className="top-header-store" title={data.settings.storeName}>
+                <Store aria-hidden="true" size={17} strokeWidth={1.8} />
+                <span>
+                  <small>Cửa hàng</small>
+                  <strong>{data.settings.storeName}</strong>
+                </span>
+              </div>
+              {connectionLabel ? (
+                <div
+                  className={cn(
+                    "connection-chip",
+                    (refreshing || !connection) && "is-syncing",
+                    connection?.service === "offline" && "is-offline",
+                  )}
+                >
+                  <span aria-hidden="true" />
+                  <strong>{connectionLabel}</strong>
+                </div>
               ) : null}
-            </button>
-          );
-        })}
-      </nav>
+              <time className="top-header-date" dateTime={data.today}>
+                {data.today.split("-").reverse().join("/")}
+              </time>
+            </div>
+          </div>
+        </header>
+
+        <main className="main-content">
+          {hasStore && connection?.service === "offline" ? (
+            <Notice tone="warning">
+              Không thể kết nối dịch vụ. Dữ liệu đang hiển thị có thể chưa phải bản mới nhất.
+            </Notice>
+          ) : null}
+          {!hasStore ? (
+            <Notice tone="warning">
+              Chưa có cửa hàng để làm việc. Hãy nhập dữ liệu cửa hàng hoặc liên
+              hệ quản trị viên.
+            </Notice>
+          ) : null}
+          <section hidden={page !== "import"}
+            aria-hidden={page !== "import"}
+          >
+            <ImportView
+              store={data.settings.storeName}
+              defaultStoreId={data.settings.storeId}
+              defaultForecastDate={data.today}
+              defaultForecastHorizon={data.settings.forecastHorizon}
+              connection={connection}
+              files={importDraftFiles}
+              setFiles={setImportDraftFiles}
+              onRefreshConnection={refreshConnection}
+              onImported={importResult}
+            />
+          </section>
+          {page === "import" ? null : selectedPage}
+        </main>
+      </div>
+
+      {mobileNavigationOpen ? (
+        <div className="mobile-drawer-layer">
+          <button
+            aria-label="Đóng điều hướng"
+            className="mobile-drawer-backdrop"
+            onClick={closeMobileNavigation}
+            type="button"
+          />
+          <aside
+            aria-label="Điều hướng ShelfCash"
+            aria-modal="true"
+            className="mobile-drawer"
+            id="mobile-navigation"
+            role="dialog"
+          >
+            <div className="mobile-drawer-header">
+              <div className="brand">
+                <i>SC</i>
+                <span>
+                  <strong>ShelfCash</strong>
+                  <small>Vận hành cửa hàng</small>
+                </span>
+              </div>
+              <button
+                aria-label="Đóng điều hướng"
+                className="mobile-drawer-close"
+                onClick={closeMobileNavigation}
+                ref={mobileCloseButton}
+                type="button"
+              >
+                <X aria-hidden="true" size={20} />
+              </button>
+            </div>
+            <label className="store-select">
+              <span>Cửa hàng</span>
+              <select value={data.settings.storeId} disabled>
+                <option value={data.settings.storeId}>
+                  {data.settings.storeName}
+                </option>
+              </select>
+            </label>
+            <AppNavigation
+              page={page}
+              hasStore={hasStore}
+              importDraftCount={importDraftFiles.length}
+              onSelect={(target) => {
+                setPage(target);
+                closeMobileNavigation();
+              }}
+            />
+            <div className={cn("sync-status", !connectionLabel && "is-quiet")}>
+              {connectionLabel ? (
+                <>
+                  <span
+                    className={cn(
+                      "sync-dot",
+                      (refreshing || !connection) && "syncing",
+                      connection?.service === "offline" && "offline",
+                    )}
+                  />
+                  <strong>{connectionLabel}</strong>
+                </>
+              ) : null}
+              <small>
+                <CalendarClock aria-hidden="true" size={15} />
+                Hôm nay · {data.today.split("-").reverse().join("/")}
+              </small>
+            </div>
+          </aside>
+        </div>
+      ) : null}
 
       {toast ? (
         <Toast

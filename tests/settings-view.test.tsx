@@ -47,7 +47,8 @@ test("supplier settings do not render a safety-stock input or column", () => {
   const html = renderInventory(5, null, "Nhà cung cấp");
   assert.doesNotMatch(html, /aria-label="Tồn an toàn/);
   assert.doesNotMatch(html, /aria-label="Nhà cung cấp Sữa"/);
-  assert.match(html, /ID sup-1/);
+  assert.doesNotMatch(html, /ID sup-1/);
+  assert.match(html, /Vendor/);
   assert.match(html, /Nhà cung cấp/);
   assert.match(html, /Ngưỡng tồn kho/);
 });

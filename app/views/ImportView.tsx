@@ -49,6 +49,8 @@ import {
   Notice,
   PageHeader,
   SectionHeading,
+  StatCard,
+  SummaryGrid,
   cn,
 } from "../components/ui";
 
@@ -65,25 +67,33 @@ function clampForecastHorizon(value: number): number {
 }
 
 function sourceLabel(source: string): string {
-  if (source === "llm") return "Qwen";
+  if (source === "llm") return "AI";
   if (source === "rule_fallback") return "Quy tắc dự phòng";
   return "Quy tắc";
 }
 
-function errorState(caught: unknown): { message: string; code?: string } {
+function resultRowLabel(label: string): string {
+  const labels: Record<string, string> = {
+    "Tồn kho": "Dòng tồn kho",
+    "Bán / tiêu thụ": "Dòng bán / tiêu thụ",
+    "Công thức": "Dòng công thức",
+    "Nhập hàng": "Dòng nhập hàng",
+    Menu: "Dòng menu",
+  };
+  return labels[label] ?? `Số dòng ${label.toLocaleLowerCase("vi")}`;
+}
+
+function errorState(caught: unknown): { message: string } {
   if (caught instanceof ShelfCashApiError) {
     return {
-      message: caught.requestId
-        ? `${caught.message} · Request ${caught.requestId}`
-        : caught.message,
-      code: caught.code,
+      message: caught.message || "Không thể hoàn tất thao tác.",
     };
   }
   return {
     message:
       caught instanceof Error
         ? caught.message
-        : "Không thể hoàn tất yêu cầu.",
+        : "Không thể hoàn tất thao tác.",
   };
 }
 
@@ -115,8 +125,23 @@ function normalizedImportStatus(status: unknown): string {
     .toLowerCase();
 }
 
+function importStatusLabel(status: unknown): string {
+  const normalized = normalizedImportStatus(status);
+  if (normalized === "confirmed") return "Đã xác nhận ghép cột";
+  if (["processing", "running"].includes(normalized)) return "Đang xử lý";
+  if (["queued", "pending"].includes(normalized)) return "Đang chờ xử lý";
+  if (
+    ["processed", "completed", "done", "succeeded", "success"].includes(
+      normalized,
+    )
+  ) {
+    return "Đã hoàn tất";
+  }
+  if (normalized === "failed") return "Không thành công";
+  return "Chưa xác định";
+}
+
 export function ImportView({
-  store,
   defaultStoreId,
   defaultForecastDate,
   defaultForecastHorizon,
@@ -126,7 +151,7 @@ export function ImportView({
   onRefreshConnection,
   onImported,
 }: {
-  store: string;
+  store?: string;
   defaultStoreId: string;
   defaultForecastDate: string;
   defaultForecastHorizon: number;
@@ -279,7 +304,7 @@ export function ImportView({
         idempotencyKey: idempotency.current.upload.key,
       });
       if (!response.import_id) {
-        throw new Error("Backend không trả import_id.");
+        throw new Error("Hệ thống không tạo được mã lần nhập.");
       }
       const editable = buildEditableMappings(response);
       setCreated(response);
@@ -290,8 +315,8 @@ export function ImportView({
       setPhase("review");
       setStatusText(
         response.requires_review === false
-          ? "Backend đã nhận diện đầy đủ. Bạn vẫn có thể kiểm tra trước khi xử lý."
-          : "Kiểm tra loại bảng và cách ghép cột.",
+          ? "Hệ thống đã nhận diện đầy đủ. Bạn vẫn có thể kiểm tra trước khi xử lý."
+          : "Kiểm tra loại dữ liệu và cách ghép cột.",
       );
       delete idempotency.current.upload;
     } catch (caught) {
@@ -323,7 +348,9 @@ export function ImportView({
     try {
       const suggestion = await mapSheet(selected.profile);
       updateSelected((item) => applyMappingSuggestion(item, suggestion));
-      setStatusText(`Đã cập nhật gợi ý cho “${selected.sheetName}”.`);
+      setStatusText(
+        `Đã cập nhật gợi ý ghép cột cho “${selected.sheetName}”.`,
+      );
     } catch (caught) {
       setError(errorState(caught));
     } finally {
@@ -344,7 +371,7 @@ export function ImportView({
         setPhase("failed");
         delete idempotency.current.process;
         setStatusText(
-          "Import này đã thất bại. Hãy tạo import mới với các tệp đang được giữ.",
+          "Lần nhập này không thành công. Hãy tạo lần nhập mới với các tệp đang được giữ.",
         );
         return;
       }
@@ -360,7 +387,7 @@ export function ImportView({
           if (!importStillProcessing(caught)) throw caught;
           setPhase("processing");
           setStatusText(
-            "Backend đã xử lý nhưng kết quả chưa sẵn sàng. Hãy bấm Đồng bộ lại sau ít phút.",
+            "Dữ liệu đã xử lý xong nhưng kết quả chưa sẵn sàng. Chọn Đồng bộ lại sau một lúc.",
           );
         }
         return;
@@ -374,7 +401,7 @@ export function ImportView({
       }
       setStatusText(
         response.status
-          ? `Trạng thái backend: ${response.status}`
+          ? `Trạng thái xử lý: ${importStatusLabel(response.status)}`
           : "Đã đồng bộ trạng thái mới nhất.",
       );
     } catch (caught) {
@@ -391,13 +418,13 @@ export function ImportView({
     delete idempotency.current.process;
     setResult(payload);
     setPhase("done");
-    setStatusText("Dữ liệu đã được đưa vào ShelfCash.");
+    setStatusText("Dữ liệu đã được nhập vào ShelfCash.");
     if (!synchronize) return;
     try {
       await onImported(payload, files);
     } catch (caught) {
       setError({
-        message: `${errorState(caught).message} Import đã xử lý thành công; hãy đồng bộ lại dữ liệu.`,
+        message: `${errorState(caught).message} Dữ liệu đã được xử lý; hãy đồng bộ lại.`,
       });
     }
   }
@@ -410,10 +437,10 @@ export function ImportView({
       );
       if (firstIncomplete) setSelectedId(firstIncomplete.sheetId);
       setChecked(false);
-      setStatusText("Hoàn tất các field bắt buộc trước khi xác nhận.");
+      setStatusText("Hoàn tất các trường bắt buộc trước khi xác nhận.");
       setError({
         message:
-          "Chưa thể sang bước tiếp theo. Hãy bổ sung đủ field bắt buộc và gỡ canonical field bị trùng.",
+          "Chưa thể tiếp tục. Hãy ghép đủ các trường bắt buộc và gỡ trường chuẩn bị trùng.",
       });
       return;
     }
@@ -441,11 +468,11 @@ export function ImportView({
       setWarnings(nextWarnings);
       setErrors(nextErrors);
       if (nextErrors.length) {
-        setStatusText("Backend yêu cầu sửa lại mapping.");
+        setStatusText("Hệ thống yêu cầu kiểm tra lại cách ghép cột.");
         return;
       }
       setPhase("confirmed");
-      setStatusText("Mapping đã được xác nhận.");
+      setStatusText("Đã xác nhận cách ghép cột.");
       delete idempotency.current.confirm;
     } catch (caught) {
       if (!retryableTransportFailure(caught)) {
@@ -466,7 +493,7 @@ export function ImportView({
         await delay(800);
       }
     }
-    throw new Error("Backend chưa trả kết quả.");
+    throw new Error("Kết quả chưa sẵn sàng.");
   }
 
   async function runProcess() {
@@ -491,7 +518,7 @@ export function ImportView({
       if (normalizedImportStatus(response.status) === "failed") {
         setPhase("failed");
         setStatusText(
-          "Import này đã thất bại. Hãy tạo import mới với các tệp đang được giữ.",
+          "Lần nhập này không thành công. Hãy tạo lần nhập mới với các tệp đang được giữ.",
         );
         delete idempotency.current.process;
         return;
@@ -502,7 +529,7 @@ export function ImportView({
       const stillProcessing = importStillProcessing(caught);
       setPhase("processing");
       setStatusText(
-        "Backend có thể vẫn đang xử lý. Hãy dùng Đồng bộ để kiểm tra lại; request hiện tại vẫn được giữ an toàn.",
+        "Dữ liệu có thể vẫn đang được xử lý. Không cần gửi lại; chọn Đồng bộ để kiểm tra trạng thái.",
       );
       setError(stillProcessing ? null : errorState(caught));
     } finally {
@@ -512,68 +539,51 @@ export function ImportView({
 
   return (
     <>
-      <PageHeader
-        title="Nhập dữ liệu"
-        subtitle="Đưa Excel hoặc CSV vào ShelfCash."
-        context={store}
-      />
+      <PageHeader title="Nhập dữ liệu" />
 
-      <div className="connection-strip">
-        <div>
-          <i
-            className={cn(
-              "connection-dot",
-              connection?.service === "online" && "online",
-            )}
-          />
-          <span>
-            Backend{" "}
-            <strong>
-              {connection?.service === "online"
-                ? "đã kết nối"
-                : connection
-                  ? "chưa kết nối"
-                  : "đang kiểm tra"}
-            </strong>
-          </span>
+      {connection?.service !== "online" || connection?.llm !== "online" ? (
+        <div className="connection-strip">
+          {connection?.service !== "online" ? (
+            <div>
+              <i className="connection-dot" />
+              <span>
+                Máy chủ{" "}
+                <strong>{connection ? "chưa kết nối" : "đang kiểm tra"}</strong>
+              </span>
+            </div>
+          ) : null}
+          {connection?.llm !== "online" ? (
+            <div>
+              <i className="connection-dot" />
+              <span>
+                AI hỗ trợ ghép cột{" "}
+                <strong>
+                  {!connection || connection.llm === "unknown"
+                    ? "chưa kiểm tra"
+                    : "chưa sẵn sàng"}
+                </strong>
+              </span>
+            </div>
+          ) : null}
+          <Button
+            variant="quiet"
+            busy={busy === "health"}
+            onClick={() => void onRefreshConnection()}
+          >
+            <RefreshCw size={14} />
+            Kiểm tra lại
+          </Button>
         </div>
-        <div>
-          <i
-            className={cn(
-              "connection-dot",
-              connection?.llm === "online" && "online",
-            )}
-          />
-          <span>
-            Qwen{" "}
-            <strong>
-              {connection?.llm === "online"
-                ? "sẵn sàng"
-                : connection?.llm === "unknown"
-                  ? "chưa rõ"
-                  : "ngoại tuyến"}
-            </strong>
-          </span>
-        </div>
-        <Button
-          variant="quiet"
-          busy={busy === "health"}
-          onClick={() => void onRefreshConnection()}
-        >
-          <RefreshCw size={14} />
-          Kiểm tra lại
-        </Button>
-      </div>
+      ) : null}
 
       {connection?.service === "offline" ? (
         <Notice tone="warning">
-          {connection.message ??
-            "Chưa thể kết nối backend. Kiểm tra cấu hình trước khi nhập dữ liệu."}
+          Chưa thể kết nối máy chủ. Kiểm tra cấu hình trước khi nhập dữ liệu.
         </Notice>
       ) : null}
 
       <ol className="step-track" aria-label="Tiến trình nhập dữ liệu">
-        {["Chọn tệp", "Duyệt mapping", "Xử lý", "Hoàn tất"].map(
+        {["Chọn tệp", "Ghép cột", "Xử lý", "Hoàn tất"].map(
           (step, index) => (
             <li className={index <= activeStep ? "active" : ""} key={step}>
               <i>{index < activeStep ? <Check size={12} /> : index + 1}</i>
@@ -648,8 +658,8 @@ export function ImportView({
             <div className="sample-file">
               <FileSpreadsheet size={20} />
               <span>
-                <strong>Tệp tham khảo</strong>
-                <small>Cấu trúc dữ liệu phổ biến</small>
+                <strong>Tệp mẫu</strong>
+                <small>Xem cấu trúc cột được hỗ trợ</small>
               </span>
               <a href="/api/sample" download>
                 <Download size={16} />
@@ -690,7 +700,7 @@ export function ImportView({
 
           <div className="confirm-row">
             <span className="quiet-copy">
-              Mapping sẽ được gợi ý bằng quy tắc hoặc Qwen.
+              Hệ thống sẽ đề xuất cách ghép cột bằng quy tắc hoặc AI.
             </span>
             <Button
               variant="primary"
@@ -703,17 +713,14 @@ export function ImportView({
               }
               onClick={() => void startImport()}
             >
-              Tải lên và nhận diện
+              Tải lên và nhận diện cột
             </Button>
           </div>
         </>
       ) : null}
 
       {error ? (
-        <Notice tone="error">
-          {error.message}
-          {error.code ? <small className="error-code">{error.code}</small> : null}
-        </Notice>
+        <Notice tone="error">{error.message}</Notice>
       ) : null}
       {warnings.map((warning) => (
         <Notice tone="warning" key={warning}>
@@ -730,10 +737,11 @@ export function ImportView({
         <>
           <div className="import-meta">
             <span>
-              Import <strong>{created.import_id.slice(0, 8)}</strong>
+              Mã lần nhập <strong>{created.import_id.slice(0, 8)}</strong>
             </span>
             <span>
-              Nguồn <strong>{sourceLabel(created.source ?? "rule")}</strong>
+              Nguồn đề xuất{" "}
+              <strong>{sourceLabel(created.source ?? "rule")}</strong>
             </span>
             <Button
               variant="quiet"
@@ -752,8 +760,8 @@ export function ImportView({
       {(phase === "review" || phase === "confirmed") && selected ? (
         <>
           <SectionHeading
-            title="Các bảng đã tìm thấy"
-            subtitle={`${mappingValidation.processableSheets} bảng dữ liệu cần kiểm tra`}
+            title="Các bảng dữ liệu"
+            subtitle={`${mappingValidation.processableSheets} bảng sẽ xử lý · ${mappingValidation.ignoredSheets} bảng sẽ bỏ qua`}
             action={
               <Button
                 variant="secondary"
@@ -765,13 +773,13 @@ export function ImportView({
                 }
                 title={
                   selectedValidation?.unknownSheetType
-                    ? "Bảng chưa xác định sẽ được bỏ qua, không cần gợi ý lại"
+                    ? "Bảng chưa xác định sẽ được bỏ qua; không cần gợi ý lại"
                     : undefined
                 }
                 onClick={() => void remapWithQwen()}
               >
                 <Sparkles size={14} />
-                Gợi ý lại bằng Qwen
+                Gợi ý lại bằng AI
               </Button>
             }
           />
@@ -818,7 +826,7 @@ export function ImportView({
                       {validation?.unknownSheetType
                         ? "Bỏ qua"
                         : validation?.complete
-                        ? "Đã nối đủ"
+                        ? "Đã ghép đủ"
                         : `${validation?.mappedColumns ?? 0}/${validation?.totalColumns ?? item.columns.length} cột`}
                     </b>
                   </span>
@@ -849,63 +857,63 @@ export function ImportView({
             <Confidence
               title={
                 selected.confidence === null
-                  ? sourceLabel(selected.source)
+                  ? "Chưa có điểm tin cậy"
                   : `Độ tin cậy ${Math.round(
                       selected.confidence <= 1
                         ? selected.confidence * 100
                         : selected.confidence,
                     )}%`
               }
-              detail={`Gợi ý bởi ${sourceLabel(selected.source)}.`}
+              detail={`Nguồn đề xuất: ${sourceLabel(selected.source)}.`}
             />
           </div>
 
           {selectedValidation?.unknownSheetType ? (
             <Notice tone="info">
-              Bảng này chưa xác định được loại dữ liệu và sẽ được bỏ qua khi xử
-              lý.
+              Bảng này chưa xác định được loại dữ liệu và sẽ được bỏ qua.
             </Notice>
           ) : null}
 
           {!selectedValidation?.unknownSheetType ? (
             <>
-              <SectionHeading
-                title="Ghép cột"
-                subtitle="Nối từng header trong file với một field thuộc canonical schema."
-              />
+              <SectionHeading title="Ghép cột" />
               {selectedValidation?.unresolvedColumns.length ? (
                 <Notice tone="info">
-                  Có {selectedValidation.unresolvedColumns.length} cột không sử
-                  dụng:{" "}
+                  Có {selectedValidation.unresolvedColumns.length} cột không được
+                  nhập:{" "}
                   <strong>
                     {selectedValidation.unresolvedColumns.join(", ")}
                   </strong>
-                  . Các cột này sẽ được gửi với giá trị null và không được xử
-                  lý.
+                  .
                 </Notice>
               ) : null}
               {selectedValidation?.missingCoreFields.length ? (
                 <Notice tone="error">
-                  Thiếu field bắt buộc:{" "}
+                  Thiếu trường bắt buộc:{" "}
                   <strong>
-                    {selectedValidation.missingCoreFields.join(", ")}
+                    {selectedValidation.missingCoreFields
+                      .map(canonicalFieldLabel)
+                      .join(", ")}
                   </strong>
-                  . Hãy nối một header của file với mỗi field này.
+                  . Hãy ghép một cột nguồn với từng trường này.
                 </Notice>
               ) : null}
               {selectedValidation?.duplicateFields.length ? (
                 <Notice tone="error">
-                  Mỗi canonical field chỉ được dùng một lần. Đang bị trùng:{" "}
+                  Mỗi trường chuẩn chỉ được dùng một lần. Các trường đang bị
+                  trùng:{" "}
                   <strong>
-                    {selectedValidation.duplicateFields.join(", ")}
+                    {selectedValidation.duplicateFields
+                      .map(canonicalFieldLabel)
+                      .join(", ")}
                   </strong>
                   .
                 </Notice>
               ) : null}
               {selectedValidation?.complete ? (
                 <Notice tone="success">
-                  Bảng này đã có đủ field bắt buộc và không có canonical field
-                  bị trùng.
+                  Bảng này đã có đủ trường bắt buộc và không có trường chuẩn bị
+                  trùng.
                 </Notice>
               ) : null}
               <div className="mapping-grid">
@@ -926,7 +934,7 @@ export function ImportView({
                     >
                       <span>
                         {column}
-                        {unresolved ? <b>Không sử dụng</b> : null}
+                        {unresolved ? <b>Không nhập</b> : null}
                       </span>
                       <select
                         value={selectedField}
@@ -943,7 +951,7 @@ export function ImportView({
                         }
                       >
                         <option value={ignoreField}>
-                          Không sử dụng — gửi null
+                          Không nhập cột này
                         </option>
                         {selected.targetFields.map((field) => (
                           <option
@@ -954,14 +962,14 @@ export function ImportView({
                               usedTargetFields.get(field) !== column
                             }
                           >
-                            {canonicalFieldLabel(field)} — {field}
+                            {canonicalFieldLabel(field)}
                           </option>
                         ))}
                       </select>
                       <small>
                         {unresolved
-                          ? "Cột này sẽ không được xử lý."
-                          : `Đã nối tới ${selectedField}.`}
+                          ? "Cột này sẽ không được nhập."
+                          : `Đã ghép với ${canonicalFieldLabel(selectedField)}.`}
                       </small>
                     </label>
                   );
@@ -972,7 +980,6 @@ export function ImportView({
                 <>
                   <SectionHeading
                     title="Xem trước"
-                    subtitle="Một vài dòng từ bảng gốc."
                   />
                   <div className="table-wrap">
                     <table>
@@ -1003,8 +1010,8 @@ export function ImportView({
             <>
               {mappingValidation.processableSheets === 0 ? (
                 <Notice tone="info">
-                  Tất cả bảng đang ở loại “Chưa xác định”. Backend sẽ nhận từng
-                  bảng với skip=true và không xử lý dữ liệu của các bảng này.
+                  Tất cả bảng đều đang ở loại “Chưa xác định” và sẽ được bỏ qua.
+                  Lần nhập này sẽ không thêm dữ liệu.
                 </Notice>
               ) : (
                 <div
@@ -1017,11 +1024,11 @@ export function ImportView({
                   <span>
                     <strong>
                       {mappingValidation.mappedColumns}/
-                      {mappingValidation.totalColumns} cột đã nối
+                      {mappingValidation.totalColumns} cột đã ghép
                     </strong>
                     <small>
                       {mappingValidation.complete
-                        ? `${mappingValidation.unresolvedColumns} cột không sử dụng sẽ được gửi với giá trị null.`
+                        ? `${mappingValidation.unresolvedColumns} cột sẽ không được nhập.`
                         : `Còn ${mappingValidation.incompleteSheets} bảng dữ liệu cần hoàn tất.`}
                     </small>
                   </span>
@@ -1042,8 +1049,8 @@ export function ImportView({
                     />
                     <span>
                       {mappingValidation.complete
-                        ? "Tôi đã kiểm tra loại dữ liệu, các field bắt buộc và những bảng sẽ bỏ qua."
-                        : "Bổ sung field bắt buộc và gỡ mapping trùng để mở khóa xác nhận."}
+                        ? "Tôi đã kiểm tra loại dữ liệu, các trường bắt buộc và những bảng sẽ bỏ qua."
+                        : "Bổ sung trường bắt buộc và gỡ phần ghép trùng để mở khóa xác nhận."}
                     </span>
                   </label>
                 ) : (
@@ -1063,11 +1070,11 @@ export function ImportView({
                   title={
                     mappingValidation.complete
                       ? undefined
-                      : "Cần đủ field bắt buộc và không được trùng canonical field"
+                      : "Cần đủ trường bắt buộc và không được trùng trường chuẩn"
                   }
                   onClick={() => void confirmMappings()}
                 >
-                  Xác nhận mapping
+                  Xác nhận ghép cột
                 </Button>
               </div>
             </>
@@ -1078,7 +1085,7 @@ export function ImportView({
                 disabled={Boolean(busy)}
                 onClick={() => setPhase("review")}
               >
-                Sửa mapping
+                Sửa ghép cột
               </Button>
               <Button
                 variant="primary"
@@ -1098,7 +1105,10 @@ export function ImportView({
           <RefreshCw className="spin" size={20} />
           <span>
             <strong>Đang xử lý dữ liệu</strong>
-            <small>Bạn có thể giữ nguyên trang này.</small>
+            <small>
+              Bạn có thể chuyển sang mục khác; tiến trình vẫn được giữ trong
+              phiên này.
+            </small>
           </span>
         </div>
       ) : null}
@@ -1106,19 +1116,19 @@ export function ImportView({
       {phase === "failed" ? (
         <>
           <Notice tone="error">
-            Import này đã kết thúc ở trạng thái thất bại và không thể xử lý lại.
-            Các tệp bạn chọn vẫn được giữ để tạo một import mới.
+            Lần nhập này không thành công và không thể xử lý lại. Các tệp bạn
+            chọn vẫn được giữ để tạo một lần nhập mới.
           </Notice>
           <div className="confirm-row">
             <span className="quiet-copy">
-              Tạo import mới sau khi sửa dữ liệu hoặc mapping cần thiết.
+              Tạo lần nhập mới sau khi sửa dữ liệu hoặc cách ghép cột.
             </span>
             <Button
               variant="primary"
               disabled={Boolean(busy)}
               onClick={resetImport}
             >
-              Tạo import mới
+              Tạo lần nhập mới
             </Button>
           </div>
         </>
@@ -1126,19 +1136,21 @@ export function ImportView({
 
       {phase === "done" && result ? (
         <>
-          <Notice tone="success">Dữ liệu đã sẵn sàng để sử dụng.</Notice>
-          <div className="result-counts">
+          <Notice tone="success">Nhập dữ liệu hoàn tất.</Notice>
+          <SummaryGrid columns={5}>
             {resultCounts(result).map((item) => (
-              <div key={item.label}>
-                <strong>{item.value.toLocaleString("vi-VN")}</strong>
-                <span>{item.label}</span>
-              </div>
+              <StatCard
+                key={item.label}
+                label={resultRowLabel(item.label)}
+                value={item.value.toLocaleString("vi-VN")}
+                status="success"
+              />
             ))}
-          </div>
+          </SummaryGrid>
           <div className="confirm-row">
             <span className="quiet-copy">
-              Chỉ các bảng đã xác nhận được xử lý theo đúng loại dữ liệu; lịch
-              sử mua hàng không tự làm tăng tồn kho.
+              Chỉ các bảng đã xác nhận mới được nhập. Lịch sử mua hàng không làm
+              thay đổi tồn kho hiện tại.
             </span>
             <Button
               variant="secondary"

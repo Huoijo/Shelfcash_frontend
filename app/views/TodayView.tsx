@@ -1,6 +1,11 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
+import {
+  ArrowRight,
+  CircleAlert,
+  Clock3,
+  WalletCards,
+} from "lucide-react";
 import type {
   BootstrapData,
   EnrichedInventoryItem,
@@ -11,9 +16,10 @@ import type {
 import {
   AlertRow,
   Button,
-  Metric,
   PageHeader,
   SectionHeading,
+  StatCard,
+  SummaryGrid,
   formatDate,
   formatQuantity,
   formatVnd,
@@ -42,7 +48,7 @@ function isActionableStatus(status: InventoryStatus): status is ActionableStatus
 }
 
 function formatBackendDate(value?: string): string {
-  return value ? formatDate(value) : "chưa có ngày";
+  return value ? formatDate(value) : "chưa ghi nhận";
 }
 
 function inventoryAlerts(items: EnrichedInventoryItem[]): InventoryAlert[] {
@@ -79,7 +85,7 @@ function alertCopy(alert: InventoryAlert): {
   if (status === "stockout") {
     return {
       title: `${ingredient.ingredient}: hết hàng`,
-      body: `${lotReference} có trạng thái stockout từ backend.`,
+      body: `${lotReference} · Không còn tồn khả dụng.`,
       tone: "red",
     };
   }
@@ -87,14 +93,14 @@ function alertCopy(alert: InventoryAlert): {
     const quantity = lot?.expiredQuantity ?? ingredient.expiredQty ?? ingredient.onHand;
     return {
       title: `${ingredient.ingredient}: ${formatQuantity(quantity, ingredient.unit)} đã hết hạn`,
-      body: `${lotReference} · hạn ${formatBackendDate(lot?.expiryDate ?? ingredient.expiryDate)}.`,
+      body: `${lotReference} · Hạn dùng: ${formatBackendDate(lot?.expiryDate ?? ingredient.expiryDate)}.`,
       tone: "red",
     };
   }
   const quantity = lot?.expiringQuantity ?? ingredient.expiringQty;
   return {
     title: `${ingredient.ingredient}: ${formatQuantity(quantity, ingredient.unit)} gần hết hạn`,
-    body: `${lotReference} · hạn ${formatBackendDate(lot?.expiryDate ?? ingredient.expiryDate)} · ưu tiên FEFO.`,
+    body: `${lotReference} · Hạn dùng: ${formatBackendDate(lot?.expiryDate ?? ingredient.expiryDate)} · ưu tiên xuất trước.`,
     tone: "amber",
   };
 }
@@ -107,26 +113,26 @@ function planningCopy(plan: PlanResponse): {
   const status = plan.status ?? "idle";
   if (status === "running") {
     return {
-      title: "Kế hoạch đang chạy",
-      body: plan.engineStatus || "Đang chờ kết quả từ backend.",
+      title: "Đang lập kế hoạch",
+      body: "Hệ thống đang tính toán. Kết quả sẽ hiển thị khi hoàn tất.",
       tone: "blue",
     };
   }
   if (status === "blocked") {
     return {
-      title: "Kế hoạch đang bị chặn",
+      title: "Chưa thể lập kế hoạch",
       body:
         plan.failureMessage ||
         (plan.failureCode === "MODEL_NOT_READY"
           ? "Mô hình dự báo chưa sẵn sàng."
-          : "Xem chi tiết lỗi trong màn hình kế hoạch."),
+          : "Mở Kế hoạch nhập để xem nội dung cần xử lý."),
       tone: "amber",
     };
   }
   if (status === "failed") {
     return {
-      title: "Lần chạy kế hoạch thất bại",
-      body: plan.failureMessage || "Mở kế hoạch để xem lỗi backend.",
+      title: "Lập kế hoạch không thành công",
+      body: plan.failureMessage || "Mở Kế hoạch nhập để xem chi tiết và thử lại.",
       tone: "red",
     };
   }
@@ -135,16 +141,16 @@ function planningCopy(plan: PlanResponse): {
       plan.budget?.plannedCost ??
       plan.recommendations.reduce((sum, line) => sum + line.cost, 0);
     return {
-      title: `Kế hoạch hoàn tất · ${formatVnd(plannedCost)}`,
+      title: "Kế hoạch đã hoàn tất",
       body: plan.completedAt
-        ? `Backend hoàn tất ngày ${formatBackendDate(plan.completedAt)}.`
-        : "Kết quả backend đã sẵn sàng để xem.",
+        ? `Chi phí dự kiến ${formatVnd(plannedCost)} · hoàn tất ngày ${formatBackendDate(plan.completedAt)}.`
+        : `Chi phí dự kiến ${formatVnd(plannedCost)}.`,
       tone: "pine",
     };
   }
   return {
-    title: "Chưa chạy kế hoạch",
-    body: "Mở màn hình kế hoạch để bắt đầu dự báo và lập kế hoạch nhập.",
+    title: "Chưa có kế hoạch",
+    body: "Mở Kế hoạch nhập để bắt đầu dự báo và lập kế hoạch.",
     tone: "blue",
   };
 }
@@ -153,15 +159,18 @@ export function TodayView({
   data,
   plan,
   onNavigate,
+  loading = false,
 }: {
   data: BootstrapData;
   plan: PlanResponse;
   onNavigate: (page: "inventory" | "plan") => void;
+  loading?: boolean;
 }) {
   const alerts = inventoryAlerts(plan.enrichedInventory);
   const stockoutCount = alerts.filter((alert) => alert.status === "stockout").length;
   const expiredCount = alerts.filter((alert) => alert.status === "expired").length;
   const expiringCount = alerts.filter((alert) => alert.status === "expiring").length;
+  const criticalCount = stockoutCount + expiredCount;
   const missingCount = plan.enrichedInventory.filter(
     (item) => item.statusKey === "missing",
   ).length;
@@ -169,130 +178,190 @@ export function TodayView({
   const bars = plan.status === "completed" ? plan.recommendations.slice(0, 6) : [];
 
   return (
-    <>
+    <div className="dashboard-page">
       <PageHeader
-        title="Hôm nay"
-        subtitle="Trạng thái lô kho và lần chạy kế hoạch hiện tại."
-        context={data.settings.storeName}
+        title="Tổng quan"
+        action={
+          <Button variant="primary" onClick={() => onNavigate("plan")}>
+            Mở kế hoạch nhập hàng
+            <ArrowRight aria-hidden="true" size={16} />
+          </Button>
+        }
       />
 
-      <div className="metric-grid">
-        <Metric
+      <SummaryGrid columns={3} className="dashboard-kpis">
+        <StatCard
           label="Lô cần xử lý"
           value={alerts.length}
-          note={`${stockoutCount} hết hàng · ${expiredCount} hết hạn`}
-          tone="red"
+          description={`${stockoutCount} hết hàng · ${expiredCount} hết hạn · ${expiringCount} gần hết hạn`}
+          status={
+            criticalCount > 0
+              ? "danger"
+              : expiringCount > 0
+                ? "warning"
+                : "success"
+          }
+          icon={<CircleAlert aria-hidden="true" />}
+          loading={loading}
         />
-        <Metric
-          label="Lô gần hạn"
+        <StatCard
+          label="Lô gần hết hạn"
           value={expiringCount}
-          note={`${missingCount} nguyên liệu thiếu dữ liệu lô`}
-          tone="amber"
+          description="Ưu tiên xuất trước theo hạn dùng"
+          status={expiringCount > 0 ? "warning" : "success"}
+          icon={<Clock3 aria-hidden="true" />}
+          loading={loading}
         />
-        <Metric
+        <StatCard
           label="Ngân sách còn"
           value={formatVnd(data.settings.remainingBudget)}
-          note={`Đã giữ ${formatVnd(data.settings.reservedBudget)} · đã chi ${formatVnd(data.settings.spentBudget)}`}
+          description={`Đã giữ cho đơn hàng ${formatVnd(data.settings.reservedBudget)} · đã chi ${formatVnd(data.settings.spentBudget)}`}
+          icon={<WalletCards aria-hidden="true" />}
+          loading={loading}
         />
-      </div>
+      </SummaryGrid>
 
-      <div className="overview-grid">
-        <section>
-          <SectionHeading title="Việc cần làm" />
-          {alerts.slice(0, 6).map((alert) => {
-            const copy = alertCopy(alert);
-            return (
-              <AlertRow
-                key={alert.key}
-                title={copy.title}
-                body={copy.body}
-                tone={copy.tone}
-                onClick={() => onNavigate("inventory")}
-              />
-            );
-          })}
-          {alerts.length > 6 ? (
-            <AlertRow
-              title={`Còn ${alerts.length - 6} lô cần xử lý`}
-              body="Mở kho để xem đầy đủ theo thứ tự FEFO."
-              tone="amber"
-              onClick={() => onNavigate("inventory")}
-            />
-          ) : null}
-          {alerts.length === 0 ? (
-            <AlertRow
-              title="Không có lô stockout, expired hoặc expiring"
-              body="Theo dữ liệu lô hiện tại từ backend."
-              tone="pine"
-              onClick={() => onNavigate("inventory")}
-            />
-          ) : null}
-          <AlertRow
-            title={planning.title}
-            body={planning.body}
-            tone={planning.tone}
-            onClick={() => onNavigate("plan")}
-          />
-          <div className="action-row">
-            <Button variant="primary" onClick={() => onNavigate("plan")}>
-              Mở kế hoạch nhập
-              <ArrowRight size={16} />
-            </Button>
-            <Button onClick={() => onNavigate("inventory")}>Xem kho theo lô</Button>
-          </div>
-        </section>
-
-        <section>
-          <SectionHeading
-            title="Tồn khả dụng và nhu cầu"
-            subtitle={
-              plan.status === "completed"
-                ? "Theo kịch bản kế hoạch đang chọn"
-                : "Hiển thị sau khi kế hoạch hoàn tất"
-            }
-          />
-          {bars.length > 0 ? (
-            <div className="stock-comparison">
-              <div className="stock-legend">
+      <div className="dashboard-grid">
+        <section className="dashboard-panel dashboard-analytics">
+          <SectionHeading title="Tồn khả dụng và nhu cầu" />
+          {loading ? (
+            <div className="dashboard-loading-state" aria-live="polite">
+              <span aria-hidden="true" />
+              Đang tải dữ liệu phân tích…
+            </div>
+          ) : bars.length > 0 ? (
+            <div
+              aria-label="So sánh tồn khả dụng cộng lượng đang về với nhu cầu kế hoạch"
+              className="stock-comparison"
+              role="list"
+            >
+              <div className="stock-legend" aria-hidden="true">
                 <span>
                   <i className="legend-stock" /> Tồn khả dụng + đang về
                 </span>
                 <span>
-                  <i className="legend-demand" /> Nhu cầu kế hoạch
+                  <i className="legend-demand" /> Nhu cầu dự kiến
                 </span>
               </div>
               {bars.map((line) => {
                 const stock = line.usableStock + line.inbound;
                 const demand = line.forecastDemand;
                 const maximum = Math.max(stock, demand, 0.01);
+                const stockWidth = Math.max(
+                  0,
+                  Math.min(100, (stock / maximum) * 100),
+                );
+                const demandWidth = Math.max(
+                  0,
+                  Math.min(100, (demand / maximum) * 100),
+                );
                 return (
                   <div
+                    aria-label={`${line.ingredient}: tồn khả dụng cộng đang về ${formatQuantity(stock, line.unit)}, nhu cầu ${formatQuantity(demand, line.unit)}`}
                     className="stock-row"
                     key={line.ingredientId || line.ingredient}
+                    role="listitem"
                   >
-                    <span>{line.ingredient}</span>
-                    <div>
-                      <i
-                        className="stock-bar stock-bar-current"
-                        style={{ width: `${(stock / maximum) * 100}%` }}
-                      />
-                      <i
-                        className="stock-bar stock-bar-demand"
-                        style={{ width: `${(demand / maximum) * 100}%` }}
-                      />
+                    <div className="stock-row-label">
+                      <strong>{line.ingredient}</strong>
+                      <small>{line.unit}</small>
                     </div>
-                    <small>{line.unit}</small>
+                    <div className="stock-row-plot" aria-hidden="true">
+                      <span>
+                        <i
+                          className="stock-bar stock-bar-current"
+                          style={{ width: `${stockWidth}%` }}
+                        />
+                      </span>
+                      <span>
+                        <i
+                          className="stock-bar stock-bar-demand"
+                          style={{ width: `${demandWidth}%` }}
+                        />
+                      </span>
+                    </div>
+                    <div className="stock-row-values" aria-hidden="true">
+                      <span>{formatQuantity(stock, line.unit)}</span>
+                      <span>{formatQuantity(demand, line.unit)}</span>
+                    </div>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <div className="panel table-empty">
-              Chưa có kết quả kế hoạch hoàn tất để so sánh.
+            <div className="dashboard-empty">
+              <strong>Chưa có dữ liệu so sánh</strong>
+              <span>Hoàn tất một lần chạy kế hoạch để xem tồn và nhu cầu.</span>
             </div>
           )}
         </section>
+
+        <section className="dashboard-panel dashboard-alerts">
+          <SectionHeading
+            title="Việc cần làm"
+            action={
+              loading ? null : (
+                <span className="dashboard-count">
+                  {(alerts.length + missingCount).toLocaleString("vi-VN")} vấn đề
+                </span>
+              )
+            }
+          />
+          {loading ? (
+            <div className="dashboard-loading-state" aria-live="polite">
+              <span aria-hidden="true" />
+              Đang tải cảnh báo…
+            </div>
+          ) : (
+            <div className="dashboard-alert-list">
+              {alerts.slice(0, 6).map((alert) => {
+                const copy = alertCopy(alert);
+                return (
+                  <AlertRow
+                    key={alert.key}
+                    title={copy.title}
+                    body={copy.body}
+                    tone={copy.tone}
+                    onClick={() => onNavigate("inventory")}
+                  />
+                );
+              })}
+              {alerts.length > 6 ? (
+                <AlertRow
+                  title={`Còn ${alerts.length - 6} lô cần xử lý`}
+                  body="Mở trang Kho để xem đầy đủ theo thứ tự FEFO."
+                  tone="amber"
+                  onClick={() => onNavigate("inventory")}
+                />
+              ) : null}
+              {missingCount > 0 ? (
+                <AlertRow
+                  title={`${missingCount} nguyên liệu thiếu dữ liệu lô`}
+                  body="Mở trang Kho để kiểm tra và bổ sung dữ liệu."
+                  tone="blue"
+                  onClick={() => onNavigate("inventory")}
+                />
+              ) : null}
+              {alerts.length === 0 ? (
+                <AlertRow
+                  title="Không có lô hết hàng, hết hạn hoặc gần hết hạn"
+                  tone="pine"
+                  onClick={() => onNavigate("inventory")}
+                />
+              ) : null}
+              <AlertRow
+                title={planning.title}
+                body={planning.body}
+                tone={planning.tone}
+                onClick={() => onNavigate("plan")}
+              />
+            </div>
+          )}
+          <div className="action-row">
+            <Button onClick={() => onNavigate("inventory")}>Xem kho theo lô</Button>
+          </div>
+        </section>
       </div>
-    </>
+    </div>
   );
 }

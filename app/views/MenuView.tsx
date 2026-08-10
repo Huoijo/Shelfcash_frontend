@@ -37,9 +37,10 @@ import type {
 } from "../../lib/types";
 import {
   Button,
-  Metric,
   Notice,
   PageHeader,
+  StatCard,
+  SummaryGrid,
   cn,
   formatVnd,
 } from "../components/ui";
@@ -62,13 +63,11 @@ const emptyDraft: MenuItemDraft = {
 
 function errorMessage(caught: unknown): string {
   if (caught instanceof ShelfCashApiError) {
-    return `${caught.message}${caught.code ? ` (${caught.code})` : ""}${
-      caught.requestId ? ` · Request ${caught.requestId}` : ""
-    }`;
+    return caught.message || "Không thể hoàn tất thao tác. Vui lòng thử lại.";
   }
   return caught instanceof Error
     ? caught.message
-    : "Không thể hoàn tất yêu cầu.";
+    : "Không thể hoàn tất thao tác. Vui lòng thử lại.";
 }
 
 function draftFrom(item: MenuItem): MenuItemDraft {
@@ -302,8 +301,8 @@ export function MenuView({
             const refreshedItems = await refreshMenu();
             throw new Error(
               refreshedItems
-                ? "Backend chưa trả phiên bản mới. Menu đã được tải lại; hãy mở món và kiểm tra trước khi gửi lại."
-                : "Backend chưa trả phiên bản mới và chưa thể tải lại Menu. Hãy làm mới trước khi gửi lại.",
+                ? "Hệ thống chưa trả về phiên bản mới. Menu đã được làm mới; hãy mở lại món và kiểm tra trước khi lưu lại."
+                : "Hệ thống chưa trả về phiên bản mới và chưa thể làm mới menu. Vui lòng thử lại.",
             );
           }
           version = responseVersion;
@@ -338,8 +337,8 @@ export function MenuView({
       await refreshMenu();
       const message =
         editor.mode === "create"
-          ? `Đã tạo ${editor.draft.product}.`
-          : `Đã cập nhật ${editor.draft.product}.`;
+          ? `Đã tạo món “${editor.draft.product}”.`
+          : `Đã cập nhật món “${editor.draft.product}”.`;
       setSuccess(message);
       setEditor(null);
       await onMenuChanged(message);
@@ -366,8 +365,8 @@ export function MenuView({
         }
         setError(
           refreshedItems
-            ? "Món đã thay đổi ở nơi khác. Menu mới nhất đã được tải lại; hãy xem lại các giá trị trong biểu mẫu rồi gửi lại."
-            : "Món đã thay đổi ở nơi khác nhưng chưa thể tải lại Menu. Hãy làm mới trước khi gửi lại.",
+            ? "Món này vừa được cập nhật ở nơi khác. Dữ liệu mới nhất đã được tải; hãy kiểm tra lại thông tin rồi lưu lại."
+            : "Món này vừa được cập nhật ở nơi khác nhưng chưa thể tải dữ liệu mới nhất. Vui lòng làm mới menu rồi thử lại.",
         );
       } else {
         setError(errorMessage(caught));
@@ -381,8 +380,6 @@ export function MenuView({
     <>
       <PageHeader
         title="Menu"
-        subtitle="Quản lý món lẻ, combo và giá bán."
-        context={data.settings.storeName}
         action={
           <Button
             variant="primary"
@@ -399,25 +396,26 @@ export function MenuView({
         }
       />
 
-      <div className="metric-grid">
-        <Metric
-          label="Đang bán"
+      <SummaryGrid columns={3}>
+        <StatCard
+          label="Món đang bán"
           value={summary.activeCount}
-          note={`${summary.inactiveCount} món đã ngừng bán`}
+          description={`${summary.inactiveCount} món đã ngừng bán`}
+          status="success"
         />
-        <Metric
+        <StatCard
           label="Combo"
           value={summary.comboCount}
-          note={`${summary.singleCount} món bán lẻ`}
-          tone="blue"
+          description={`${summary.singleCount} món lẻ`}
+          status="info"
         />
-        <Metric
-          label="Thiếu công thức"
+        <StatCard
+          label="Món thiếu công thức"
           value={missingRecipes}
-          note="Chỉ tính món lẻ đang bán"
-          tone={missingRecipes ? "amber" : "pine"}
+          description="Chỉ tính món lẻ đang bán"
+          status={missingRecipes ? "warning" : "success"}
         />
-      </div>
+      </SummaryGrid>
 
       {error ? <Notice tone="error">{error}</Notice> : null}
       {success ? <Notice tone="success">{success}</Notice> : null}
@@ -429,7 +427,7 @@ export function MenuView({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Tìm theo tên hoặc mã món"
-            aria-label="Tìm Menu"
+            aria-label="Tìm món trong menu"
           />
         </label>
         <div className="menu-filters">
@@ -465,7 +463,7 @@ export function MenuView({
             onClick={() => void refreshMenu()}
           >
             <RefreshCw size={14} />
-            Làm mới
+            {loading ? "Đang làm mới" : "Làm mới"}
           </Button>
           <Button
             className="menu-mobile-add"
@@ -483,7 +481,12 @@ export function MenuView({
         </div>
       </div>
 
-      {filteredItems.length ? (
+      {loading && items.length === 0 ? (
+        <div className="menu-empty" role="status">
+          <RefreshCw className="spin" size={25} />
+          <h2>Đang tải menu…</h2>
+        </div>
+      ) : filteredItems.length ? (
         <div className="menu-card-grid">
           {filteredItems.map((item) => {
             const recipe = data.products.find(
@@ -572,7 +575,7 @@ export function MenuView({
                         ))}
                       </ul>
                     ) : (
-                      <p>Backend chưa trả thành phần combo.</p>
+                      <p>Chưa có dữ liệu thành phần cho combo này.</p>
                     )}
                   </div>
                 ) : (
@@ -581,13 +584,13 @@ export function MenuView({
                     <span>
                       <strong>
                         {recipeReady
-                          ? "Công thức đã sẵn sàng"
-                          : "Thiếu công thức"}
+                          ? "Công thức hoàn chỉnh"
+                          : "Công thức chưa hoàn chỉnh"}
                       </strong>
                       <small>
                         {recipeReady
-                          ? "Có thể quy đổi sang nguyên liệu."
-                          : "Cần bổ sung trước khi dựng nhu cầu."}
+                          ? "Có thể dùng để tính nhu cầu nguyên liệu."
+                          : "Bổ sung định lượng trước khi tính nhu cầu nguyên liệu."}
                       </small>
                     </span>
                   </div>
@@ -609,13 +612,13 @@ export function MenuView({
           <Coffee size={25} />
           <h2>
             {items.length
-              ? "Không có món phù hợp bộ lọc"
-              : "Chưa có dữ liệu Menu"}
+              ? "Không có món phù hợp với bộ lọc"
+              : "Menu chưa có món nào"}
           </h2>
           <p>
             {items.length
-              ? "Đổi từ khóa hoặc đưa bộ lọc về Tất cả."
-              : "Nhập file 06_Menu.xlsx hoặc tạo món trực tiếp sau khi backend Menu đã sẵn sàng."}
+              ? "Thử từ khóa khác hoặc đặt các bộ lọc về “Tất cả”."
+              : "Nhập dữ liệu menu từ tệp hoặc thêm món trực tiếp."}
           </p>
           <div className="button-group">
             {items.length ? (
@@ -629,7 +632,7 @@ export function MenuView({
                 Xóa bộ lọc
               </Button>
             ) : (
-              <Button onClick={onOpenImport}>Mở Nhập dữ liệu</Button>
+              <Button onClick={onOpenImport}>Mở trang Nhập dữ liệu</Button>
             )}
             <Button
               variant="primary"
@@ -668,12 +671,12 @@ export function MenuView({
             <header>
               <div>
                 <span>
-                  {editor.mode === "create" ? "Sản phẩm mới" : editor.draft.sku}
+                  {editor.mode === "create" ? "Món mới" : editor.draft.sku}
                 </span>
                 <h2 id="menu-dialog-title">
                   {editor.mode === "create"
-                    ? "Thêm món vào Menu"
-                    : `Chỉnh sửa ${editor.item?.product ?? "món"}`}
+                    ? "Thêm món vào menu"
+                    : `Chỉnh sửa món “${editor.item?.product ?? "món"}”`}
                 </h2>
               </div>
               <button
@@ -729,7 +732,9 @@ export function MenuView({
               </div>
 
               <label className="field">
-                <span>Tên món / Combo</span>
+                <span>
+                  {editor.draft.itemType === "combo" ? "Tên combo" : "Tên món"}
+                </span>
                 <input
                   value={editor.draft.product}
                   maxLength={255}
@@ -799,7 +804,10 @@ export function MenuView({
                 <section className="menu-component-editor">
                   <div>
                     <span>Thành phần combo</span>
-                    <small>Chỉ chọn món lẻ đang bán; không hỗ trợ combo lồng.</small>
+                    <small>
+                      Chỉ chọn món lẻ đang bán. Combo không thể chứa
+                      combo khác.
+                    </small>
                   </div>
                   {editor.draft.components.map((component, index) => {
                     const selectedByOtherRows = new Set(
@@ -905,15 +913,15 @@ export function MenuView({
                   </Button>
                   <div className="menu-derived-price">
                     <span>
-                      Tổng giá lẻ
+                      Tổng giá món lẻ (ước tính)
                       <strong>{formatVnd(comboPricing.listPrice)}</strong>
                     </span>
                     <span>
-                      Tiết kiệm
+                      Tiết kiệm (ước tính)
                       <strong>{formatVnd(comboPricing.savings)}</strong>
                     </span>
                     <span>
-                      Mức giảm
+                      Mức giảm (ước tính)
                       <strong>
                         {(comboPricing.discount * 100).toLocaleString(
                           "vi-VN",

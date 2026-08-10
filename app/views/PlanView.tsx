@@ -29,11 +29,12 @@ import { ForecastChart } from "../components/ForecastChart";
 import {
   Button,
   Details,
-  Metric,
   Notice,
   PageHeader,
   SectionHeading,
+  StatCard,
   StatusPill,
+  SummaryGrid,
   formatDate,
   formatQuantity,
   formatVnd,
@@ -49,17 +50,17 @@ const strategyOptions: StrategyOption[] = [
   {
     label: "Tiết kiệm",
     core: "lean",
-    note: "Kịch bản P25, ưu tiên mức tồn gọn hơn.",
+    note: "Dùng mức dự báo P25 để ưu tiên tồn kho gọn hơn.",
   },
   {
     label: "Cân bằng",
     core: "balanced",
-    note: "Kịch bản P50, cân bằng thiếu hàng, hao hụt và chi phí.",
+    note: "Dùng mức dự báo P50 để cân bằng thiếu hàng, hao hụt và chi phí.",
   },
   {
     label: "An toàn",
     core: "protected",
-    note: "Kịch bản P75, giữ mức dự phòng cao hơn.",
+    note: "Dùng mức dự báo P75 để duy trì mức dự phòng cao hơn.",
   },
 ];
 
@@ -111,7 +112,7 @@ function demandLabel(demand: IngredientDemandResult): string {
 }
 
 function dateTimeLabel(value: string | undefined, timeZone?: string): string {
-  if (!value) return "Chưa có thời gian snapshot";
+  if (!value) return "Chưa có thời gian hoàn tất kế hoạch";
   const instant = new Date(value);
   if (Number.isNaN(instant.getTime())) return value;
   return new Intl.DateTimeFormat("vi-VN", {
@@ -175,22 +176,27 @@ function ScenarioCard({
 }) {
   const feasible = scenario?.feasible;
   return (
-    <article className={`metric ${active ? "metric-blue" : ""}`}>
-      <div className="metric-label">
-        <span>
-          {option.label}
-          {recommended ? " · Backend đề xuất" : ""}
-        </span>
-        <i />
-      </div>
-      <strong>{scenario ? formatVnd(scenario.cost) : "Chưa có kết quả"}</strong>
-      <small>
-        {scenario
-          ? `${feasible ? "Khả thi" : "Không khả thi"} · fill rate ${percentageLabel(scenario.fillRate)}`
-          : "Chạy lại kế hoạch để lấy kịch bản này."}
-      </small>
+    <StatCard
+      label={`${option.label}${recommended ? " · Khuyến nghị" : ""}`}
+      value={scenario ? formatVnd(scenario.cost) : "Chưa có kết quả"}
+      description={
+        scenario
+          ? `${feasible ? "Khả thi" : "Không khả thi"} · tỷ lệ đáp ứng ${percentageLabel(scenario.fillRate)}`
+          : "Chạy lại kế hoạch để lấy kịch bản này."
+      }
+      status={
+        !scenario
+          ? "neutral"
+          : !feasible
+            ? "warning"
+            : active
+              ? "info"
+              : "success"
+      }
+      className="scenario-card"
+    >
       {scenario ? (
-        <small>
+        <small className="stat-card-detail">
           Thiếu {formatQuantity(scenario.shortage)} · hao hụt{" "}
           {formatQuantity(scenario.waste)} · {scenario.warnings.length} cảnh báo
         </small>
@@ -202,7 +208,7 @@ function ScenarioCard({
       >
         {active ? "Đang xem" : "Xem kịch bản"}
       </Button>
-    </article>
+    </StatCard>
   );
 }
 
@@ -389,7 +395,7 @@ export function PlanView({
     setError("");
     try {
       await onRunPlanning(horizonDays);
-      setMessage("Đã cập nhật snapshot forecast, nhu cầu và ba kịch bản.");
+      setMessage("Đã cập nhật dự báo, nhu cầu nguyên liệu và ba kịch bản nhập hàng.");
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -408,10 +414,10 @@ export function PlanView({
     setError("");
     try {
       await onTrainModel(modelVersion.trim(), historyDays);
-      setMessage("Model đã sẵn sàng. Hãy bấm Chạy lại kế hoạch.");
+      setMessage("Mô hình dự báo đã sẵn sàng. Hãy chạy lại kế hoạch.");
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : "Không thể train model.",
+        caught instanceof Error ? caught.message : "Không thể huấn luyện mô hình dự báo.",
       );
     } finally {
       setTrainingBusy(false);
@@ -443,7 +449,9 @@ export function PlanView({
         : [];
     });
     if (lineUpdates.length === 0) {
-      setError("Nhập số lượng lớn hơn 0 cho ít nhất một dòng có po_line_id.");
+      setError(
+        "Không có dòng đơn hợp lệ để cập nhật. Mỗi dòng cần có mã hệ thống và số lượng lớn hơn 0.",
+      );
       return;
     }
     setActionBusy("update");
@@ -451,7 +459,7 @@ export function PlanView({
     setError("");
     try {
       await onUpdateOrder(selectedOrder.poId, lineUpdates);
-      setMessage("Đã lưu số lượng trên đơn nháp từ phản hồi backend.");
+      setMessage("Đã lưu số lượng mới cho đơn nháp.");
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Không thể sửa đơn nháp.",
@@ -542,7 +550,7 @@ export function PlanView({
     });
 
     if (!receivedAt || lines.length === 0) {
-      setError("Chọn thời gian nhận và nhập ít nhất một lot có số lượng lớn hơn 0.");
+      setError("Chọn thời gian nhận và nhập số lượng lớn hơn 0 cho ít nhất một lô.");
       return;
     }
 
@@ -563,7 +571,7 @@ export function PlanView({
           : {}),
         lines,
       });
-      setMessage("Đã ghi nhận các lot vừa nhận và cập nhật trạng thái đơn.");
+      setMessage("Đã ghi nhận các lô vừa nhận và cập nhật trạng thái đơn.");
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Không thể nhận hàng.",
@@ -576,9 +584,8 @@ export function PlanView({
   return (
     <>
       <PageHeader
-        title="Kế hoạch nhập"
-        subtitle="Forecast sản phẩm → nhu cầu nguyên liệu → ba kịch bản mô phỏng → đơn đặt hàng."
-        context={data.settings.storeName}
+        title="Kế hoạch nhập hàng"
+        subtitle="Từ dự báo sản phẩm đến nhu cầu nguyên liệu, ba kịch bản nhập hàng và đơn đặt hàng."
         action={
           <Button
             variant="primary"
@@ -593,7 +600,7 @@ export function PlanView({
 
       <div className="plan-controls">
         <label className="field">
-          <span>Horizon forecast (1–7 ngày)</span>
+          <span>Số ngày dự báo (1–7)</span>
           <input
             type="number"
             min="1"
@@ -606,7 +613,7 @@ export function PlanView({
           />
         </label>
         <fieldset className="segmented">
-          <legend>Snapshot workflow</legend>
+          <legend>Trạng thái lập kế hoạch</legend>
           <div>
             <button className={plan.status === "idle" ? "active" : ""}>
               Chưa chạy
@@ -623,39 +630,39 @@ export function PlanView({
 
       {plan.status === "idle" ? (
         <Notice tone="info">
-          Chọn horizon rồi chạy workflow để lấy kết quả đã persist từ backend.
+          Chọn số ngày dự báo rồi chạy kế hoạch để tạo kết quả.
         </Notice>
       ) : null}
       {plan.status === "running" ? (
         <Notice tone="info">
-          Backend đang tạo forecast, ingredient demand và procurement plan.
+          Hệ thống đang dự báo sản phẩm, tính nhu cầu nguyên liệu và lập ba
+          kịch bản nhập hàng.
         </Notice>
       ) : null}
       {plan.status === "blocked" ? (
         <>
           <Notice tone="warning">
             {plan.failureCode === "MODEL_NOT_READY"
-              ? "Model chưa sẵn sàng. Admin có thể train model rồi chạy một forecast mới."
-              : plan.failureMessage || "Workflow đang bị chặn."}
-            {plan.failureCode ? ` (${plan.failureCode})` : ""}
+              ? "Mô hình dự báo chưa sẵn sàng. Quản trị viên cần huấn luyện mô hình rồi chạy lại kế hoạch."
+              : plan.failureMessage || "Quy trình lập kế hoạch đang bị chặn."}
           </Notice>
           {plan.failureCode === "MODEL_NOT_READY" && onTrainModel ? (
-            <Details summary="Thao tác quản trị · train forecast model">
+            <Details summary="Dành cho quản trị viên · Huấn luyện mô hình dự báo">
               <Notice tone="warning">
-                Training chạy đồng bộ và có thể lâu. Chỉ thực hiện khi bạn có
-                quyền quản trị và đủ ít nhất 140 target dates lịch sử.
+                Quá trình huấn luyện có thể mất nhiều thời gian. Chỉ thực hiện
+                khi bạn có quyền quản trị và ít nhất 140 ngày dữ liệu lịch sử.
               </Notice>
               <div className="two-column compact-gap">
                 <label className="field">
-                  <span>Model version mới</span>
+                  <span>Phiên bản mô hình mới</span>
                   <input
                     value={modelVersion}
                     onChange={(event) => setModelVersion(event.target.value)}
-                    placeholder="forecast-core-v..."
+                    placeholder="mo-hinh-du-bao-v..."
                   />
                 </label>
                 <label className="field">
-                  <span>History days</span>
+                  <span>Số ngày dữ liệu lịch sử</span>
                   <input
                     type="number"
                     min="140"
@@ -673,7 +680,7 @@ export function PlanView({
                 disabled={!modelVersion.trim()}
                 onClick={() => void trainModel()}
               >
-                Train model (quản trị)
+                Huấn luyện mô hình
               </Button>
             </Details>
           ) : null}
@@ -681,8 +688,7 @@ export function PlanView({
       ) : null}
       {plan.status === "failed" ? (
         <Notice tone="error">
-          {plan.failureMessage || "Workflow lập kế hoạch thất bại."}
-          {plan.failureCode ? ` (${plan.failureCode})` : ""}
+          {plan.failureMessage || "Không thể hoàn tất quy trình lập kế hoạch."}
         </Notice>
       ) : null}
       {message ? <Notice tone="success">{message}</Notice> : null}
@@ -690,15 +696,18 @@ export function PlanView({
 
       {plan.status === "completed" ? (
         <Notice tone="warning">
-          Đây là snapshot hoàn tất lúc{" "}
+          Kết quả này được tạo lúc{" "}
           {dateTimeLabel(plan.completedAt || plan.createdAt, data.settings.timezone)}
-          {plan.cutoffDate ? `, cutoff ${formatDate(plan.cutoffDate)}` : ""}. Nếu
-          inventory, recipe hoặc settings đã đổi, hãy chạy lại trước khi tạo đơn.
+          {plan.cutoffDate
+            ? `, từ dữ liệu đến ngày ${formatDate(plan.cutoffDate)}`
+            : ""}
+          . Nếu tồn kho, công thức hoặc cài đặt đã thay đổi, hãy chạy lại trước
+          khi tạo đơn.
         </Notice>
       ) : null}
 
       {plan.warnings?.length ? (
-        <Details summary={`Cảnh báo toàn workflow (${plan.warnings.length})`}>
+        <Details summary={`Cảnh báo của quy trình (${plan.warnings.length})`}>
           <ul className="warning-list">
             {plan.warnings.map((warning, index) => (
               <li key={`${warning}-${index}`}>{warning}</li>
@@ -710,8 +719,8 @@ export function PlanView({
       {forecastEntries.length > 0 ? (
         <>
           <SectionHeading
-            title="Forecast sản phẩm"
-            subtitle="Hiển thị predictions đã persist; bộ lọc này không thay đổi scope planning."
+            title="Dự báo sản phẩm"
+            subtitle="Kết quả đã lưu. Bộ lọc chỉ thay đổi sản phẩm đang xem, không ảnh hưởng đến kế hoạch."
             action={
               <label className="field">
                 <span>Sản phẩm hiển thị</span>
@@ -732,27 +741,27 @@ export function PlanView({
           />
           {forecast ? (
             <>
-              <div className="metric-grid">
-                <Metric
+              <SummaryGrid columns={3}>
+                <StatCard
                   label="P25"
                   value={formatQuantity(forecast.totals.p25, forecast.unit)}
-                  note={`${plan.horizonDays ?? horizonDays} ngày · persisted`}
-                  tone="blue"
+                  description={`Tổng trong ${plan.horizonDays ?? horizonDays} ngày · đã lưu`}
+                  status="info"
                 />
-                <Metric
+                <StatCard
                   label="P50"
                   value={formatQuantity(forecast.totals.p50, forecast.unit)}
-                  note="Trung vị từ backend"
+                  description="Dự báo trung vị"
                 />
-                <Metric
+                <StatCard
                   label="P75"
                   value={formatQuantity(forecast.totals.p75, forecast.unit)}
-                  note="Không dùng thay interval calibration"
-                  tone="amber"
+                  description="Phân vị dự báo, không phải cận trên của khoảng dự báo"
+                  status="info"
                 />
-              </div>
+              </SummaryGrid>
               {forecastWarnings.length > 0 ? (
-                <div aria-label="Cảnh báo forecast">
+                <div aria-label="Cảnh báo dự báo">
                   {forecastWarnings.map((warning) => (
                     <span
                       className="status-pill status-expiring"
@@ -764,7 +773,7 @@ export function PlanView({
                   ))}
                 </div>
               ) : null}
-              <Details summary="Xem chart và interval calibration" open>
+              <Details summary="Biểu đồ và khoảng dự báo" open>
                 <div className="detail-grid">
                   <ForecastChart forecast={forecast} compact />
                   <div className="table-wrap">
@@ -773,8 +782,8 @@ export function PlanView({
                         <tr>
                           <th>Ngày</th>
                           <th>P50</th>
-                          <th>Interval dưới</th>
-                          <th>Interval trên</th>
+                          <th>Cận dưới dự báo</th>
+                          <th>Cận trên dự báo</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -808,7 +817,7 @@ export function PlanView({
         <>
           <SectionHeading
             title="Nhu cầu nguyên liệu"
-            subtitle="BOM theo quantile cùng contributions từ từng sản phẩm."
+            subtitle="Nhu cầu được quy đổi từ công thức theo từng phân vị và sản phẩm."
           />
           <div className="table-wrap">
             <table>
@@ -818,7 +827,7 @@ export function PlanView({
                   <th>P25</th>
                   <th>P50</th>
                   <th>P75</th>
-                  <th>Contributions</th>
+                  <th>Số dòng phân bổ</th>
                   <th>Cảnh báo</th>
                 </tr>
               </thead>
@@ -845,7 +854,7 @@ export function PlanView({
           </div>
           {selectedDemand ? (
             <Details
-              summary={`Contribution drill-down · ${demandLabel(selectedDemand)}`}
+              summary={`Chi tiết phân bổ nhu cầu · ${demandLabel(selectedDemand)}`}
               open
             >
               {selectedDemand.contributions.length > 0 ? (
@@ -877,8 +886,8 @@ export function PlanView({
                 </div>
               ) : (
                 <Notice tone="warning">
-                  Backend không trả contribution cho nguyên liệu này. Không suy
-                  diễn thành “không có nhu cầu”.
+                  Hệ thống chưa trả về dữ liệu phân bổ cho nguyên liệu này.
+                  Không nên hiểu là nguyên liệu không có nhu cầu.
                 </Notice>
               )}
             </Details>
@@ -888,9 +897,9 @@ export function PlanView({
 
       <SectionHeading
         title="So sánh ba kịch bản"
-        subtitle="Chuyển kịch bản chỉ chọn kết quả đã có; không tạo run mới."
+        subtitle="Chọn kịch bản chỉ đổi kết quả đang xem, không chạy lại kế hoạch."
       />
-      <div className="metric-grid">
+      <SummaryGrid columns={3}>
         {strategyOptions.map((option) => (
           <ScenarioCard
             key={option.core}
@@ -903,18 +912,19 @@ export function PlanView({
             onSelect={() => onStrategyChange(option.label)}
           />
         ))}
-      </div>
+      </SummaryGrid>
       <p className="strategy-note">{strategyOption(strategy).note}</p>
 
       {selectedScenario && !selectedScenario.feasible ? (
         <Notice tone="warning">
-          Kịch bản này không khả thi. Bạn vẫn có thể tạo Draft từ các line hợp
-          lệ để chỉnh; backend chỉ enforce remaining budget khi confirm.
+          Kịch bản này chưa đáp ứng một hoặc nhiều điều kiện. Bạn vẫn có thể tạo
+          đơn nháp từ các dòng hợp lệ; ngân sách sẽ được kiểm tra lại khi xác
+          nhận.
         </Notice>
       ) : null}
       {selectedScenario?.violations.length ? (
         <Details
-          summary={`Violation (${selectedScenario.violations.length})`}
+          summary={`Điều kiện chưa đáp ứng (${selectedScenario.violations.length})`}
           open
         >
           <ul className="warning-list">
@@ -926,8 +936,8 @@ export function PlanView({
       ) : null}
 
       <SectionHeading
-        title="Line của kịch bản"
-        subtitle="Line thiếu supplier hoặc có quantity 0 vẫn được giữ lại để xử lý constraint."
+        title="Dòng đề xuất của kịch bản"
+        subtitle="Các dòng chưa có nhà cung cấp hoặc có số lượng bằng 0 vẫn được hiển thị để kiểm tra."
       />
       <div className="table-wrap plan-table">
         <table>
@@ -935,11 +945,11 @@ export function PlanView({
             <tr>
               <th>Nguyên liệu</th>
               <th>Trạng thái</th>
-              <th>Raw required</th>
+              <th>Nhu cầu tính toán</th>
               <th>Đề xuất</th>
-              <th>Số lượng Draft</th>
+              <th>Số lượng đặt</th>
               <th>Nhà cung cấp</th>
-              <th>ETA</th>
+              <th>Dự kiến về</th>
               <th>Cảnh báo</th>
             </tr>
           </thead>
@@ -968,7 +978,7 @@ export function PlanView({
                       min="0"
                       step={row.packSize || 1}
                       value={row.orderQty}
-                      aria-label={`Số lượng Draft ${row.ingredient}`}
+                      aria-label={`Số lượng đặt ${row.ingredient}`}
                       onChange={(event) => {
                         const next = Number(event.target.value);
                         setAdjusted((current) =>
@@ -987,12 +997,14 @@ export function PlanView({
                       }}
                     />
                     <small>
-                      MOQ {formatQuantity(row.moq)} · pack{" "}
+                      Đặt tối thiểu {formatQuantity(row.moq)} · quy cách{" "}
                       {formatQuantity(row.packSize)}
                     </small>
                   </td>
                   <td>
-                    {row.supplierId ? row.supplier || row.supplierId : "Thiếu supplier"}
+                    {row.supplierId
+                      ? row.supplier || row.supplierId
+                      : "Chưa có nhà cung cấp"}
                   </td>
                   <td>
                     {row.expectedArrivalDate
@@ -1009,7 +1021,7 @@ export function PlanView({
             ) : (
               <tr>
                 <td colSpan={8} className="table-empty">
-                  Chưa có line từ procurement plan.
+                  Chưa có dòng đề xuất nhập hàng.
                 </td>
               </tr>
             )}
@@ -1017,32 +1029,29 @@ export function PlanView({
         </table>
       </div>
 
-      <div className="metric-grid">
-        <Metric
+      <SummaryGrid columns={3}>
+        <StatCard
           label="Chi phí kịch bản"
           value={
             selectedScenario ? formatVnd(selectedScenario.cost) : "Chưa có"
           }
-          note="Giá trị persist từ core planning"
+          description="Theo kịch bản đang xem"
         />
-        <Metric
-          label="Line đủ điều kiện"
+        <StatCard
+          label="Dòng có thể tạo đơn"
           value={eligibleRecommendations.length}
-          note="Có supplier và quantity > 0"
-          tone="pine"
+          description="Đã có nhà cung cấp và số lượng lớn hơn 0"
+          status="success"
         />
-        <Metric
-          label="Line bị loại khỏi Draft"
+        <StatCard
+          label="Dòng chưa thể tạo đơn"
           value={invalidRecommendationCount}
-          note="Không tự bịa supplier/recommendation ID"
-          tone={invalidRecommendationCount ? "amber" : "pine"}
+          description="Có số lượng nhưng chưa có nhà cung cấp"
+          status={invalidRecommendationCount ? "warning" : "success"}
         />
-      </div>
+      </SummaryGrid>
 
-      <SectionHeading
-        title="Đơn đặt hàng"
-        subtitle="Bridge legacy chỉ chạy ngay trước khi tạo Draft; có thể trả nhiều đơn."
-      />
+      <SectionHeading title="Đơn đặt hàng" />
       <div className="confirm-row">
         <label className="check">
           <input
@@ -1051,7 +1060,8 @@ export function PlanView({
             onChange={(event) => setConfirmed(event.target.checked)}
           />
           <span>
-            Tôi đã kiểm tra snapshot, line bị loại và cảnh báo khả thi/ngân sách.
+            Tôi đã kiểm tra dữ liệu lập kế hoạch, các dòng chưa thể tạo đơn và
+            cảnh báo ngân sách.
           </span>
         </label>
         <Button
@@ -1096,7 +1106,7 @@ export function PlanView({
                   <h3>{selectedOrder.poId}</h3>
                   <p>
                     {selectedOrder.supplier} · giao{" "}
-                    {formatDate(selectedOrder.deliveryDate)} · version{" "}
+                    {formatDate(selectedOrder.deliveryDate)} · phiên bản{" "}
                     {selectedOrder.version ?? "—"}
                   </p>
                 </div>
@@ -1107,7 +1117,7 @@ export function PlanView({
                 <table>
                   <thead>
                     <tr>
-                      <th>po_line_id</th>
+                      <th>Mã dòng đơn</th>
                       <th>Nguyên liệu</th>
                       <th>Số lượng đặt</th>
                       <th>Đã nhận</th>
@@ -1120,7 +1130,7 @@ export function PlanView({
                       const key = lineKey(line, index);
                       return (
                         <tr key={key}>
-                          <td>{line.poLineId || "Thiếu po_line_id"}</td>
+                          <td>{line.poLineId || "Chưa có mã dòng"}</td>
                           <td>
                             <strong>{line.ingredient}</strong>
                             <small>{line.unit}</small>
@@ -1166,15 +1176,16 @@ export function PlanView({
 
               {selectedOrder.status === "draft" ? (
                 <Notice tone="info">
-                  Chỉ Draft được sửa. Backend sẽ validate MOQ, pack size, version
-                  và trả lại toàn bộ PO mới.
+                  Bạn có thể sửa số lượng khi đơn còn ở trạng thái nháp. Khi lưu,
+                  hệ thống sẽ kiểm tra số lượng đặt tối thiểu, quy cách đóng gói
+                  và phiên bản dữ liệu.
                 </Notice>
               ) : null}
 
               {["ordered", "partially_received"].includes(
                 selectedOrder.status,
               ) ? (
-                <Details summary="Ghi nhận nhận hàng theo lot" open>
+                <Details summary="Ghi nhận hàng theo lô" open>
                   <div className="two-column compact-gap">
                     <label className="field">
                       <span>Thời gian nhận</span>
@@ -1191,7 +1202,7 @@ export function PlanView({
                         onChange={(event) =>
                           setDeliveryReference(event.target.value)
                         }
-                        placeholder="DELIVERY-..."
+                        placeholder="Ví dụ: PGH-001"
                       />
                     </label>
                   </div>
@@ -1202,10 +1213,10 @@ export function PlanView({
                     return (
                       <div className="panel compact-gap" key={key}>
                         <strong>
-                          {line.ingredient} · po_line_id {line.poLineId}
+                          {line.ingredient} · mã dòng {line.poLineId}
                         </strong>
                         <small>
-                          Còn lại từ backend:{" "}
+                          Còn cần nhận:{" "}
                           {line.remainingQuantity == null
                             ? "—"
                             : formatQuantity(line.remainingQuantity, line.unit)}
@@ -1216,7 +1227,7 @@ export function PlanView({
                             key={lot.id}
                           >
                             <label className="field">
-                              <span>Số lượng lot {lotIndex + 1}</span>
+                              <span>Số lượng lô {lotIndex + 1}</span>
                               <input
                                 type="number"
                                 min="0"
@@ -1241,7 +1252,7 @@ export function PlanView({
                               />
                             </label>
                             <label className="field">
-                              <span>Mã lot nhà cung cấp</span>
+                              <span>Mã lô của nhà cung cấp</span>
                               <input
                                 value={lot.supplierLotCode}
                                 onChange={(event) =>
@@ -1257,13 +1268,13 @@ export function PlanView({
                               onClick={() => removeReceiveLot(key, lot.id)}
                             >
                               <Trash2 size={15} />
-                              Bỏ lot
+                              Xóa lô
                             </Button>
                           </div>
                         ))}
                         <Button variant="quiet" onClick={() => addReceiveLot(key)}>
                           <Plus size={15} />
-                          Thêm lot
+                          Thêm lô
                         </Button>
                       </div>
                     );

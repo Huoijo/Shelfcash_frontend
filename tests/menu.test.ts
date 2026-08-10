@@ -194,5 +194,5 @@ test("Menu view never invents a version and refreshes version conflicts", () => 
   assert.doesNotMatch(source, /editor\.item\.version\s*\+\s*1/);
   assert.match(source, /caught\.code === "VERSION_CONFLICT"/);
   assert.match(source, /const refreshedItems = await refreshMenu\(\)/);
-  assert.match(source, /hãy xem lại các giá trị trong biểu mẫu rồi gửi lại/i);
+  assert.match(source, /hãy kiểm tra lại thông tin rồi lưu lại/i);
 });
