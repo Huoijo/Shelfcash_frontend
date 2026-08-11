@@ -17,7 +17,7 @@ import type {
 } from "../../lib/types";
 import {
   Button,
-  InfoTip,
+  GuidanceHint,
   Notice,
   PageHeader,
   SectionHeading,
@@ -140,12 +140,6 @@ export function SettingsView({
         <>
           <SectionHeading
             title="Quy tắc theo nguyên liệu"
-            action={
-              <InfoTip label="Giải thích quy tắc nhập hàng">
-                Đơn giá, nhà cung cấp, số lượng tối thiểu và thời gian giao được
-                dùng khi lập kế hoạch nhập hàng.
-              </InfoTip>
-            }
           />
           <div className="table-wrap settings-table">
             <table>
@@ -269,12 +263,7 @@ export function SettingsView({
         <>
           <SectionHeading
             title="Ngưỡng tồn kho"
-            action={
-              <InfoTip label="Giải thích ngưỡng tồn kho">
-                Tồn kho an toàn và tồn kho tối đa được áp dụng độc lập với điều
-                kiện nhà cung cấp.
-              </InfoTip>
-            }
+            guidance={<GuidanceHint content="Các ngưỡng này chỉ xem được ở đây. Cập nhật chúng trong Nhập dữ liệu → Ràng buộc kinh doanh." />}
           />
           {inventoryConstraintsLoading ? (
             <p className="quiet-help">Đang tải ngưỡng tồn kho...</p>
@@ -302,10 +291,6 @@ export function SettingsView({
               </table>
             </div>
           )}
-          <p className="quiet-help">
-            Thông tin này chỉ đọc. Để cập nhật, hãy vào Nhập dữ liệu → Ràng
-            buộc kinh doanh.
-          </p>
         </>
       ) : null}
 
@@ -313,7 +298,6 @@ export function SettingsView({
         <>
           <SectionHeading
             title="Tên thay thế"
-            subtitle="Gộp các cách viết khác nhau về cùng một nguyên liệu."
           />
           <div className="alias-editor">
             {aliases.map((alias, index) => (

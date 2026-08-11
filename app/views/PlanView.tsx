@@ -31,6 +31,7 @@ import { DecisionCenter } from "../components/DecisionCenter";
 import {
   Button,
   Details,
+  GuidanceHint,
   Notice,
   PageHeader,
   SectionHeading,
@@ -93,6 +94,12 @@ export interface ReceiveOrderInput {
   }>;
 }
 
+export interface SimulationRunInput {
+  horizonDays: number;
+  includeOpenPurchaseOrders: boolean;
+  budgetOverride?: number;
+}
+
 function clampHorizon(value: number): number {
   if (!Number.isFinite(value)) return 7;
   return Math.min(7, Math.max(1, Math.round(value)));
@@ -122,11 +129,6 @@ function dateTimeLabel(value: string | undefined, timeZone?: string): string {
     timeStyle: "short",
     timeZone: timeZone || "Asia/Ho_Chi_Minh",
   }).format(instant);
-}
-
-function percentageLabel(value: number): string {
-  const percentage = value >= 0 && value <= 1 ? value * 100 : value;
-  return `${percentage.toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`;
 }
 
 function currentLocalDateTime(): string {
@@ -181,11 +183,6 @@ function ScenarioCard({
     <StatCard
       label={`${option.label}${recommended ? " · Khuyến nghị" : ""}`}
       value={scenario ? formatVnd(scenario.cost) : "Chưa có kết quả"}
-      description={
-        scenario
-          ? `${feasible ? "Khả thi" : "Không khả thi"} · tỷ lệ đáp ứng ${percentageLabel(scenario.fillRate)}`
-          : "Chạy lại kế hoạch để lấy kịch bản này."
-      }
       status={
         !scenario
           ? "neutral"
@@ -228,6 +225,7 @@ export function PlanView({
   onUpdateOrder,
   onConfirmOrder,
   onReceiveOrder,
+  focus = "plan",
 }: {
   data: BootstrapData;
   plan: PlanResponse;
@@ -235,7 +233,7 @@ export function PlanView({
   strategy: Strategy;
   initialIngredient?: string;
   draftOrders: PurchaseOrder[];
-  onRunPlanning: (horizonDays: number) => Promise<void>;
+  onRunPlanning: (input: SimulationRunInput) => Promise<void>;
   onTrainModel?: (modelVersion: string, historyDays: number) => Promise<void>;
   onStrategyChange: (strategy: Strategy) => void;
   onCreateOrders: (
@@ -247,10 +245,14 @@ export function PlanView({
   ) => Promise<void>;
   onConfirmOrder: (poId: string) => Promise<void>;
   onReceiveOrder: (poId: string, input: ReceiveOrderInput) => Promise<void>;
+  focus?: "future" | "simulator" | "plan" | "orders";
 }) {
   const [horizonDays, setHorizonDays] = useState(
     clampHorizon(plan.horizonDays ?? data.settings.forecastHorizon),
   );
+  const [budgetOverride, setBudgetOverride] = useState("");
+  const [includeOpenPurchaseOrders, setIncludeOpenPurchaseOrders] = useState(true);
+  const [controlsDirty, setControlsDirty] = useState(false);
   const [runBusy, setRunBusy] = useState(false);
   const [trainingBusy, setTrainingBusy] = useState(false);
   const [modelVersion, setModelVersion] = useState("");
@@ -356,6 +358,20 @@ export function PlanView({
   );
 
   useEffect(() => {
+    const targetId =
+      focus === "future"
+        ? "future-7-days"
+        : focus === "orders"
+          ? "draft-purchase-orders"
+          : focus === "plan"
+            ? "procurement-plan"
+            : "simulation-run";
+    requestAnimationFrame(() =>
+      document.getElementById(targetId)?.scrollIntoView({ block: "start" }),
+    );
+  }, [focus]);
+
+  useEffect(() => {
     if (!selectedOrder) {
       setDraftQuantities({});
       setReceiveLots({});
@@ -398,8 +414,18 @@ export function PlanView({
     setMessage("");
     setError("");
     try {
-      await onRunPlanning(horizonDays);
-      setMessage("Đã cập nhật dự báo, nhu cầu nguyên liệu và ba kịch bản nhập hàng.");
+      const parsedBudget = budgetOverride.trim() === "" ? undefined : Number(budgetOverride);
+      if (parsedBudget !== undefined && (!Number.isFinite(parsedBudget) || parsedBudget < 0)) {
+        setError("Ngân sách mô phỏng phải là số từ 0 trở lên.");
+        return;
+      }
+      await onRunPlanning({
+        horizonDays,
+        includeOpenPurchaseOrders,
+        ...(parsedBudget === undefined ? {} : { budgetOverride: parsedBudget }),
+      });
+      setControlsDirty(false);
+      setMessage("Mô phỏng đã hoàn tất.");
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -585,20 +611,39 @@ export function PlanView({
     }
   }
 
-  if (decision) {
+  if (decision && focus === "simulator") {
     const isRunning = runBusy || decision.status === "running" || decision.status === "queued";
     return (
       <>
         <PageHeader
-          title="Kế hoạch nhập hàng"
-          subtitle="Khuyến nghị nhập hàng dựa trên kế hoạch đã được tính toán."
-          action={<Button variant="primary" busy={isRunning} onClick={() => void runPlanning()} aria-label="Chạy lại kế hoạch nhập hàng"><Play size={16} />Chạy lại kế hoạch</Button>}
+          title="Mô phỏng"
+          context={`${data.settings.storeName} · ${data.today} · ${horizonDays} ngày`}
+          action={<Button variant="primary" busy={isRunning} onClick={() => void runPlanning()} aria-label="Chạy mô phỏng"><Play size={16} />Chạy mô phỏng</Button>}
         />
         <div className="plan-controls">
-          <label className="field"><span>Số ngày dự báo (1–7)</span><input type="number" min="1" max="7" step="1" value={horizonDays} onChange={(event) => setHorizonDays(clampHorizon(Number(event.target.value)))} /></label>
+          <label className="field"><span>Số ngày mô phỏng (1–7)</span><input type="number" min="1" max="7" step="1" value={horizonDays} onChange={(event) => { setHorizonDays(clampHorizon(Number(event.target.value))); setControlsDirty(true); }} /></label>
+          <label className="field"><span>Ngân sách tối đa (tùy chọn)</span><input type="number" min="0" step="1000" inputMode="decimal" value={budgetOverride} placeholder={formatVnd(data.settings.remainingBudget)} onChange={(event) => { setBudgetOverride(event.target.value); setControlsDirty(true); }} /></label>
+          <label className="check plan-open-orders"><input type="checkbox" checked={includeOpenPurchaseOrders} onChange={(event) => { setIncludeOpenPurchaseOrders(event.target.checked); setControlsDirty(true); }} /><span>Tính đơn mua hàng đang mở</span></label>
           <div className="plan-status"><span>Trạng thái</span><strong>{isRunning ? "Đang lập kế hoạch..." : decision.status === "completed" ? "Hoàn tất" : "Cần kiểm tra"}</strong></div>
         </div>
+        {controlsDirty && !isRunning ? <Notice tone="warning">Kết quả dưới đây được tạo trước khi bạn thay đổi điều kiện. Hãy chạy lại mô phỏng.</Notice> : null}
+        <Details summary="Ràng buộc đang áp dụng">
+          <ul className="warning-list">
+            <li>Ngân sách còn: {formatVnd(data.settings.remainingBudget)}</li>
+            <li>{data.inventory.filter((item) => item.moq != null).length} nguyên liệu có số lượng đặt tối thiểu</li>
+            <li>{data.inventory.filter((item) => item.packSize != null).length} nguyên liệu có quy cách đóng gói</li>
+            <li>{data.inventory.filter((item) => item.leadTimeDays != null).length} nguyên liệu có thời gian giao hàng</li>
+          </ul>
+        </Details>
         <DecisionCenter key={decision.decision_run_id} decision={decision} running={isRunning} />
+        {decision.status === "completed" ? (
+          <Details summary="Đơn nháp">
+            <p className="quiet-copy">
+              Kết quả mô phỏng này chưa thể chuyển trực tiếp thành đơn nháp vì
+              chưa có dữ liệu tham chiếu từng dòng đặt hàng.
+            </p>
+          </Details>
+        ) : null}
       </>
     );
   }
@@ -606,8 +651,16 @@ export function PlanView({
   return (
     <>
       <PageHeader
-        title="Kế hoạch nhập hàng"
-        subtitle="Từ dự báo sản phẩm đến nhu cầu nguyên liệu, ba kịch bản nhập hàng và đơn đặt hàng."
+        title={
+          focus === "future"
+            ? "Tương lai 7 ngày"
+            : focus === "orders"
+              ? "Đơn mua hàng"
+              : focus === "plan"
+                ? "Kế hoạch nhập"
+                : "Mô phỏng"
+        }
+        context={`${data.settings.storeName} · ${data.today}`}
         action={
           <Button
             variant="primary"
@@ -615,24 +668,51 @@ export function PlanView({
             onClick={() => void runPlanning()}
           >
             <Play size={16} />
-            Chạy lại kế hoạch
+            Chạy mô phỏng
           </Button>
         }
       />
 
-      <div className="plan-controls">
+      <div className="plan-controls" id="simulation-run">
         <label className="field">
-          <span>Số ngày dự báo (1–7)</span>
+          <span>Số ngày mô phỏng (1–7)</span>
           <input
             type="number"
             min="1"
             max="7"
             step="1"
             value={horizonDays}
-            onChange={(event) =>
-              setHorizonDays(clampHorizon(Number(event.target.value)))
-            }
+            onChange={(event) => {
+              setHorizonDays(clampHorizon(Number(event.target.value)));
+              setControlsDirty(true);
+            }}
           />
+        </label>
+        <label className="field">
+          <span>Ngân sách tối đa (tùy chọn)</span>
+          <input
+            type="number"
+            min="0"
+            step="1000"
+            inputMode="decimal"
+            value={budgetOverride}
+            placeholder={formatVnd(data.settings.remainingBudget)}
+            onChange={(event) => {
+              setBudgetOverride(event.target.value);
+              setControlsDirty(true);
+            }}
+          />
+        </label>
+        <label className="check plan-open-orders">
+          <input
+            type="checkbox"
+            checked={includeOpenPurchaseOrders}
+            onChange={(event) => {
+              setIncludeOpenPurchaseOrders(event.target.checked);
+              setControlsDirty(true);
+            }}
+          />
+          <span>Tính đơn mua hàng đang mở</span>
         </label>
         <fieldset className="segmented">
           <legend>Trạng thái lập kế hoạch</legend>
@@ -738,11 +818,12 @@ export function PlanView({
         </Details>
       ) : null}
 
+      <section id="future-7-days">
       {forecastEntries.length > 0 ? (
         <>
           <SectionHeading
             title="Dự báo sản phẩm"
-            subtitle="Kết quả đã lưu. Bộ lọc chỉ thay đổi sản phẩm đang xem, không ảnh hưởng đến kế hoạch."
+            guidance={<GuidanceHint content="Bộ lọc chỉ thay đổi dữ liệu đang xem." />}
             action={
               <label className="field">
                 <span>Sản phẩm hiển thị</span>
@@ -765,20 +846,17 @@ export function PlanView({
             <>
               <SummaryGrid columns={3}>
                 <StatCard
-                  label="P25"
+                  label={`P25 · ${plan.horizonDays ?? horizonDays} ngày`}
                   value={formatQuantity(forecast.totals.p25, forecast.unit)}
-                  description={`Tổng trong ${plan.horizonDays ?? horizonDays} ngày · đã lưu`}
                   status="info"
                 />
                 <StatCard
-                  label="P50"
+                  label="P50 · mức trung tâm"
                   value={formatQuantity(forecast.totals.p50, forecast.unit)}
-                  description="Dự báo trung vị"
                 />
                 <StatCard
-                  label="P75"
+                  label="P75 · mức cao"
                   value={formatQuantity(forecast.totals.p75, forecast.unit)}
-                  description="Phân vị dự báo, không phải cận trên của khoảng dự báo"
                   status="info"
                 />
               </SummaryGrid>
@@ -795,6 +873,11 @@ export function PlanView({
                   ))}
                 </div>
               ) : null}
+              {forecast.invalidQuantileCount ? (
+                <Notice tone="warning">
+                  Có {forecast.invalidQuantileCount} ngày có dữ liệu P25/P50/P75 không hợp lệ và không được vẽ trên biểu đồ.
+                </Notice>
+              ) : null}
               <Details summary="Biểu đồ và khoảng dự báo" open>
                 <div className="detail-grid">
                   <ForecastChart forecast={forecast} compact />
@@ -803,25 +886,25 @@ export function PlanView({
                       <thead>
                         <tr>
                           <th>Ngày</th>
+                          <th>P25</th>
                           <th>P50</th>
-                          <th>Cận dưới dự báo</th>
-                          <th>Cận trên dự báo</th>
+                          <th>P75</th>
+                          <th>Khoảng dự báo</th>
                         </tr>
                       </thead>
                       <tbody>
                         {forecast.forecast.map((point) => (
                           <tr key={point.date}>
                             <td>{formatDate(point.date)}</td>
-                            <td>{formatQuantity(point.p50 ?? 0)}</td>
+                            <td>{point.p25 == null ? "—" : formatQuantity(point.p25)}</td>
+                            <td>{point.p50 == null ? "—" : formatQuantity(point.p50)}</td>
                             <td>
-                              {point.intervalLower == null
-                                ? "—"
-                                : formatQuantity(point.intervalLower)}
+                              {point.p75 == null ? "—" : formatQuantity(point.p75)}
                             </td>
                             <td>
-                              {point.intervalUpper == null
+                              {point.intervalLower == null || point.intervalUpper == null
                                 ? "—"
-                                : formatQuantity(point.intervalUpper)}
+                                : `${formatQuantity(point.intervalLower)} – ${formatQuantity(point.intervalUpper)}`}
                             </td>
                           </tr>
                         ))}
@@ -839,7 +922,6 @@ export function PlanView({
         <>
           <SectionHeading
             title="Nhu cầu nguyên liệu"
-            subtitle="Nhu cầu được quy đổi từ công thức theo từng phân vị và sản phẩm."
           />
           <div className="table-wrap">
             <table>
@@ -917,9 +999,12 @@ export function PlanView({
         </>
       ) : null}
 
+      </section>
+
+      <section id="procurement-plan">
       <SectionHeading
         title="So sánh ba kịch bản"
-        subtitle="Chọn kịch bản chỉ đổi kết quả đang xem, không chạy lại kế hoạch."
+        guidance={<GuidanceHint content="Chọn kịch bản chỉ đổi dữ liệu đang xem." />}
       />
       <SummaryGrid columns={3}>
         {strategyOptions.map((option) => (
@@ -959,7 +1044,6 @@ export function PlanView({
 
       <SectionHeading
         title="Dòng đề xuất của kịch bản"
-        subtitle="Các dòng chưa có nhà cung cấp hoặc có số lượng bằng 0 vẫn được hiển thị để kiểm tra."
       />
       <div className="table-wrap plan-table">
         <table>
@@ -1057,22 +1141,22 @@ export function PlanView({
           value={
             selectedScenario ? formatVnd(selectedScenario.cost) : "Chưa có"
           }
-          description="Theo kịch bản đang xem"
         />
         <StatCard
           label="Dòng có thể tạo đơn"
           value={eligibleRecommendations.length}
-          description="Đã có nhà cung cấp và số lượng lớn hơn 0"
           status="success"
         />
         <StatCard
-          label="Dòng chưa thể tạo đơn"
+          label="Dòng thiếu nhà cung cấp"
           value={invalidRecommendationCount}
-          description="Có số lượng nhưng chưa có nhà cung cấp"
           status={invalidRecommendationCount ? "warning" : "success"}
         />
       </SummaryGrid>
 
+      </section>
+
+      <section id="draft-purchase-orders">
       <SectionHeading title="Đơn đặt hàng" />
       <div className="confirm-row">
         <label className="check">
@@ -1363,6 +1447,7 @@ export function PlanView({
           ) : null}
         </section>
       ) : null}
+      </section>
     </>
   );
 }

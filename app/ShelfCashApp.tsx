@@ -18,12 +18,11 @@ import {
   adaptBootstrap,
   adaptOrders,
   adaptPlan,
-  adaptPlanningWorkflow,
   emptyBackendPlan,
   selectPlanningScenario,
   strategyFromApi,
-  strategyFromCore,
 } from "../lib/contract-adapters";
+import { shouldPollDecisionRun } from "../lib/decision-run";
 import {
   createIdempotencyKey,
   createInventoryAdjustment,
@@ -52,7 +51,6 @@ import {
 import {
   createDraftOrdersFromLegacyPlan,
   runLegacyPurchaseOrderBridge,
-  runPlanningWorkflow,
   type PlanningWorkflowSnapshot,
 } from "../lib/planning-workflow";
 import {
@@ -85,10 +83,11 @@ import type {
   SupplierConstraintRow,
 } from "../lib/types";
 import { Notice, Toast, cn } from "./components/ui";
+import { DecisionWorkspace } from "./components/DecisionWorkspace";
 import { ImportView } from "./views/ImportView";
 import { InventoryView } from "./views/InventoryView";
 import { MenuView } from "./views/MenuView";
-import { PlanView } from "./views/PlanView";
+import { PlanView, type SimulationRunInput } from "./views/PlanView";
 import {
   RecipesView,
   type RecipeSaveOptions,
@@ -98,11 +97,14 @@ import { TodayView } from "./views/TodayView";
 
 type PageKey =
   | "today"
+  | "future"
+  | "simulator"
   | "import"
   | "inventory"
   | "menu"
   | "recipes"
   | "plan"
+  | "orders"
   | "settings";
 
 const navigationGroups: Array<{
@@ -114,10 +116,16 @@ const navigationGroups: Array<{
   }>;
 }> = [
   {
-    items: [{ key: "today", label: "Tổng quan", icon: Home }],
+    items: [
+      { key: "today", label: "Hôm nay", icon: Home },
+      { key: "future", label: "Tương lai 7 ngày", icon: CalendarClock },
+      { key: "simulator", label: "Mô phỏng", icon: ShoppingCart },
+      { key: "plan", label: "Kế hoạch nhập", icon: ShoppingCart },
+      { key: "orders", label: "Đơn mua hàng", icon: Package },
+    ],
   },
   {
-    label: "Vận hành",
+    label: "Dữ liệu",
     items: [
       { key: "import", label: "Nhập dữ liệu", icon: Upload },
       { key: "inventory", label: "Kho", icon: Package },
@@ -127,7 +135,7 @@ const navigationGroups: Array<{
     ],
   },
   {
-    label: "Hệ thống",
+    label: "Thiết lập",
     items: [{ key: "settings", label: "Cài đặt", icon: Settings }],
   },
 ];
@@ -254,32 +262,6 @@ function apiListRecords(value: unknown): ApiRecord[] {
   );
 }
 
-function planFailure(
-  current: PlanResponse,
-  caught: unknown,
-): PlanResponse {
-  const isApiError = caught instanceof ShelfCashApiError;
-  return {
-    ...current,
-    status:
-      isApiError &&
-      (caught.code === "MODEL_NOT_READY" ||
-        caught.code === "RUN_BLOCKED")
-        ? "blocked"
-        : "failed",
-    engineStatus:
-      isApiError && caught.code === "MODEL_NOT_READY"
-        ? "model_unavailable"
-        : current.engineStatus,
-    failureCode: isApiError ? caught.code : "PLANNING_FAILED",
-    failureMessage: errorMessage(caught, "Không thể hoàn tất kế hoạch nhập hàng."),
-    forecastRunId:
-      isApiError && typeof caught.details.forecast_run_id === "string"
-        ? caught.details.forecast_run_id
-        : current.forecastRunId,
-  };
-}
-
 function orderDateTime(value: string, timezone: string): string {
   if (isTimezoneAwareDateTime(value)) return value;
   const parsed = new Date(value);
@@ -316,13 +298,29 @@ export function ShelfCashApp({
   const [data, setData] = useState(initialData);
   const [plan, setPlan] = useState(initialPlan);
   const [decision, setDecision] = useState<DecisionPackage | null>(null);
+  const [decisionIngredient, setDecisionIngredient] = useState("");
   useEffect(() => {
     const storeId = data.settings.storeId;
     if (!storeId) return;
     const decisionRunId = window.localStorage.getItem(`shelfcash:decision-run:${storeId}`);
     if (!decisionRunId) return;
-    void getDecisionRun(decisionRunId).then(setDecision, () => undefined);
-  // The persisted package is a convenience; a failed reload must not block the app.
+    const abortController = new AbortController();
+    void (async () => {
+      try {
+        const result = await getDecisionRun(decisionRunId, {
+          signal: abortController.signal,
+        });
+        const resolved = shouldPollDecisionRun(result.status)
+          ? await waitForDecisionRun(decisionRunId, result, {
+              signal: abortController.signal,
+            })
+          : result;
+        if (!abortController.signal.aborted) setDecision(resolved);
+      } catch {
+        // The persisted package is a convenience; a failed reload must not block the app.
+      }
+    })();
+    return () => abortController.abort();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [strategy, setStrategy] = useState<Strategy>(
@@ -349,13 +347,8 @@ export function ShelfCashApp({
   const [inventoryConstraintsLoading, setInventoryConstraintsLoading] =
     useState(false);
   const operationSequence = useRef(0);
+  const decisionRunAbort = useRef<AbortController | null>(null);
   const workflowSnapshot = useRef<PlanningWorkflowSnapshot | null>(null);
-  const planningIdempotency = useRef<{
-    fingerprint: string;
-    forecast: string;
-    ingredientDemand: string;
-    procurementPlans: string;
-  } | null>(null);
   const draftIdempotency = useRef<{
     fingerprint: string;
     bridge: string;
@@ -374,6 +367,13 @@ export function ShelfCashApp({
   const trainingIdempotencyKeys = useRef(new Map<string, string>());
   const mobileMenuButton = useRef<HTMLButtonElement>(null);
   const mobileCloseButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(
+    () => () => {
+      decisionRunAbort.current?.abort();
+    },
+    [],
+  );
 
   const reloadFromBackend = useCallback(
     async (
@@ -554,9 +554,9 @@ export function ShelfCashApp({
     }
   }
 
-  function openPlan(ingredient?: string) {
+  function openPlan(ingredient?: string, destination: PageKey = "plan") {
     if (ingredient) setPlanIngredient(ingredient);
-    setPage("plan");
+    setPage(destination);
   }
 
   async function importResult(result: IngestionResult, files: File[]) {
@@ -866,19 +866,23 @@ export function ShelfCashApp({
     }
   }
 
-  async function runPlanning(horizonDays: number): Promise<void> {
+  async function runPlanning({
+    horizonDays,
+    includeOpenPurchaseOrders,
+    budgetOverride,
+  }: SimulationRunInput): Promise<void> {
     if (!data.settings.storeId.trim()) {
       throw new Error("Hãy cấu hình hoặc import một store trước.");
     }
-    const operation = ++operationSequence.current;
     const forecastRunId = plan.forecastRunId || data.settings.latestForecastRunId;
     if (!forecastRunId || forecastRunId === "FORECAST_RUN_ID") {
       throw new Error("Chưa có lượt dự báo hợp lệ để lập kế hoạch nhập hàng.");
     }
+    const operation = ++operationSequence.current;
+    decisionRunAbort.current?.abort();
+    const abortController = new AbortController();
+    decisionRunAbort.current = abortController;
     setRefreshing(true);
-    setDecision((current) => current
-      ? { ...current, status: "running" }
-      : { decision_run_id: "pending", status: "running", horizon_days: horizonDays });
     try {
       const created = await createDecisionRun({
         storeId: data.settings.storeId,
@@ -887,17 +891,18 @@ export function ShelfCashApp({
           as_of_date: data.today,
           horizon_days: horizonDays,
           engine_mode: "deterministic",
-          include_open_purchase_orders: true,
-          budget_override: 5_000_000,
-          scenario_count: 100,
-          random_seed: 42,
+          include_open_purchase_orders: includeOpenPurchaseOrders,
+          ...(budgetOverride === undefined ? {} : { budget_override: budgetOverride }),
         },
+        signal: abortController.signal,
       });
       if (operation !== operationSequence.current) return;
-      const fetched = await getDecisionRun(created.decision_run_id);
-      const resolved = ["queued", "running"].includes(fetched.status)
-        ? await waitForDecisionRun(created.decision_run_id, fetched)
-        : fetched;
+      if (shouldPollDecisionRun(created.status)) setDecision(created);
+      const resolved = shouldPollDecisionRun(created.status)
+        ? await waitForDecisionRun(created.decision_run_id, created, {
+            signal: abortController.signal,
+          })
+        : created;
       if (operation === operationSequence.current) {
         setDecision(resolved);
         if (resolved.decision_run_id) {
@@ -907,96 +912,11 @@ export function ShelfCashApp({
           );
         }
       }
-    } catch (caught) {
-      if (operation === operationSequence.current) {
-        setDecision({
-          decision_run_id: "unavailable",
-          status: "failed",
-          horizon_days: horizonDays,
-          failure_code: caught instanceof ShelfCashApiError ? caught.code : "NETWORK_ERROR",
-          failure_message: retryableTransportFailure(caught)
-            ? "Không thể kết nối máy chủ. Dữ liệu đang hiển thị có thể chưa phải bản mới nhất."
-            : errorMessage(caught, "Không thể lập kế hoạch vì thiếu dữ liệu hoặc ràng buộc."),
-        });
-      }
-      throw caught;
     } finally {
+      if (decisionRunAbort.current === abortController) {
+        decisionRunAbort.current = null;
+      }
       if (operation === operationSequence.current) setRefreshing(false);
-    }
-    return;
-    const fingerprint = [
-      data.settings.storeId,
-      data.today,
-      horizonDays,
-      data.settings.remainingBudget,
-    ].join(":");
-    if (planningIdempotency.current?.fingerprint !== fingerprint) {
-      planningIdempotency.current = {
-        fingerprint,
-        forecast: createIdempotencyKey(),
-        ingredientDemand: createIdempotencyKey(),
-        procurementPlans: createIdempotencyKey(),
-      };
-    }
-    const keys = planningIdempotency.current;
-    setRefreshing(true);
-    setPlan((current) => ({
-      ...emptyBackendPlan(data, strategy),
-      status: "running",
-      forecastRunId: current.forecastRunId,
-    }));
-    try {
-      const snapshot = await runPlanningWorkflow({
-        storeId: data.settings.storeId,
-        cutoffDate: data.today,
-        horizonDays,
-        remainingBudget: data.settings.remainingBudget,
-        idempotencyKeys: keys
-          ? {
-              forecast: keys.forecast,
-              ingredientDemand: keys.ingredientDemand,
-              procurementPlans: keys.procurementPlans,
-            }
-          : undefined,
-      });
-      if (operation !== operationSequence.current) return;
-      workflowSnapshot.current = snapshot;
-      planningIdempotency.current = null;
-      const recommended = snapshot.procurementPlans.recommended_strategy
-        ? strategyFromCore(
-            snapshot.procurementPlans.recommended_strategy,
-          )
-        : strategy;
-      const adapted = adaptPlanningWorkflow(
-        data,
-        recommended,
-        snapshot.forecast,
-        snapshot.ingredientDemand,
-        snapshot.procurementPlans,
-      );
-      setStrategy(recommended);
-      setPlan(adapted);
-      setToast({
-        message:
-          "Đã hoàn tất dự báo, nhu cầu nguyên liệu và ba kịch bản nhập hàng.",
-        tone: "success",
-      });
-    } catch (caught) {
-      if (!retryableTransportFailure(caught)) {
-        planningIdempotency.current = null;
-      }
-      if (operation === operationSequence.current) {
-        setPlan((current) => planFailure(current, caught));
-        setToast({
-          message: errorMessage(caught, "Không thể lập kế hoạch nhập hàng."),
-          tone: "error",
-        });
-      }
-      throw caught;
-    } finally {
-      if (operation === operationSequence.current) {
-        setRefreshing(false);
-      }
     }
   }
 
@@ -1419,8 +1339,9 @@ export function ShelfCashApp({
             plan={plan}
             loading={initialDashboardLoading}
             onNavigate={(target) =>
-              target === "plan" ? openPlan() : setPage("inventory")
+              target === "plan" ? openPlan(undefined, "future") : setPage("inventory")
             }
+            onOpenDecision={setDecisionIngredient}
           />
         );
       case "import":
@@ -1453,7 +1374,10 @@ export function ShelfCashApp({
             onOpenPlan={() => openPlan()}
           />
         );
+      case "future":
+      case "simulator":
       case "plan":
+      case "orders":
         return (
           <PlanView
             data={data}
@@ -1469,6 +1393,15 @@ export function ShelfCashApp({
             onUpdateOrder={updateOrder}
             onConfirmOrder={confirmOrder}
             onReceiveOrder={receiveOrder}
+            focus={
+              page === "future"
+                ? "future"
+                : page === "simulator"
+                  ? "simulator"
+                  : page === "orders"
+                    ? "orders"
+                    : "plan"
+            }
           />
         );
       case "settings":
@@ -1624,6 +1557,18 @@ export function ShelfCashApp({
           {page === "import" ? null : selectedPage}
         </main>
       </div>
+
+      {decisionIngredient ? (
+        <DecisionWorkspace
+          data={data}
+          ingredient={decisionIngredient}
+          plan={plan}
+          onClose={() => setDecisionIngredient("")}
+          onNavigate={(destination, ingredient) =>
+            openPlan(ingredient, destination)
+          }
+        />
+      ) : null}
 
       {mobileNavigationOpen ? (
         <div className="mobile-drawer-layer">

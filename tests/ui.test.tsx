@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
-  InfoTip,
+  GuidanceHint,
   PageHeader,
   SectionHeading,
   StatCard,
@@ -25,7 +25,7 @@ test("PageHeader renders cleanly with or without a description", () => {
 test("SectionHeading does not reserve markup for an absent description", () => {
   const html = renderToStaticMarkup(<SectionHeading title="Nguyên liệu" />);
 
-  assert.match(html, /<h2>Nguyên liệu<\/h2>/);
+  assert.match(html, /section-heading-title">Nguyên liệu<\/span>/);
   assert.doesNotMatch(html, /<p>/);
 });
 
@@ -68,19 +68,23 @@ test("StatCard safely handles optional content, loading and empty values", () =>
   assert.match(loading, /aria-label="Đang tải"/);
 });
 
-test("InfoTip exposes an accessible label and supplemental tooltip content", () => {
+test("GuidanceHint exposes an accessible, keyboard-focusable guidance button", () => {
   const html = renderToStaticMarkup(
-    <InfoTip label="Giải thích số lượng đặt tối thiểu">
-      Số lượng nhỏ nhất có thể đặt trong một lần.
-    </InfoTip>,
+    <GuidanceHint
+      content="Chọn một dòng để xem tồn kho, lô và lịch sử sử dụng."
+      defaultOpen
+      label="Xem hướng dẫn chọn nguyên liệu"
+    />,
   );
 
   assert.match(
     html,
-    /aria-label="Giải thích số lượng đặt tối thiểu"/,
+    /aria-label="Xem hướng dẫn chọn nguyên liệu"/,
   );
+  assert.match(html, /<button/);
+  assert.match(html, /type="button"/);
   assert.match(html, /role="tooltip"/);
-  assert.match(html, /Số lượng nhỏ nhất có thể đặt trong một lần\./);
+  assert.match(html, /Chọn một dòng để xem tồn kho, lô và lịch sử sử dụng\./);
 });
 
 test("SummaryGrid renders every dynamic card with the requested column layout", () => {

@@ -275,13 +275,11 @@ export function RecipesView({
           {detailsError ? <Notice tone="error">{detailsError}</Notice> : null}
           <SectionHeading
             title={`Thiết lập công thức · ${product.product}`}
-            subtitle="Thiết lập định lượng, hiệu lực và hao hụt."
           />
           <SummaryGrid columns={4}>
             <StatCard
               label="Giá bán"
               value={formatVnd(product.price)}
-              description={product.sku}
             />
             <StatCard
               label="Nguyên liệu"
@@ -307,7 +305,6 @@ export function RecipesView({
                   ? String(product.recipeVersion)
                   : "Chưa có")
               }
-              description={product.recipeStatus}
               status={
                 product.recipeStatus === "Hoàn chỉnh" ? "success" : "warning"
               }

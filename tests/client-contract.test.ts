@@ -31,6 +31,7 @@ import {
   saveSettings,
   updatePurchaseOrder,
   updateMenuProduct,
+  waitForDecisionRun,
   waitForForecastResult,
 } from "../lib/shelfcash-client.ts";
 import {
@@ -87,6 +88,52 @@ test("decision runs use the canonical store-scoped create and global result endp
     random_seed: 42,
   });
   assert.deepEqual(calls[2]?.body, { language: "vi", detail_level: "simple" });
+});
+
+test("a completed decision response is terminal and does not trigger polling", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({ decision_run_id: "decision-1", status: "completed" });
+  };
+  try {
+    const result = await waitForDecisionRun("decision-1", {
+      decision_run_id: "decision-1",
+      status: "completed",
+    });
+    assert.equal(result.status, "completed");
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a processing decision run polls once and preserves a completed non-feasible result", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({
+      decision_run_id: "decision-2",
+      status: "completed",
+      recommended_plan: { valid: false },
+      strategies: [{ strategy: "balanced", feasible: false, violations: ["Ngân sách không đủ"] }],
+    });
+  };
+  try {
+    const result = await waitForDecisionRun(
+      "decision-2",
+      { decision_run_id: "decision-2", status: "running" },
+      { pollIntervalMs: 0 },
+    );
+    assert.equal(calls, 1);
+    assert.equal(result.status, "completed");
+    assert.equal(result.recommended_plan?.valid, false);
+    assert.equal(result.strategies?.[0]?.feasible, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("confirm import preserves explicit unknown skips and nullable columns", async () => {

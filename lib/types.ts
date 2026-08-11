@@ -346,6 +346,7 @@ export interface ForecastPoint {
   warnings?: string[];
   promotion?: boolean;
   weekend?: boolean;
+  quantilesValid?: boolean;
 }
 
 export interface ForecastResult {
@@ -364,6 +365,7 @@ export interface ForecastResult {
   drivers: string[];
   confidence: "Tốt" | "Khá" | "Cần thêm dữ liệu";
   dataNotes: string[];
+  invalidQuantileCount?: number;
 }
 
 export interface IngredientDemandContribution {

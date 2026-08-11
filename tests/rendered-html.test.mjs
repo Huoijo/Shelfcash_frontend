@@ -32,7 +32,7 @@ test("renders development preview metadata", async () => {
   const html = await response.text();
   assert.match(html, developmentPreviewMeta);
   assert.match(html, /Chưa chọn cửa hàng/);
-  assert.match(html, /Chưa có store hợp lệ/);
+  assert.match(html, /Chưa có cửa hàng để làm việc/);
   assert.doesNotMatch(html, /(?:\/workspace\/|\.vinext\/fonts)/);
   assert.doesNotMatch(html, /data-vinext-fonts/);
   assert.doesNotMatch(

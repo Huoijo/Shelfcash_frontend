@@ -34,6 +34,7 @@ import {
   type RunStatus,
   type RunWaitOptions,
 } from "./api-contract";
+import { decisionRunLifecycle, shouldPollDecisionRun } from "./decision-run";
 
 /** The browser talks to one same-origin BFF root; the BFF owns backend secrets. */
 export const API_ROOT = "/api/shelfcash";
@@ -278,15 +279,30 @@ export async function getDecisionWhatIf(decisionRunId: string): Promise<Decision
 export async function waitForDecisionRun(
   decisionRunId: string,
   initial?: DecisionPackage,
+  options: RunWaitOptions = {},
 ): Promise<DecisionPackage> {
   let result = initial;
   const startedAt = Date.now();
-  while (!result || ["queued", "running"].includes(result.status)) {
-    if (Date.now() - startedAt > 90_000) {
+  while (!result || shouldPollDecisionRun(result.status)) {
+    if (Date.now() - startedAt > (options.timeoutMs ?? 90_000)) {
       throw new ShelfCashApiError({ code: "JOB_TIMEOUT", message: "Lập kế hoạch đang mất nhiều thời gian hơn dự kiến.", details: {}, request_id: null }, 408);
     }
-    await delay(2_000);
-    result = await getDecisionRun(decisionRunId, { timeoutMs: 30_000 });
+    await delay(options.pollIntervalMs ?? 2_000, options.signal);
+    result = await getDecisionRun(decisionRunId, {
+      signal: options.signal,
+      timeoutMs: options.requestTimeoutMs ?? 30_000,
+    });
+  }
+  if (decisionRunLifecycle(result.status) === "unknown") {
+    throw new ShelfCashApiError(
+      {
+        code: "UNEXPECTED_DECISION_STATUS",
+        message: "Máy chủ trả trạng thái mô phỏng không xác định.",
+        details: { status: result.status },
+        request_id: result.request_id ?? null,
+      },
+      502,
+    );
   }
   return result;
 }

@@ -159,11 +159,13 @@ export function TodayView({
   data,
   plan,
   onNavigate,
+  onOpenDecision,
   loading = false,
 }: {
   data: BootstrapData;
   plan: PlanResponse;
   onNavigate: (page: "inventory" | "plan") => void;
+  onOpenDecision?: (ingredient: string) => void;
   loading?: boolean;
 }) {
   const alerts = inventoryAlerts(plan.enrichedInventory);
@@ -180,10 +182,11 @@ export function TodayView({
   return (
     <div className="dashboard-page">
       <PageHeader
-        title="Tổng quan"
+        title="Hôm nay"
+        context={`${data.today.split("-").reverse().join("/")} · ${data.settings.storeName}`}
         action={
           <Button variant="primary" onClick={() => onNavigate("plan")}>
-            Mở kế hoạch nhập hàng
+            Xem 7 ngày
             <ArrowRight aria-hidden="true" size={16} />
           </Button>
         }
@@ -193,7 +196,6 @@ export function TodayView({
         <StatCard
           label="Lô cần xử lý"
           value={alerts.length}
-          description={`${stockoutCount} hết hàng · ${expiredCount} hết hạn · ${expiringCount} gần hết hạn`}
           status={
             criticalCount > 0
               ? "danger"
@@ -207,7 +209,6 @@ export function TodayView({
         <StatCard
           label="Lô gần hết hạn"
           value={expiringCount}
-          description="Ưu tiên xuất trước theo hạn dùng"
           status={expiringCount > 0 ? "warning" : "success"}
           icon={<Clock3 aria-hidden="true" />}
           loading={loading}
@@ -215,7 +216,6 @@ export function TodayView({
         <StatCard
           label="Ngân sách còn"
           value={formatVnd(data.settings.remainingBudget)}
-          description={`Đã giữ cho đơn hàng ${formatVnd(data.settings.reservedBudget)} · đã chi ${formatVnd(data.settings.spentBudget)}`}
           icon={<WalletCards aria-hidden="true" />}
           loading={loading}
         />
@@ -298,7 +298,7 @@ export function TodayView({
 
         <section className="dashboard-panel dashboard-alerts">
           <SectionHeading
-            title="Việc cần làm"
+            title={`Có ${(alerts.length + missingCount).toLocaleString("vi-VN")} việc cần xử lý`}
             action={
               loading ? null : (
                 <span className="dashboard-count">
@@ -319,10 +319,14 @@ export function TodayView({
                 return (
                   <AlertRow
                     key={alert.key}
-                    title={copy.title}
-                    body={copy.body}
-                    tone={copy.tone}
-                    onClick={() => onNavigate("inventory")}
+                  title={copy.title}
+                  body={copy.body}
+                  tone={copy.tone}
+                    onClick={() =>
+                      onOpenDecision?.(
+                        alert.ingredient.ingredientId || alert.ingredient.ingredient,
+                      )
+                    }
                   />
                 );
               })}
@@ -344,7 +348,7 @@ export function TodayView({
               ) : null}
               {alerts.length === 0 ? (
                 <AlertRow
-                  title="Không có lô hết hàng, hết hạn hoặc gần hết hạn"
+                  title="Chưa phát hiện việc cần xử lý trong dữ liệu hiện tại."
                   tone="pine"
                   onClick={() => onNavigate("inventory")}
                 />

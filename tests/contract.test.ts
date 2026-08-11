@@ -321,6 +321,29 @@ test("product forecasts retain persisted calibrated intervals and warnings", () 
   assert.equal(latte.forecast[1]?.calibrationSource, "rolling-28d");
   assert.deepEqual(latte.forecast[1]?.warnings, ["Có khuyến mãi"]);
   assert.deepEqual(latte.totals, { p25: 34.1, p50: 41.5, p75: 49.3 });
+  assert.equal(latte.invalidQuantileCount, 0);
+});
+
+test("crossing forecast quantiles are retained for audit but marked invalid", () => {
+  const forecasts = adaptForecasts({
+    forecast_run_id: "forecast-invalid",
+    status: "completed",
+    predictions: [{
+      product_id: "PROD_INVALID",
+      product_name: "Món kiểm thử",
+      target_date: "2026-08-05",
+      p25: 12,
+      p50: 10,
+      p75: 14,
+      interval_lower: 8,
+      interval_upper: 16,
+    }],
+  });
+  const result = forecasts["Món kiểm thử"];
+
+  assert.equal(result?.forecast[0]?.quantilesValid, false);
+  assert.equal(result?.invalidQuantileCount, 1);
+  assert.ok(result?.forecast[0]?.warnings?.includes("Dữ liệu dự báo không hợp lệ"));
 });
 
 test("ingredient demand retains product contributions", () => {

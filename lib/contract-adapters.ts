@@ -741,7 +741,7 @@ export function adaptBootstrap(
 }
 
 function forecastPoint(row: ApiRecord): ForecastPoint {
-  return {
+  const point: ForecastPoint = {
     date: text(row, ["target_date", "date"]),
     actual: optionalNumber(row, ["actual", "quantity"]),
     p25: optionalNumber(row, ["p25"]),
@@ -755,6 +755,17 @@ function forecastPoint(row: ApiRecord): ForecastPoint {
     promotion: boolean(row, ["promotion"]),
     weekend: boolean(row, ["weekend"]),
   };
+  const quantiles = [point.p25, point.p50, point.p75];
+  if (quantiles.every((value) => value != null)) {
+    point.quantilesValid =
+      quantiles[0]! <= quantiles[1]! && quantiles[1]! <= quantiles[2]!;
+    if (!point.quantilesValid) {
+      point.warnings = Array.from(
+        new Set([...(point.warnings ?? []), "Dữ liệu dự báo không hợp lệ"]),
+      );
+    }
+  }
+  return point;
 }
 
 function warningMessages(value: unknown): string[] {
@@ -820,6 +831,7 @@ export function adaptForecasts(
             ? `Model ${text(responseRecord, ["model_version"])}`
             : "Kết quả persisted từ Forecast Core.",
         ],
+        invalidQuantileCount: points.filter((point) => point.quantilesValid === false).length,
       };
       return [product || result.productId || "", result];
     }),

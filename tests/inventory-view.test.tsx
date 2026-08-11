@@ -154,7 +154,7 @@ test("ForecastChart identifies products and shades persisted interval bounds", (
 
   assert.match(
     html,
-    /aria-label="Biểu đồ số liệu thực tế và dự báo cho Cacao đá, đơn vị ly"/,
+    /aria-label="Biểu đồ số liệu thực tế và dự báo cho Cacao đá, đơn vị ly\. P25 là nhu cầu thấp, P50 là mức trung tâm và P75 là nhu cầu cao\."/,
   );
   assert.match(html, /data-forecast-series-id="product-cocoa"/);
   assert.match(source, /dataKey="confidenceRange"/);

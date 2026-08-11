@@ -3,10 +3,10 @@
 import {
   AlertCircle,
   CheckCircle2,
-  CircleHelp,
   LoaderCircle,
   X,
 } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import type { InventoryStatus } from "../../lib/types";
 
@@ -63,16 +63,21 @@ export function PageHeader({
 export function SectionHeading({
   title,
   subtitle,
+  guidance,
   action,
 }: {
   title: string;
   subtitle?: string;
+  guidance?: ReactNode;
   action?: ReactNode;
 }) {
   return (
     <div className="section-heading">
       <div>
-        <h2>{title}</h2>
+        <h2>
+          <span className="section-heading-title">{title}</span>
+          {guidance}
+        </h2>
         {subtitle ? <p>{subtitle}</p> : null}
       </div>
       {action}
@@ -250,6 +255,57 @@ export function AlertRow({
   return <div className="alert-row">{content}</div>;
 }
 
+export function GuidanceHint({
+  content,
+  label = "Xem hướng dẫn",
+  defaultOpen = false,
+}: {
+  content: ReactNode;
+  label?: string;
+  defaultOpen?: boolean;
+}) {
+  const id = useId();
+  const ref = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(defaultOpen);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <span
+      className="guidance-hint"
+      ref={ref}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        aria-describedby={open ? id : undefined}
+        aria-expanded={open}
+        aria-label={label}
+        onClick={() => setOpen(true)}
+        onFocus={() => setOpen(true)}
+        type="button"
+      >
+        !
+      </button>
+      {open ? <span id={id} role="tooltip">{content}</span> : null}
+    </span>
+  );
+}
+
 export function InfoTip({
   label,
   children,
@@ -257,14 +313,7 @@ export function InfoTip({
   label: string;
   children: ReactNode;
 }) {
-  return (
-    <details className="info-tip">
-      <summary aria-label={label}>
-        <CircleHelp aria-hidden="true" size={17} />
-      </summary>
-      <span role="tooltip">{children}</span>
-    </details>
-  );
+  return <GuidanceHint content={children} label={label} />;
 }
 
 export function Confidence({

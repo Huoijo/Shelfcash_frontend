@@ -32,7 +32,6 @@ test("import draft files remain visible when the view is rendered again", () => 
 
   assert.match(beforeTabChange, /POS_T7_2026\.csv/);
   assert.match(afterTabChange, /POS_T7_2026\.csv/);
-  assert.match(afterTabChange, /1 tệp đang được giữ trong phiên làm việc/);
 });
 
 test("import controls cap horizon at seven days and accept xlsm files", () => {

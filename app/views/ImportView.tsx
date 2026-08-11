@@ -541,30 +541,15 @@ export function ImportView({
     <>
       <PageHeader title="Nhập dữ liệu" />
 
-      {connection?.service !== "online" || connection?.llm !== "online" ? (
+      {connection?.service !== "online" ? (
         <div className="connection-strip">
-          {connection?.service !== "online" ? (
-            <div>
-              <i className="connection-dot" />
-              <span>
-                Máy chủ{" "}
-                <strong>{connection ? "chưa kết nối" : "đang kiểm tra"}</strong>
-              </span>
-            </div>
-          ) : null}
-          {connection?.llm !== "online" ? (
-            <div>
-              <i className="connection-dot" />
-              <span>
-                AI hỗ trợ ghép cột{" "}
-                <strong>
-                  {!connection || connection.llm === "unknown"
-                    ? "chưa kiểm tra"
-                    : "chưa sẵn sàng"}
-                </strong>
-              </span>
-            </div>
-          ) : null}
+          <div>
+            <i className="connection-dot" />
+            <span>
+              Máy chủ{" "}
+              <strong>{connection ? "chưa kết nối" : "đang kiểm tra"}</strong>
+            </span>
+          </div>
           <Button
             variant="quiet"
             busy={busy === "health"}
@@ -578,7 +563,7 @@ export function ImportView({
 
       {connection?.service === "offline" ? (
         <Notice tone="warning">
-          Chưa thể kết nối máy chủ. Kiểm tra cấu hình trước khi nhập dữ liệu.
+          Không thể kết nối máy chủ. Hãy thử lại trước khi tải tệp.
         </Notice>
       ) : null}
 
@@ -651,15 +636,13 @@ export function ImportView({
               />
               <UploadCloud size={21} />
               <span>
-                <strong>Chọn hoặc thả tệp vào đây</strong>
-                <small>Excel, CSV · có thể chọn nhiều tệp</small>
+                <strong>Chọn hoặc thả tệp Excel, CSV</strong>
               </span>
             </button>
             <div className="sample-file">
               <FileSpreadsheet size={20} />
               <span>
                 <strong>Tệp mẫu</strong>
-                <small>Xem cấu trúc cột được hỗ trợ</small>
               </span>
               <a href="/api/sample" download>
                 <Download size={16} />
@@ -691,17 +674,10 @@ export function ImportView({
                   </div>
                 ))}
               </div>
-              <p className="file-draft-note">
-                {files.length} tệp đang được giữ trong phiên làm việc. Bạn có
-                thể chuyển sang mục khác rồi quay lại trước khi gửi.
-              </p>
             </>
           ) : null}
 
           <div className="confirm-row">
-            <span className="quiet-copy">
-              Hệ thống sẽ đề xuất cách ghép cột bằng quy tắc hoặc AI.
-            </span>
             <Button
               variant="primary"
               busy={busy === "upload"}
@@ -761,7 +737,6 @@ export function ImportView({
         <>
           <SectionHeading
             title="Các bảng dữ liệu"
-            subtitle={`${mappingValidation.processableSheets} bảng sẽ xử lý · ${mappingValidation.ignoredSheets} bảng sẽ bỏ qua`}
             action={
               <Button
                 variant="secondary"
@@ -818,14 +793,14 @@ export function ImportView({
                         "mapping-state",
                         validation?.unknownSheetType
                           ? "skipped"
-                          : validation?.complete
+                          : validation?.fullyMapped
                             ? "complete"
                             : "pending",
                       )}
                     >
                       {validation?.unknownSheetType
                         ? "Bỏ qua"
-                        : validation?.complete
+                        : validation?.fullyMapped
                         ? "Đã ghép đủ"
                         : `${validation?.mappedColumns ?? 0}/${validation?.totalColumns ?? item.columns.length} cột`}
                     </b>
@@ -910,10 +885,9 @@ export function ImportView({
                   .
                 </Notice>
               ) : null}
-              {selectedValidation?.complete ? (
+              {selectedValidation?.fullyMapped ? (
                 <Notice tone="success">
-                  Bảng này đã có đủ trường bắt buộc và không có trường chuẩn bị
-                  trùng.
+                  Tất cả cột của bảng này đã được ghép hợp lệ.
                 </Notice>
               ) : null}
               <div className="mapping-grid">
@@ -1017,7 +991,7 @@ export function ImportView({
                 <div
                   className={cn(
                     "mapping-progress",
-                    mappingValidation.complete && "complete",
+                    mappingValidation.fullyMapped && "complete",
                   )}
                   role="status"
                 >
@@ -1027,8 +1001,10 @@ export function ImportView({
                       {mappingValidation.totalColumns} cột đã ghép
                     </strong>
                     <small>
-                      {mappingValidation.complete
-                        ? `${mappingValidation.unresolvedColumns} cột sẽ không được nhập.`
+                      {mappingValidation.fullyMapped
+                        ? "Tất cả cột đã được ghép."
+                        : mappingValidation.complete
+                          ? `Đủ trường bắt buộc; còn ${mappingValidation.unresolvedColumns} cột chưa ghép.`
                         : `Còn ${mappingValidation.incompleteSheets} bảng dữ liệu cần hoàn tất.`}
                     </small>
                   </span>
@@ -1120,9 +1096,6 @@ export function ImportView({
             chọn vẫn được giữ để tạo một lần nhập mới.
           </Notice>
           <div className="confirm-row">
-            <span className="quiet-copy">
-              Tạo lần nhập mới sau khi sửa dữ liệu hoặc cách ghép cột.
-            </span>
             <Button
               variant="primary"
               disabled={Boolean(busy)}
@@ -1148,10 +1121,6 @@ export function ImportView({
             ))}
           </SummaryGrid>
           <div className="confirm-row">
-            <span className="quiet-copy">
-              Chỉ các bảng đã xác nhận mới được nhập. Lịch sử mua hàng không làm
-              thay đổi tồn kho hiện tại.
-            </span>
             <Button
               variant="secondary"
               onClick={() => {

@@ -14,6 +14,7 @@ import {
   Button,
   Confidence,
   Details,
+  GuidanceHint,
   Notice,
   PageHeader,
   SectionHeading,
@@ -245,15 +246,13 @@ export function InventoryView({
           status="danger"
         />
         <StatCard
-          label="Hết hạn"
+          label="Hết hạn · không khả dụng"
           value={statusCounts.expired}
-          description="Không tính vào tồn khả dụng"
           status="danger"
         />
         <StatCard
           label="Gần hết hạn"
           value={statusCounts.expiring}
-          description="Ưu tiên xuất trước theo hạn dùng"
           status="warning"
         />
         <StatCard
@@ -264,14 +263,13 @@ export function InventoryView({
         <StatCard
           label="Thiếu dữ liệu"
           value={statusCounts.missing}
-          description="Bản ghi chưa có dữ liệu lô"
           status="info"
         />
       </SummaryGrid>
 
       <SectionHeading
         title="Nguyên liệu"
-        subtitle="Chọn một dòng để xem chi tiết từng lô."
+        guidance={<GuidanceHint content="Chọn một dòng để xem tồn kho, lô và lịch sử sử dụng." />}
       />
       <div className="filter-row">
         <label className="field field-inline">
@@ -355,7 +353,6 @@ export function InventoryView({
         <>
           <SectionHeading
             title={item.ingredient}
-            subtitle={`${lots.length} lô · ${item.supplier || "Chưa gán nhà cung cấp"}`}
             action={
               <Button variant="quiet" onClick={() => onOpenPlan(item.ingredient)}>
                 Mở kế hoạch
@@ -378,16 +375,11 @@ export function InventoryView({
               status="info"
             />
             <StatCard
-              label="Nhu cầu P50"
+              label={`Nhu cầu P50 · ${plan.horizonDays ?? data.settings.forecastHorizon} ngày`}
               value={
                 demand
                   ? formatQuantity(demand.totals.p50, demand.unit)
                   : "Chưa có"
-              }
-              description={
-                demand
-                  ? `${plan.horizonDays ?? data.settings.forecastHorizon} ngày của lần chạy hiện tại`
-                  : "Chạy dự báo và nhu cầu nguyên liệu để xem"
               }
               status={demand ? "info" : "neutral"}
             />
@@ -578,7 +570,6 @@ export function InventoryView({
                     <div className="panel">
                       <SectionHeading
                         title="Kiểm kho thực tế"
-                        subtitle="Hệ thống tự tính chênh lệch so với tồn hiện tại."
                       />
                       <div className="two-column compact-gap">
                         <label className="field">
@@ -616,7 +607,7 @@ export function InventoryView({
                     <div className="panel">
                       <SectionHeading
                         title="Điều chỉnh thủ công"
-                        subtitle="Hệ thống kiểm tra phiên bản trước khi lưu và tải lại nếu dữ liệu đã thay đổi."
+                        guidance={<GuidanceHint content="Nếu tồn kho đã thay đổi, dữ liệu mới sẽ được tải lại trước khi lưu." />}
                       />
                       <div className="two-column compact-gap">
                         <label className="field">

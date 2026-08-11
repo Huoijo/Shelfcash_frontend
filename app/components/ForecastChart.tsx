@@ -14,6 +14,32 @@ import { useId } from "react";
 import type { ForecastResult } from "../../lib/types";
 import { formatDate, formatQuantity } from "./ui";
 
+type ForecastTooltipProps = {
+  active?: boolean;
+  payload?: Array<{ payload?: ForecastResult["forecast"][number] & { label?: string } }>;
+  unit: string;
+};
+
+function ForecastTooltip({ active, payload, unit }: ForecastTooltipProps) {
+  const point = payload?.[0]?.payload;
+  if (!active || !point) return null;
+  return (
+    <div className="forecast-tooltip">
+      <strong>Ngày {point.label}</strong>
+      {point.quantilesValid === false ? (
+        <span>Dữ liệu dự báo không hợp lệ</span>
+      ) : (
+        <>
+          <span>Nhu cầu thấp (P25): {point.p25 == null ? "—" : formatQuantity(point.p25, unit)}</span>
+          <span>Mức dự báo trung tâm (P50): {point.p50 == null ? "—" : formatQuantity(point.p50, unit)}</span>
+          <span>Nhu cầu cao (P75): {point.p75 == null ? "—" : formatQuantity(point.p75, unit)}</span>
+        </>
+      )}
+      {point.actual == null ? null : <span>Số liệu thực tế: {formatQuantity(point.actual, unit)}</span>}
+    </div>
+  );
+}
+
 export function ForecastChart({
   forecast,
   compact = false,
@@ -32,21 +58,27 @@ export function ForecastChart({
       label: formatDate(point.date).slice(0, 5),
       confidenceRange: undefined,
     })),
-    ...forecast.forecast.map((point) => ({
-      ...point,
-      label: formatDate(point.date).slice(0, 5),
-      confidenceRange:
-        point.intervalLower == null || point.intervalUpper == null
-          ? undefined
-          : [point.intervalLower, point.intervalUpper],
-    })),
+    ...forecast.forecast.map((point) => {
+      const quantilesValid = point.quantilesValid !== false;
+      return {
+        ...point,
+        p50: quantilesValid ? point.p50 : undefined,
+        intervalLower: quantilesValid ? point.intervalLower : undefined,
+        intervalUpper: quantilesValid ? point.intervalUpper : undefined,
+        label: formatDate(point.date).slice(0, 5),
+        confidenceRange:
+          !quantilesValid || point.intervalLower == null || point.intervalUpper == null
+            ? undefined
+            : [point.intervalLower, point.intervalUpper],
+      };
+    }),
   ];
 
   return (
     <div
       className={compact ? "chart chart-compact" : "chart"}
       role="img"
-      aria-label={`Biểu đồ số liệu thực tế và dự báo cho ${seriesName}, đơn vị ${forecast.unit}`}
+      aria-label={`Biểu đồ số liệu thực tế và dự báo cho ${seriesName}, đơn vị ${forecast.unit}. P25 là nhu cầu thấp, P50 là mức trung tâm và P75 là nhu cầu cao.`}
       data-forecast-series-id={seriesId}
     >
       <ResponsiveContainer width="100%" height="100%">
@@ -71,25 +103,7 @@ export function ForecastChart({
             tick={{ fill: "#6b7773", fontSize: 13 }}
             width={45}
           />
-          <Tooltip
-            contentStyle={{
-              border: "1px solid #d7d7cf",
-              borderRadius: 10,
-              boxShadow: "0 10px 28px rgba(36,48,45,.08)",
-              fontSize: 13,
-            }}
-            labelFormatter={(label) => `Ngày ${String(label)}`}
-            formatter={(value, name) => [
-              formatQuantity(Number(value), forecast.unit),
-              name === "actual"
-                ? "Số liệu thực tế"
-                : name === "p50"
-                  ? "Dự báo trung vị (P50)"
-                  : name === "intervalLower"
-                    ? "Cận dưới dự báo"
-                    : "Cận trên dự báo",
-            ]}
-          />
+          <Tooltip content={<ForecastTooltip unit={forecast.unit} />} />
           <Area
             type="monotone"
             dataKey="confidenceRange"

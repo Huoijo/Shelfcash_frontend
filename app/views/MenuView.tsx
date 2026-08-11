@@ -400,19 +400,16 @@ export function MenuView({
         <StatCard
           label="Món đang bán"
           value={summary.activeCount}
-          description={`${summary.inactiveCount} món đã ngừng bán`}
           status="success"
         />
         <StatCard
           label="Combo"
           value={summary.comboCount}
-          description={`${summary.singleCount} món lẻ`}
           status="info"
         />
         <StatCard
-          label="Món thiếu công thức"
+          label="Món đang bán thiếu công thức"
           value={missingRecipes}
-          description="Chỉ tính món lẻ đang bán"
           status={missingRecipes ? "warning" : "success"}
         />
       </SummaryGrid>
@@ -557,9 +554,7 @@ export function MenuView({
                         %
                       </b>
                     </span>
-                  ) : (
-                    <span>Giá bán hiện tại</span>
-                  )}
+                  ) : null}
                 </div>
                 {item.itemType === "combo" ? (
                   <div className="menu-components">

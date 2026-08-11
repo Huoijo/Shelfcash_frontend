@@ -361,6 +361,7 @@ export interface SheetMappingValidation {
   missingCoreFields: string[];
   unknownSheetType: boolean;
   complete: boolean;
+  fullyMapped: boolean;
 }
 
 export interface ImportMappingValidation {
@@ -372,6 +373,7 @@ export interface ImportMappingValidation {
   unresolvedColumns: number;
   incompleteSheets: number;
   complete: boolean;
+  fullyMapped: boolean;
 }
 
 export function isProcessableSheet(
@@ -396,6 +398,7 @@ export function validateSheetMapping(
       missingCoreFields: [],
       unknownSheetType: true,
       complete: true,
+      fullyMapped: true,
     };
   }
   const allowedFields = canonicalFieldsForSheetType(sheetType);
@@ -432,6 +435,7 @@ export function validateSheetMapping(
   );
   const complete =
     duplicateFields.length === 0 && missingCoreFields.length === 0;
+  const fullyMapped = complete && unresolvedColumns.length === 0;
 
   return {
     sheetId: item.id,
@@ -443,6 +447,7 @@ export function validateSheetMapping(
     missingCoreFields,
     unknownSheetType,
     complete,
+    fullyMapped,
   };
 }
 
@@ -469,6 +474,8 @@ export function validateImportMappings(
     incompleteSheets: processableSheets.filter((sheet) => !sheet.complete)
       .length,
     complete: sheets.length > 0 && sheets.every((sheet) => sheet.complete),
+    fullyMapped:
+      sheets.length > 0 && sheets.every((sheet) => sheet.fullyMapped),
   };
 }
 

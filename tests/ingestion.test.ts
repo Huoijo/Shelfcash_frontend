@@ -307,8 +307,10 @@ test("unmapped optional columns are allowed but missing core fields still block"
     ...sales,
     mapping: { ...sales.mapping, "Khuyến mãi": ignoreField },
   };
-  assert.equal(validateImportMappings([unresolved]).complete, true);
-  assert.equal(validateImportMappings([unresolved]).unresolvedColumns, 1);
+  const unresolvedValidation = validateImportMappings([unresolved]);
+  assert.equal(unresolvedValidation.complete, true);
+  assert.equal(unresolvedValidation.fullyMapped, false);
+  assert.equal(unresolvedValidation.unresolvedColumns, 1);
   assert.equal(
     toConfirmMappings([unresolved])[0]?.column_mapping["Khuyến mãi"],
     null,
@@ -319,6 +321,7 @@ test("unmapped optional columns are allowed but missing core fields still block"
     mapping: { ...sales.mapping, "Số lượng": ignoreField },
   };
   assert.equal(validateImportMappings([missingCore]).complete, false);
+  assert.equal(validateImportMappings([missingCore]).fullyMapped, false);
   assert.deepEqual(validateSheetMapping(missingCore).missingCoreFields, [
     "quantity_sold",
   ]);
