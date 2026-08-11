@@ -517,6 +517,7 @@ function normalizeProducts(
         .map((line) => line.effectiveDate)
         .find((value): value is string => Boolean(value)) ||
       text(activeRecipe, ["effective_from", "effective_date"]);
+    const rawItemType = text(row, ["item_type"]).toLowerCase();
     return {
       productId: productId || undefined,
       recipeVersionId:
@@ -538,9 +539,11 @@ function normalizeProducts(
         `SP-${String(index + 1).padStart(3, "0")}`,
       price: number(row, ["price", "unit_price"]),
       itemType:
-        text(row, ["item_type"]).toLowerCase() === "combo"
+        rawItemType === "combo"
           ? "combo"
-          : "single",
+          : rawItemType === "single"
+            ? "single"
+            : undefined,
       status:
         text(row, ["status"]).toLowerCase() === "inactive"
           ? "inactive"

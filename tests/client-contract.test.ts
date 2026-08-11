@@ -334,6 +334,7 @@ test("frontend writes only contract fields through the proxy", async () => {
         { componentProductId: "product-1", quantity: 1 },
         { componentProductId: "product-2", quantity: 2 },
       ],
+      idempotencyKey: "combo-components-action-1",
     });
   } finally {
     globalThis.fetch = originalFetch;
@@ -416,7 +417,10 @@ test("frontend writes only contract fields through the proxy", async () => {
     status: "active",
   });
   assert.equal(calls[10]?.method, "PUT");
-  assert.ok(calls[10]?.headers.get("Idempotency-Key"));
+  assert.equal(
+    calls[10]?.headers.get("Idempotency-Key"),
+    "combo-components-action-1",
+  );
   assert.deepEqual(calls[10]?.body, {
     version: 3,
     components: [

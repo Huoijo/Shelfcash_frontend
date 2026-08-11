@@ -44,6 +44,13 @@ export function recipeLinesForProduct(
   return lines.filter((line) => recipeMatchesProduct(line, product));
 }
 
+/** Combo recipes are derived from their single-product components by the backend. */
+export function canEditDirectRecipe(
+  product: Pick<Product, "itemType"> | undefined,
+): boolean {
+  return product?.itemType === "single";
+}
+
 export function productIdentityKey(product: Product): string {
   return product.productId
     ? `id:${product.productId}`

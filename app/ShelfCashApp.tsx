@@ -32,12 +32,14 @@ import {
   getBootstrap,
   getConnectionHealth,
   getDecisionRun,
+  getMenu,
   getInventory,
   getInventoryConstraints,
   getPurchaseOrder,
   getPurchaseOrders,
   getRecipe,
   receivePurchaseOrder,
+  replaceMenuComponents,
   saveAliases as saveAliasesApi,
   saveCalendar,
   saveRecipe as saveRecipeApi,
@@ -60,9 +62,11 @@ import {
 } from "../lib/api-contract";
 import {
   findIngredientForRecipeLine,
+  canEditDirectRecipe,
   mergeRecipeIngredients,
   productIdentityKey,
 } from "../lib/recipes";
+import { normalizeMenuItems, validateComboComponents } from "../lib/menu";
 import type {
   Alias,
   ApiRecord,
@@ -75,6 +79,8 @@ import type {
   PlanResponse,
   DecisionPackage,
   Product,
+  MenuComponentDraft,
+  MenuItem,
   PurchaseOrder,
   RecipeLine,
   RecipeVersion,
@@ -90,6 +96,7 @@ import { MenuView } from "./views/MenuView";
 import { PlanView, type SimulationRunInput } from "./views/PlanView";
 import {
   RecipesView,
+  type ComboComponentsSaveResult,
   type RecipeSaveOptions,
 } from "./views/RecipesView";
 import { SettingsView } from "./views/SettingsView";
@@ -200,6 +207,8 @@ function errorMessage(caught: unknown, fallback: string): string {
       CRITIC_REJECTED_ALL_PLANS: "Không có phương án đủ điều kiện để khuyến nghị.",
       MODEL_NOT_READY: "Mô hình dự báo chưa sẵn sàng. Hãy thiết lập trong phần quản trị rồi chạy lại.",
       RECIPE_NOT_FOUND: "Một sản phẩm chưa có công thức có hiệu lực.",
+      RECIPE_NOT_ALLOWED_FOR_COMBO:
+        "Sản phẩm này là Combo; hãy chỉnh danh sách thành phần thay vì công thức trực tiếp.",
       RECIPE_NOT_EFFECTIVE: "Một công thức không có hiệu lực trong ngày dự báo.",
       RECIPE_YIELD_INVALID: "Sản lượng đầu ra của công thức không hợp lệ.",
       RECIPE_LINE_INVALID: "Có dòng nguyên liệu chưa hợp lệ.",
@@ -364,6 +373,7 @@ export function ShelfCashApp({
     new Map<string, { fingerprint: string; key: string }>(),
   );
   const inventoryMutationKeys = useRef(new Map<string, string>());
+  const comboComponentMutationKeys = useRef(new Map<string, string>());
   const trainingIdempotencyKeys = useRef(new Map<string, string>());
   const mobileMenuButton = useRef<HTMLButtonElement>(null);
   const mobileCloseButton = useRef<HTMLButtonElement>(null);
@@ -605,8 +615,51 @@ export function ShelfCashApp({
     );
   }
 
+  const refreshMenuData = useCallback(
+    async (storeId = data.settings.storeId): Promise<MenuItem[] | null> => {
+      if (!storeId.trim()) return null;
+      try {
+        const response = await getMenu(storeId, {
+          status: "all",
+          itemType: "all",
+          page: 1,
+          pageSize: 100,
+        });
+        const menu = normalizeMenuItems(response);
+        setData((current) => ({
+          ...current,
+          menu,
+          products: current.products.map((product) => {
+            const menuItem = menu.find(
+              (item) => item.productId === product.productId,
+            );
+            return menuItem
+              ? {
+                  ...product,
+                  itemType: menuItem.itemType,
+                  status: menuItem.status,
+                  sellingUnit: menuItem.sellingUnit,
+                  price: menuItem.price,
+                }
+              : product;
+          }),
+        }));
+        return menu;
+      } catch {
+        return null;
+      }
+    },
+    [data.settings.storeId],
+  );
+
   const loadRecipeDetails = useCallback(async (product: Product): Promise<Product> => {
-    if (!data.settings.storeId || !product.productId) return product;
+    if (
+      !data.settings.storeId ||
+      !product.productId ||
+      !canEditDirectRecipe(product)
+    ) {
+      return product;
+    }
     try {
       const detail = await getRecipe({
         storeId: data.settings.storeId,
@@ -635,9 +688,24 @@ export function ShelfCashApp({
           recipeProcessLossRate: 0,
         };
       }
+      if (
+        caught instanceof ShelfCashApiError &&
+        caught.code === "RECIPE_NOT_ALLOWED_FOR_COMBO"
+      ) {
+        const menu = await refreshMenuData();
+        const refreshed = menu?.find(
+          (item) => item.productId === product.productId,
+        );
+        if (refreshed) {
+          return { ...product, itemType: refreshed.itemType };
+        }
+        throw new Error(
+          "Sản phẩm này là Combo; hãy làm mới Menu để chỉnh danh sách thành phần thay vì công thức trực tiếp.",
+        );
+      }
       throw caught;
     }
-  }, [data.settings.storeId, data.today]);
+  }, [data.settings.storeId, data.today, refreshMenuData]);
 
   async function saveRecipe(
     selectedProduct: Product,
@@ -652,6 +720,13 @@ export function ShelfCashApp({
       if (!product?.productId) {
         throw new Error(
           "Dữ liệu món chưa đầy đủ nên chưa thể lưu công thức. Hãy đồng bộ lại.",
+        );
+      }
+      if (!canEditDirectRecipe(product)) {
+        throw new Error(
+          product.itemType === "combo"
+            ? "Sản phẩm này là Combo; hãy chỉnh danh sách thành phần thay vì công thức trực tiếp."
+            : "Chưa xác định được loại sản phẩm; chưa thể lưu công thức.",
         );
       }
       const ingredients = mergeRecipeIngredients(
@@ -700,6 +775,77 @@ export function ShelfCashApp({
         tone: "error",
       });
       return false;
+    }
+  }
+
+  async function saveComboComponents(
+    combo: MenuItem,
+    components: MenuComponentDraft[],
+  ): Promise<ComboComponentsSaveResult> {
+    const currentCombo = data.menu.find(
+      (item) => item.productId === combo.productId,
+    );
+    if (!currentCombo || currentCombo.itemType !== "combo") {
+      return {
+        saved: false,
+        message:
+          "Không tìm thấy Combo hiện tại trong Menu. Hãy tải lại dữ liệu trước khi lưu.",
+      };
+    }
+    const singles = data.menu.filter(
+      (item) => item.itemType === "single" && item.productId !== currentCombo.productId,
+    );
+    const issues = validateComboComponents(
+      currentCombo.productId,
+      components,
+      singles,
+    );
+    if (issues.length) return { saved: false, message: issues.join(" ") };
+
+    const fingerprint = JSON.stringify({
+      productId: currentCombo.productId,
+      version: currentCombo.version,
+      components,
+    });
+    const idempotencyKey =
+      comboComponentMutationKeys.current.get(fingerprint) ??
+      createIdempotencyKey();
+    comboComponentMutationKeys.current.set(fingerprint, idempotencyKey);
+    try {
+      await replaceMenuComponents({
+        storeId: data.settings.storeId,
+        productId: currentCombo.productId,
+        version: currentCombo.version,
+        components,
+        idempotencyKey,
+      });
+      comboComponentMutationKeys.current.delete(fingerprint);
+      const menu = await refreshMenuData();
+      return menu
+        ? { saved: true, message: `Đã lưu thành phần cho “${currentCombo.product}”.` }
+        : {
+            saved: false,
+            message:
+              "Đã lưu thành phần nhưng chưa thể tải Menu mới nhất. Hãy làm mới trước khi chỉnh tiếp.",
+          };
+    } catch (caught) {
+      if (
+        caught instanceof ShelfCashApiError &&
+        caught.code === "VERSION_CONFLICT"
+      ) {
+        comboComponentMutationKeys.current.delete(fingerprint);
+        const menu = await refreshMenuData();
+        return {
+          saved: false,
+          message: menu
+            ? "Combo đã được cập nhật ở nơi khác. Dữ liệu mới nhất đã được tải; hãy kiểm tra lại trước khi lưu."
+            : "Combo đã được cập nhật ở nơi khác nhưng chưa thể tải bản mới. Hãy làm mới Menu rồi thử lại.",
+        };
+      }
+      return {
+        saved: false,
+        message: errorMessage(caught, "Không thể lưu thành phần Combo."),
+      };
     }
   }
 
@@ -1371,6 +1517,7 @@ export function ShelfCashApp({
             versions={recipeVersions}
             onLoadDetails={loadRecipeDetails}
             onSave={saveRecipe}
+            onSaveComponents={saveComboComponents}
             onOpenPlan={() => openPlan()}
           />
         );

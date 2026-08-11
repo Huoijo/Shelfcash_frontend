@@ -8,6 +8,7 @@ import {
   normalizeMenuItems,
   patchMenuPayload,
   summarizeMenu,
+  validateComboComponents,
   validateMenuDraft,
 } from "../lib/menu.ts";
 import type { MenuItemDraft } from "../lib/types.ts";
@@ -134,7 +135,7 @@ test("Menu create, patch and component payloads match the contract", () => {
   );
 });
 
-test("Menu validation blocks empty, duplicate and invalid combo components", () => {
+test("Menu validation accepts inactive singles but blocks duplicate and invalid combo components", () => {
   const draft: MenuItemDraft = {
     sku: "CMB-003",
     product: "Combo lỗi",
@@ -182,7 +183,26 @@ test("Menu validation blocks empty, duplicate and invalid combo components", () 
     },
     [inactiveSingle],
   );
-  assert.ok(inactiveIssues.some((issue) => /món lẻ đang bán/i.test(issue)));
+  assert.deepEqual(inactiveIssues, []);
+});
+
+test("component replacement only accepts single products, never the combo itself", () => {
+  const singles = items.filter((item) => item.itemType === "single");
+  assert.deepEqual(validateComboComponents("combo-1", [], singles), []);
+  assert.ok(
+    validateComboComponents(
+      "combo-1",
+      [{ componentProductId: "combo-1", quantity: 1 }],
+      [...singles, items[2]!],
+    ).some((issue) => /chính nó/i.test(issue)),
+  );
+  assert.ok(
+    validateComboComponents(
+      "combo-1",
+      [{ componentProductId: "missing", quantity: 1 }],
+      singles,
+    ).some((issue) => /món lẻ/i.test(issue)),
+  );
 });
 
 test("Menu view never invents a version and refreshes version conflicts", () => {

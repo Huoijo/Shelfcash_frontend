@@ -195,9 +195,6 @@ export function validateMenuDraft(
     return issues;
   }
 
-  if (!draft.components.length) {
-    issues.push("Combo phải có ít nhất một món thành phần.");
-  }
   if (draft.components.length > 20) {
     issues.push("Combo tối đa 20 món thành phần.");
   }
@@ -224,10 +221,49 @@ export function validateMenuDraft(
   if (
     ids.some((id) => {
       const item = singlesById.get(id);
-      return !item || item.itemType !== "single" || item.status !== "active";
+      return !item || item.itemType !== "single";
     })
   ) {
-    issues.push("Combo chỉ được chứa món lẻ đang bán trong cùng cửa hàng.");
+    issues.push("Combo chỉ được chứa món lẻ trong cùng cửa hàng.");
+  }
+  return issues;
+}
+
+/** The backend decides whether an empty component list is permitted. */
+export function validateComboComponents(
+  comboProductId: string,
+  components: MenuComponentDraft[],
+  availableSingles: MenuItem[],
+): string[] {
+  const issues: string[] = [];
+  const ids = components.map((component) => component.componentProductId);
+  const singlesById = new Map(
+    availableSingles.map((item) => [item.productId, item]),
+  );
+  if (ids.some((id) => !id)) {
+    issues.push("Hãy chọn món cho mọi dòng thành phần.");
+  }
+  if (ids.includes(comboProductId)) {
+    issues.push("Combo không thể là thành phần của chính nó.");
+  }
+  if (new Set(ids).size !== ids.length) {
+    issues.push("Một món chỉ được xuất hiện một lần trong combo.");
+  }
+  if (
+    components.some(
+      (component) =>
+        !Number.isInteger(component.quantity) || component.quantity <= 0,
+    )
+  ) {
+    issues.push("Số lượng thành phần phải là số nguyên lớn hơn 0.");
+  }
+  if (
+    ids.some((id) => {
+      const item = singlesById.get(id);
+      return !item || item.itemType !== "single";
+    })
+  ) {
+    issues.push("Chỉ có thể chọn món lẻ trong cùng cửa hàng.");
   }
   return issues;
 }

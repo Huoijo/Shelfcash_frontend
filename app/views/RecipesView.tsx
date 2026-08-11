@@ -3,21 +3,25 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { ArrowRight, Plus, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   BootstrapData,
+  MenuComponentDraft,
+  MenuItem,
   Product,
   RecipeLine,
   RecipeVersion,
 } from "../../lib/types";
 import {
   findIngredientForRecipeLine,
+  canEditDirectRecipe,
   ingredientIdentityKey,
   mergeRecipeIngredients,
   productIdentityKey,
   recipeIngredientIdentityKey,
   recipeLinesForProduct,
 } from "../../lib/recipes";
+import { validateComboComponents } from "../../lib/menu";
 import {
   Button,
   Notice,
@@ -40,6 +44,11 @@ export type RecipeSaveOptions = {
   version: number;
   yieldQuantity: number;
   processLossRate: number;
+};
+
+export type ComboComponentsSaveResult = {
+  saved: boolean;
+  message?: string;
 };
 
 const defaultLoadDetails = async (product: Product) => product;
@@ -72,10 +81,208 @@ function recipeDefaults(product: Product | undefined, today: string) {
   };
 }
 
+function ComboComponentsEditor({
+  combo,
+  items,
+  onSave,
+  onOpenSingle,
+}: {
+  combo: MenuItem;
+  items: MenuItem[];
+  onSave: (
+    combo: MenuItem,
+    components: MenuComponentDraft[],
+  ) => Promise<ComboComponentsSaveResult>;
+  onOpenSingle: (productId: string) => void;
+}) {
+  const componentKey = (rows: MenuComponentDraft[]) =>
+    rows
+      .map((row) => `${row.componentProductId}:${row.quantity}`)
+      .join("|");
+  const [components, setComponents] = useState<MenuComponentDraft[]>(() =>
+    combo.components.map((component) => ({
+      componentProductId: component.componentProductId,
+      quantity: component.quantity,
+    })),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState("");
+  const lastSavedComponents = useRef<string | null>(null);
+  const singles = useMemo(
+    () =>
+      items.filter(
+        (item) =>
+          item.itemType === "single" && item.productId !== combo.productId,
+      ),
+    [combo.productId, items],
+  );
+  const issues = useMemo(
+    () => validateComboComponents(combo.productId, components, singles),
+    [combo.productId, components, singles],
+  );
+
+  useEffect(() => {
+    setComponents(
+      combo.components.map((component) => ({
+        componentProductId: component.componentProductId,
+        quantity: component.quantity,
+      })),
+    );
+    setError("");
+    if (lastSavedComponents.current !== componentKey(combo.components)) {
+      setSaved("");
+    }
+  }, [combo]);
+
+  function update(index: number, patch: Partial<MenuComponentDraft>) {
+    setComponents((current) =>
+      current.map((component, componentIndex) =>
+        componentIndex === index ? { ...component, ...patch } : component,
+      ),
+    );
+    setError("");
+    setSaved("");
+  }
+
+  function add() {
+    const used = new Set(components.map((component) => component.componentProductId));
+    const first = singles.find((item) => !used.has(item.productId));
+    if (!first) return;
+    setComponents((current) => [
+      ...current,
+      { componentProductId: first.productId, quantity: 1 },
+    ]);
+    setError("");
+    setSaved("");
+  }
+
+  return (
+    <section className="recipe-editor combo-components-editor">
+      <SectionHeading title={`Thành phần Combo · ${combo.product}`} />
+      <Notice tone="info">
+        Combo không có công thức trực tiếp. Nhu cầu nguyên liệu được tổng hợp từ công thức của từng sản phẩm thành phần.
+      </Notice>
+      {components.length ? (
+        <div className="menu-component-editor">
+          {components.map((component, index) => {
+            const selectedByOtherRows = new Set(
+              components
+                .filter((_, rowIndex) => rowIndex !== index)
+                .map((row) => row.componentProductId),
+            );
+            const selected = singles.find(
+              (item) => item.productId === component.componentProductId,
+            );
+            return (
+              <div className="menu-component-row" key={`${component.componentProductId}-${index}`}>
+                <select
+                  aria-label={`Món thành phần ${index + 1}`}
+                  value={component.componentProductId}
+                  onChange={(event) => update(index, { componentProductId: event.target.value })}
+                >
+                  <option value="">Chọn món lẻ</option>
+                  {singles.map((single) => (
+                    <option
+                      disabled={selectedByOtherRows.has(single.productId)}
+                      key={single.productId}
+                      value={single.productId}
+                    >
+                      {single.product} · {single.sku}
+                      {single.status === "inactive" ? " · Ngừng bán" : ""}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  aria-label={`Số lượng thành phần ${index + 1}`}
+                  min="1"
+                  step="1"
+                  type="number"
+                  value={component.quantity}
+                  onChange={(event) => update(index, { quantity: Number(event.target.value) })}
+                />
+                {selected ? (
+                  <Button
+                    type="button"
+                    variant="quiet"
+                    onClick={() => onOpenSingle(selected.productId)}
+                  >
+                    Sửa công thức
+                  </Button>
+                ) : null}
+                <button
+                  aria-label={`Xóa thành phần ${index + 1}`}
+                  className="icon-button"
+                  type="button"
+                  onClick={() => {
+                    setComponents((current) => current.filter((_, rowIndex) => rowIndex !== index));
+                    setError("");
+                    setSaved("");
+                  }}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <Notice tone="info">Combo này chưa có món thành phần.</Notice>
+      )}
+      {!singles.length ? (
+        <Notice tone="warning">Chưa có món lẻ nào trong menu để thêm vào Combo.</Notice>
+      ) : null}
+      {issues.length ? <Notice tone="warning">{issues.join(" ")}</Notice> : null}
+      {error ? <Notice tone="error">{error}</Notice> : null}
+      {saved ? <Notice tone="success">{saved}</Notice> : null}
+      <div className="confirm-row">
+        <Button type="button" variant="quiet" disabled={!singles.some((single) => !components.some((row) => row.componentProductId === single.productId))} onClick={add}>
+          <Plus size={15} /> Thêm món thành phần
+        </Button>
+        <Button
+          busy={saving}
+          disabled={Boolean(issues.length)}
+          type="button"
+          variant="primary"
+          onClick={() => {
+            void (async () => {
+              setSaving(true);
+              setError("");
+              try {
+                const result = await onSave(combo, components);
+                if (result.saved) {
+                  lastSavedComponents.current = componentKey(components);
+                  setSaved(result.message || `Đã lưu thành phần cho “${combo.product}”.`);
+                } else {
+                  setError(result.message || "Không thể lưu thành phần Combo.");
+                }
+              } catch (caught) {
+                setError(
+                  caught instanceof Error
+                    ? caught.message
+                    : "Không thể lưu thành phần Combo.",
+                );
+              } finally {
+                setSaving(false);
+              }
+            })();
+          }}
+        >
+          Lưu thành phần Combo
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 export function RecipesView({
   data,
   onLoadDetails = defaultLoadDetails,
   onSave,
+  onSaveComponents = async () => ({
+    saved: false,
+    message: "Chưa thể lưu thành phần Combo.",
+  }),
   onOpenPlan,
 }: {
   data: BootstrapData;
@@ -86,10 +293,14 @@ export function RecipesView({
     rows: RecipeLine[],
     options: RecipeSaveOptions,
   ) => Promise<boolean>;
+  onSaveComponents?: (
+    combo: MenuItem,
+    components: MenuComponentDraft[],
+  ) => Promise<ComboComponentsSaveResult>;
   onOpenPlan: () => void;
 }) {
   const products = useMemo(
-    () => data.products.filter((item) => item.itemType !== "combo"),
+    () => data.products,
     [data.products],
   );
   const [selectedProductKey, setSelectedProductKey] = useState(
@@ -106,6 +317,10 @@ export function RecipesView({
     productIdentityKey(detailedProduct) === productIdentityKey(selectedProduct)
       ? detailedProduct
       : selectedProduct;
+  const combo =
+    product?.itemType === "combo"
+      ? data.menu.find((item) => item.productId === product.productId)
+      : undefined;
   const currentRows = useMemo(
     () => recipeLinesForProduct(data.recipes, product),
     [data.recipes, product],
@@ -159,7 +374,9 @@ export function RecipesView({
     let active = true;
     setDetailedProduct(null);
     setDetailsError("");
-    if (!selectedProduct) return () => undefined;
+    if (!selectedProduct || !canEditDirectRecipe(selectedProduct)) {
+      return () => undefined;
+    }
     void onLoadDetails(selectedProduct).then(
       (detail) => {
         if (active) setDetailedProduct(detail);
@@ -221,6 +438,7 @@ export function RecipesView({
           <thead>
             <tr>
               <th>Sản phẩm</th>
+              <th>Loại</th>
               <th>Giá bán</th>
               <th>Số nguyên liệu</th>
               <th>Trạng thái</th>
@@ -233,6 +451,9 @@ export function RecipesView({
                 data.recipes,
                 item,
               ).length;
+              const componentCount = data.menu.find(
+                (menuItem) => menuItem.productId === item.productId,
+              )?.components.length ?? 0;
               return (
                 <tr
                   key={itemKey}
@@ -245,14 +466,35 @@ export function RecipesView({
                     <strong>{item.product}</strong>
                     <small>{item.sku}</small>
                   </td>
+                  <td>
+                    {item.itemType === "combo"
+                      ? "Combo"
+                      : item.itemType === "single"
+                        ? "Món lẻ"
+                        : "Đang xác định"}
+                  </td>
                   <td>{formatVnd(item.price)}</td>
-                  <td>{count} nguyên liệu</td>
+                  <td>
+                    {item.itemType === "combo"
+                      ? `${componentCount} món thành phần`
+                      : item.itemType === "single"
+                        ? `${count} nguyên liệu`
+                        : "Chưa xác định"}
+                  </td>
                   <td>
                     <StatusPill
                       status={
-                        item.recipeStatus === "Hoàn chỉnh" ? "healthy" : "missing"
+                        item.itemType === "combo" || item.recipeStatus === "Hoàn chỉnh"
+                          ? "healthy"
+                          : "missing"
                       }
-                      label={item.recipeStatus}
+                      label={
+                        item.itemType === "combo"
+                          ? "Thành phần Combo"
+                          : item.itemType === "single"
+                            ? item.recipeStatus
+                            : "Đang xác định loại món"
+                      }
                     />
                   </td>
                 </tr>
@@ -260,9 +502,8 @@ export function RecipesView({
             })}
             {!products.length ? (
               <tr>
-                <td className="table-empty" colSpan={4}>
-                  Chưa có món lẻ để thiết lập công thức. Thành phần combo
-                  được quản lý tại trang Menu.
+                <td className="table-empty" colSpan={5}>
+                  Chưa có sản phẩm để thiết lập công thức hoặc thành phần Combo.
                 </td>
               </tr>
             ) : null}
@@ -270,7 +511,25 @@ export function RecipesView({
         </table>
       </div>
 
-      {product ? (
+      {product?.itemType === "combo" ? (
+        combo ? (
+          <ComboComponentsEditor
+            combo={combo}
+            items={data.menu}
+            onSave={onSaveComponents}
+            onOpenSingle={(productId) => {
+              const single = products.find(
+                (item) => item.productId === productId && item.itemType === "single",
+              );
+              if (single) setSelectedProductKey(productIdentityKey(single));
+            }}
+          />
+        ) : (
+          <Notice tone="warning">
+            Chưa tải được danh sách thành phần của Combo này. Hãy làm mới Menu rồi thử lại.
+          </Notice>
+        )
+      ) : product?.itemType === "single" ? (
         <>
           {detailsError ? <Notice tone="error">{detailsError}</Notice> : null}
           <SectionHeading
@@ -571,6 +830,10 @@ export function RecipesView({
           </div>
 
         </>
+      ) : product ? (
+        <Notice tone="info">
+          Đang xác định loại sản phẩm. Chưa tải công thức hoặc thành phần cho đến khi Menu trả về `item_type`.
+        </Notice>
       ) : null}
     </>
   );

@@ -11,7 +11,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   componentSignature,
   createMenuPayload,
@@ -23,6 +23,7 @@ import {
 } from "../../lib/menu";
 import {
   ShelfCashApiError,
+  createIdempotencyKey,
   createMenuProduct,
   getMenu,
   replaceMenuComponents,
@@ -109,6 +110,7 @@ export function MenuView({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [editor, setEditor] = useState<MenuEditor | null>(null);
+  const componentIdempotencyKeys = useRef(new Map<string, string>());
 
   const refreshMenu = useCallback(async (): Promise<MenuItem[] | null> => {
     setLoading(true);
@@ -153,10 +155,6 @@ export function MenuView({
   const availableSingles = useMemo(
     () => items.filter((item) => item.itemType === "single"),
     [items],
-  );
-  const activeSingles = useMemo(
-    () => availableSingles.filter((item) => item.status === "active"),
-    [availableSingles],
   );
   const summary = useMemo(() => summarizeMenu(items), [items]);
   const missingRecipes = useMemo(
@@ -257,7 +255,7 @@ export function MenuView({
         (component) => component.componentProductId,
       ),
     );
-    const first = activeSingles.find((item) => !used.has(item.productId));
+    const first = availableSingles.find((item) => !used.has(item.productId));
     if (!first?.productId) return;
     updateDraft({
       components: [
@@ -318,12 +316,26 @@ export function MenuView({
               })),
             );
         if (componentsChanged) {
+          const componentFingerprint = JSON.stringify({
+            productId: editor.item.productId,
+            version,
+            components: editor.draft.components,
+          });
+          const idempotencyKey =
+            componentIdempotencyKeys.current.get(componentFingerprint) ??
+            createIdempotencyKey();
+          componentIdempotencyKeys.current.set(
+            componentFingerprint,
+            idempotencyKey,
+          );
           await replaceMenuComponents({
             storeId: data.settings.storeId,
             productId: editor.item.productId,
             version,
             components: editor.draft.components,
+            idempotencyKey,
           });
+          componentIdempotencyKeys.current.delete(componentFingerprint);
           changed = true;
         }
       }
@@ -359,6 +371,7 @@ export function MenuView({
               ? {
                   ...current,
                   item: refreshedItem,
+                  draft: draftFrom(refreshedItem),
                 }
               : current,
           );
@@ -800,8 +813,7 @@ export function MenuView({
                   <div>
                     <span>Thành phần combo</span>
                     <small>
-                      Chỉ chọn món lẻ đang bán. Combo không thể chứa
-                      combo khác.
+                      Chỉ chọn món lẻ. Combo không thể chứa combo khác.
                     </small>
                   </div>
                   {editor.draft.components.map((component, index) => {
@@ -840,7 +852,6 @@ export function MenuView({
                               key={single.productId || single.sku}
                               disabled={
                                 !single.productId ||
-                                single.status !== "active" ||
                                 selectedByOtherRows.has(single.productId)
                               }
                             >
@@ -891,7 +902,7 @@ export function MenuView({
                     type="button"
                     variant="quiet"
                     disabled={
-                      !activeSingles.some(
+                      !availableSingles.some(
                         (single) =>
                           single.productId &&
                           !editor.draft.components.some(
