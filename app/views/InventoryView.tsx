@@ -407,7 +407,7 @@ export function InventoryView({
                   {lots.map((lot) => (
                     <tr key={lot.lotId}>
                       <td>
-                        <strong>{lot.lotId}</strong>
+                        <strong>{lot.batchId || lot.lotId}</strong>
                         <small>{lot.sku}</small>
                       </td>
                       <td>{lot.supplier || "—"}</td>

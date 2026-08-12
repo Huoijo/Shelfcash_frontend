@@ -22,7 +22,11 @@ import {
   selectPlanningScenario,
   strategyFromApi,
 } from "../lib/contract-adapters";
-import { shouldPollDecisionRun } from "../lib/decision-run";
+import { dateInTimeZone } from "../lib/data";
+import {
+  buildDecisionRunRequest,
+  shouldPollDecisionRun,
+} from "../lib/decision-run";
 import {
   createIdempotencyKey,
   createInventoryAdjustment,
@@ -90,6 +94,7 @@ import type {
 } from "../lib/types";
 import { Notice, Toast, cn } from "./components/ui";
 import { DecisionWorkspace } from "./components/DecisionWorkspace";
+import { DecisionCenterWorkspace } from "./components/DecisionCenterWorkspace";
 import { ImportView } from "./views/ImportView";
 import { InventoryView } from "./views/InventoryView";
 import { MenuView } from "./views/MenuView";
@@ -100,7 +105,6 @@ import {
   type RecipeSaveOptions,
 } from "./views/RecipesView";
 import { SettingsView } from "./views/SettingsView";
-import { TodayView } from "./views/TodayView";
 
 type PageKey =
   | "today"
@@ -294,20 +298,36 @@ function retryableTransportFailure(caught: unknown): boolean {
 
 export function ShelfCashApp({
   initialData,
+  initialDecisionIngredient = "",
+  initialDecisionView = "today",
   initialPlan,
 }: {
   initialData: BootstrapData;
+  initialDecisionIngredient?: string;
+  initialDecisionView?: "today" | "future";
   initialPlan: PlanResponse;
 }) {
-  const [page, setPage] = useState<PageKey>("today");
+  const [page, setPage] = useState<PageKey>(initialDecisionView);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
-  const [initialDashboardLoading, setInitialDashboardLoading] = useState(
-    Boolean(initialData.settings.storeId.trim()),
-  );
   const [data, setData] = useState(initialData);
   const [plan, setPlan] = useState(initialPlan);
   const [decision, setDecision] = useState<DecisionPackage | null>(null);
   const [decisionIngredient, setDecisionIngredient] = useState("");
+  const [decisionCenterIngredient, setDecisionCenterIngredient] = useState(initialDecisionIngredient);
+
+  function navigateDecisionCenter(
+    view: "today" | "future",
+    ingredientId?: string,
+  ) {
+    if (ingredientId) setDecisionCenterIngredient(ingredientId);
+    setPage(view);
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("decision_view", view);
+    if (ingredientId) url.searchParams.set("ingredient", ingredientId);
+    else url.searchParams.delete("ingredient");
+    window.history.pushState({}, "", url);
+  }
   useEffect(() => {
     const storeId = data.settings.storeId;
     if (!storeId) return;
@@ -434,7 +454,16 @@ export function ShelfCashApp({
             }
           : bootstrap;
         const adapted = adaptBootstrap(baseData, bootstrapWithInventory);
-        const nextData = withSafetyStocks(adapted, inventoryResult.value);
+        const hydratedData = withSafetyStocks(adapted, inventoryResult.value);
+        // `today` is the date shown as “Hôm nay” and used as the default
+        // business date. Resolve it in the store's timezone instead of
+        // trusting a bootstrap date that may have been calculated in UTC.
+        const nextData = {
+          ...hydratedData,
+          today: dateInTimeZone(
+            hydratedData.settings.timezone ?? "Asia/Ho_Chi_Minh",
+          ),
+        };
         const nextStrategy = resetPlanning
           ? strategyFromApi(nextData.settings.defaultStrategy)
           : requestedStrategy;
@@ -478,8 +507,6 @@ export function ShelfCashApp({
 
   useEffect(() => {
     let active = true;
-    const shouldHydrateStore = Boolean(initialData.settings.storeId.trim());
-    setInitialDashboardLoading(shouldHydrateStore);
     void (async () => {
       const health = await getConnectionHealth();
       if (!active) return;
@@ -494,7 +521,6 @@ export function ShelfCashApp({
           strategyFromApi(initialData.settings.defaultStrategy),
         );
       }
-      if (active) setInitialDashboardLoading(false);
     })();
     return () => {
       active = false;
@@ -1032,14 +1058,14 @@ export function ShelfCashApp({
     try {
       const created = await createDecisionRun({
         storeId: data.settings.storeId,
-        request: {
-          forecast_run_id: forecastRunId,
-          as_of_date: data.today,
-          horizon_days: horizonDays,
-          engine_mode: "deterministic",
-          include_open_purchase_orders: includeOpenPurchaseOrders,
-          ...(budgetOverride === undefined ? {} : { budget_override: budgetOverride }),
-        },
+        request: buildDecisionRunRequest({
+          forecastRunId,
+          asOfDate: data.today,
+          horizonDays,
+          includeOpenPurchaseOrders,
+          budgetOverride,
+          monthlyBudget: data.settings.monthlyBudget,
+        }),
         signal: abortController.signal,
       });
       if (operation !== operationSequence.current) return;
@@ -1480,14 +1506,16 @@ export function ShelfCashApp({
     switch (page) {
       case "today":
         return (
-          <TodayView
+          <DecisionCenterWorkspace
+            activeView="today"
             data={data}
-            plan={plan}
-            loading={initialDashboardLoading}
+            decision={decision}
+            initialIngredient={decisionCenterIngredient}
             onNavigate={(target) =>
-              target === "plan" ? openPlan(undefined, "future") : setPage("inventory")
+              target === "plan" ? openPlan() : setPage("inventory")
             }
-            onOpenDecision={setDecisionIngredient}
+            onViewChange={navigateDecisionCenter}
+            plan={plan}
           />
         );
       case "import":
@@ -1522,6 +1550,19 @@ export function ShelfCashApp({
           />
         );
       case "future":
+        return (
+          <DecisionCenterWorkspace
+            activeView="future"
+            data={data}
+            decision={decision}
+            initialIngredient={decisionCenterIngredient}
+            onNavigate={(target) =>
+              target === "plan" ? openPlan() : setPage("inventory")
+            }
+            onViewChange={navigateDecisionCenter}
+            plan={plan}
+          />
+        );
       case "simulator":
       case "plan":
       case "orders":
@@ -1541,13 +1582,11 @@ export function ShelfCashApp({
             onConfirmOrder={confirmOrder}
             onReceiveOrder={receiveOrder}
             focus={
-              page === "future"
-                ? "future"
-                : page === "simulator"
-                  ? "simulator"
-                  : page === "orders"
-                    ? "orders"
-                    : "plan"
+              page === "simulator"
+                ? "simulator"
+                : page === "orders"
+                  ? "orders"
+                  : "plan"
             }
           />
         );

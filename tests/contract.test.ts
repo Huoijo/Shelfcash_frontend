@@ -12,7 +12,11 @@ import {
   strategyToApi,
   strategyToCore,
 } from "../lib/contract-adapters.ts";
-import { buildEmptyBootstrapData, hasOperationalData } from "../lib/data.ts";
+import {
+  buildEmptyBootstrapData,
+  dateInTimeZone,
+  hasOperationalData,
+} from "../lib/data.ts";
 import type {
   ForecastRunResultResponse,
   StoreBootstrapResponse,
@@ -117,6 +121,13 @@ const bootstrapResponse: StoreBootstrapResponse = {
     inventory_updated_at: "2026-08-04T09:00:00+07:00",
   },
 };
+
+test("business date follows the store timezone instead of the UTC calendar date", () => {
+  const instant = new Date("2026-08-11T17:30:00.000Z");
+
+  assert.equal(dateInTimeZone("Asia/Ho_Chi_Minh", instant), "2026-08-12");
+  assert.equal(dateInTimeZone("UTC", instant), "2026-08-11");
+});
 
 const forecastResponse: ForecastRunResultResponse = {
   forecast_run_id: "forecast-42",
@@ -294,6 +305,57 @@ test("bootstrap preserves canonical lots, Decimal-like values, settings and vers
   assert.equal(data.products[0]?.recipeProcessLossRate, 0.04);
 });
 
+test("bootstrap products inherit ITEM_TYPE from their matching Menu records", () => {
+  const data = adaptBootstrap(buildEmptyBootstrapData(), {
+    ...bootstrapResponse,
+    menu: [
+      {
+        product_id: "PROD_LATTE",
+        product: "Cà phê sữa",
+        sku: "LATTE-01",
+        ITEM_TYPE: "single",
+        price: "35000",
+      },
+      {
+        product_id: "PROD_COMBO",
+        product: "Combo buổi sáng",
+        sku: "COMBO-01",
+        ITEM_TYPE: "combo",
+        price: "69000",
+      },
+    ],
+    products: [
+      ...bootstrapResponse.products,
+      {
+        product_id: "PROD_COMBO",
+        product_name: "Combo buổi sáng",
+        sku: "COMBO-01",
+        price: "69000",
+      },
+    ],
+  });
+
+  assert.equal(data.products[0]?.itemType, "single");
+  assert.equal(data.products[1]?.itemType, "combo");
+  assert.equal(data.menu[1]?.itemType, "combo");
+});
+
+test("inventory retains lot_id for mutations and uses batch_id as the display code", () => {
+  const data = adaptBootstrap(buildEmptyBootstrapData(), {
+    ...bootstrapResponse,
+    inventory: [
+      {
+        ...bootstrapResponse.inventory[0],
+        lot_id: "lot-internal-1",
+        batch_id: "BATCH-2026-08-A",
+      },
+    ],
+  });
+
+  assert.equal(data.inventory[0]?.lots?.[0]?.lotId, "lot-internal-1");
+  assert.equal(data.inventory[0]?.lots?.[0]?.batchId, "BATCH-2026-08-A");
+});
+
 test("product forecasts retain persisted calibrated intervals and warnings", () => {
   const forecasts = adaptForecasts(forecastResponse);
   const latte = forecasts["Cà phê sữa"];
@@ -356,6 +418,7 @@ test("ingredient demand retains product contributions", () => {
     {
       productId: "PROD_LATTE",
       product: "Cà phê sữa",
+      date: "2026-08-05",
       p25: 2.4,
       p50: 3,
       p75: 3.6,
@@ -363,6 +426,34 @@ test("ingredient demand retains product contributions", () => {
       unit: "lít",
     },
   ]);
+});
+
+test("forecast adapter deduplicates repeated product and target-date rows", () => {
+  const forecasts = adaptForecasts({
+    forecast_run_id: "forecast-dedup",
+    status: "completed",
+    predictions: [
+      {
+        product_id: "PROD_LATTE",
+        product_name: "Cà phê sữa",
+        target_date: "2026-08-12",
+        p25: 16,
+        p50: 20,
+        p75: 24,
+      },
+      {
+        product_id: "PROD_LATTE",
+        product_name: "Cà phê sữa",
+        target_date: "2026-08-12",
+        p25: 16,
+        p50: 20,
+        p75: 24,
+      },
+    ],
+  });
+
+  assert.equal(forecasts["Cà phê sữa"]?.forecast.length, 1);
+  assert.deepEqual(forecasts["Cà phê sữa"]?.totals, { p25: 16, p50: 20, p75: 24 });
 });
 
 test("core comparison retains all strategies, metrics and infeasible lines", () => {

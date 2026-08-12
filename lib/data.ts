@@ -7,15 +7,23 @@ import type {
   RecipeLine,
 } from "./types";
 
-function dateInVietnam(): string {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Ho_Chi_Minh",
+export function dateInTimeZone(
+  timeZone = "Asia/Ho_Chi_Minh",
+  now: Date = new Date(),
+): string {
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).formatToParts(new Date());
+  });
+  const parts = formatter.formatToParts(now);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
+}
+
+function dateInVietnam(): string {
+  return dateInTimeZone();
 }
 
 export function addDays(isoDate: string, days: number): string {

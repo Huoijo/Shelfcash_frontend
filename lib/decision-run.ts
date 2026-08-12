@@ -1,4 +1,27 @@
-import type { DecisionRunStatus } from "./types";
+import type { CreateDecisionRunRequest, DecisionRunStatus } from "./types";
+
+export const DECISION_SCENARIO_COUNT = 100;
+export const DECISION_RANDOM_SEED = 42;
+
+export function buildDecisionRunRequest(input: {
+  forecastRunId: string;
+  asOfDate: string;
+  horizonDays: number;
+  includeOpenPurchaseOrders: boolean;
+  budgetOverride?: number;
+  monthlyBudget: number;
+}): CreateDecisionRunRequest {
+  return {
+    forecast_run_id: input.forecastRunId,
+    as_of_date: input.asOfDate,
+    horizon_days: input.horizonDays,
+    engine_mode: "deterministic",
+    include_open_purchase_orders: input.includeOpenPurchaseOrders,
+    budget_override: input.budgetOverride ?? input.monthlyBudget,
+    scenario_count: DECISION_SCENARIO_COUNT,
+    random_seed: DECISION_RANDOM_SEED,
+  };
+}
 
 export type DecisionRunLifecycle =
   | "processing"
@@ -16,6 +39,7 @@ export function decisionRunLifecycle(status: unknown): DecisionRunLifecycle {
     case "running":
       return "processing";
     case "completed":
+    case "completed_with_no_feasible_recommendation":
       return "completed";
     case "failed":
     case "blocked":

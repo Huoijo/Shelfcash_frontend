@@ -57,6 +57,8 @@ export interface InventoryItem {
 
 export interface InventoryLot {
   lotId: string;
+  /** User-facing batch code. lotId remains the backend identifier for mutations. */
+  batchId?: string;
   ingredientId?: string;
   supplierId?: string;
   ingredient: string;
@@ -371,9 +373,15 @@ export interface ForecastResult {
 export interface IngredientDemandContribution {
   productId?: string;
   product: string;
+  date?: string;
   p25: number;
   p50: number;
   p75: number;
+  forecastP25?: number;
+  forecastP50?: number;
+  forecastP75?: number;
+  recipeQuantity?: number;
+  recipeUnit?: string;
   quantity?: number;
   unit?: string;
 }
@@ -469,7 +477,13 @@ export interface PlanResponse {
 }
 
 /** Persisted, user-facing output of the Decision Package API. */
-export type DecisionRunStatus = "queued" | "running" | "completed" | "failed" | "blocked";
+export type DecisionRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "completed_with_no_feasible_recommendation"
+  | "failed"
+  | "blocked";
 export type DecisionStrategyKey = "lean" | "balanced" | "protected" | string;
 
 export interface CreateDecisionRunRequest {
@@ -556,6 +570,7 @@ export interface DecisionStressResult {
 export interface DecisionPackage {
   decision_run_id: string;
   status: DecisionRunStatus;
+  as_of_date?: string | null;
   horizon_days?: number | null;
   recommended_strategy?: DecisionStrategyKey | null;
   business_metrics?: DecisionBusinessMetrics | null;

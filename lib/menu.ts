@@ -85,7 +85,7 @@ export function normalizeMenuItem(value: unknown): MenuItem | null {
   if (!product || !sku) return null;
 
   const itemType =
-    text(value, ["item_type"]).toLowerCase() === "combo"
+    text(value, ["item_type", "ITEM_TYPE"]).toLowerCase() === "combo"
       ? "combo"
       : "single";
   const price = numberValue(value, ["price", "selling_price"]);

@@ -228,7 +228,8 @@ function normalizeInventory(
       0,
     );
     const normalizedLots = lots.map((lot) => ({
-      lotId: text(lot, ["lot_id"]),
+      lotId: text(lot, ["lot_id", "batch_id", "BATCH_ID"]),
+      batchId: text(lot, ["batch_id", "BATCH_ID", "lot_id"]) || undefined,
       ingredientId: text(lot, ["ingredient_id"]) || undefined,
       supplierId: text(lot, ["supplier_id"]) || undefined,
       ingredient:
@@ -249,7 +250,7 @@ function normalizeInventory(
     }));
 
     return {
-      lotId: text(first, ["lot_id"]) || undefined,
+      lotId: text(first, ["lot_id", "batch_id", "BATCH_ID"]) || undefined,
       ingredientId: text(first, ["ingredient_id"]) || undefined,
       supplierId:
         text(constraint, ["supplier_id"]) ||
@@ -463,6 +464,32 @@ function rawRecipeMatchesProduct(
   );
 }
 
+function itemTypeFrom(row: ApiRecord | undefined): Product["itemType"] {
+  const value = text(row ?? {}, ["item_type", "ITEM_TYPE"]).toLowerCase();
+  if (value === "combo") return "combo";
+  if (value === "single") return "single";
+  return undefined;
+}
+
+function menuRowForProduct(
+  menuRows: ApiRecord[],
+  product: ApiRecord,
+): ApiRecord | undefined {
+  const productId = text(product, ["product_id"]);
+  if (productId) {
+    return menuRows.find(
+      (menuItem) => text(menuItem, ["product_id"]) === productId,
+    );
+  }
+  const productName = text(product, ["product", "product_name", "name"]);
+  return menuRows.find(
+    (menuItem) =>
+      Boolean(productName) &&
+      normalized(text(menuItem, ["product", "product_name", "name"])) ===
+        normalized(productName),
+  );
+}
+
 function firstScalar(
   rows: ApiRecord[],
   keys: string[],
@@ -490,6 +517,7 @@ function normalizeProducts(
   const source = records(response.products).length
     ? records(response.products)
     : records(response.menu);
+  const menuRows = records(response.menu);
   return source.map((row, index) => {
     const productId = text(row, ["product_id"]);
     const product = text(row, ["product", "product_name", "name"]);
@@ -517,7 +545,8 @@ function normalizeProducts(
         .map((line) => line.effectiveDate)
         .find((value): value is string => Boolean(value)) ||
       text(activeRecipe, ["effective_from", "effective_date"]);
-    const rawItemType = text(row, ["item_type"]).toLowerCase();
+    const itemType =
+      itemTypeFrom(row) ?? itemTypeFrom(menuRowForProduct(menuRows, row));
     return {
       productId: productId || undefined,
       recipeVersionId:
@@ -538,12 +567,7 @@ function normalizeProducts(
         text(row, ["sku"]) ||
         `SP-${String(index + 1).padStart(3, "0")}`,
       price: number(row, ["price", "unit_price"]),
-      itemType:
-        rawItemType === "combo"
-          ? "combo"
-          : rawItemType === "single"
-            ? "single"
-            : undefined,
+      itemType,
       status:
         text(row, ["status"]).toLowerCase() === "inactive"
           ? "inactive"
@@ -803,10 +827,14 @@ export function adaptForecasts(
     Array.from(grouped.values()).map((rows) => {
       const first = rows[0] ?? {};
       const product = text(first, ["product_name", "product", "name"]);
-      const points = rows
+      const points = Array.from(
+        new Map(
+          rows
         .map(forecastPoint)
         .filter((point) => point.date)
-        .sort((left, right) => left.date.localeCompare(right.date));
+        .map((point) => [point.date, point] as const),
+        ).values(),
+      ).sort((left, right) => left.date.localeCompare(right.date));
       const total = (key: "p25" | "p50" | "p75") =>
         points.reduce((sum, point) => sum + (point[key] ?? 0), 0);
       const warnings = Array.from(
@@ -875,15 +903,33 @@ export function adaptIngredientDemand(
           p50: forecast.reduce((sum, point) => sum + (point.p50 ?? 0), 0),
           p75: forecast.reduce((sum, point) => sum + (point.p75 ?? 0), 0),
         },
-        contributions: contributionRows.map((row) => ({
-          productId: text(row, ["product_id"]) || undefined,
-          product: text(row, ["product_name", "product", "name"]),
-          p25: number(row, ["p25", "contribution_p25", "demand_p25"]),
-          p50: number(row, ["p50", "contribution_p50", "demand_p50", "quantity"]),
-          p75: number(row, ["p75", "contribution_p75", "demand_p75"]),
-          quantity: optionalNumber(row, ["quantity", "contribution_quantity"]),
-          unit: text(row, ["unit", "uom"]) || undefined,
-        })),
+        contributions: contributionRows.map((row) => {
+          const date =
+            text(row, ["target_date", "date"]) ||
+            text(first, ["target_date", "date"]);
+          const forecastP25 = optionalNumber(row, ["forecast_p25"]);
+          const forecastP50 = optionalNumber(row, ["forecast_p50"]);
+          const forecastP75 = optionalNumber(row, ["forecast_p75"]);
+          const recipeQuantity = optionalNumber(row, ["recipe_quantity"]);
+          const recipeUnit = text(row, ["recipe_unit"]);
+          const quantity = optionalNumber(row, ["quantity", "contribution_quantity"]);
+          const unit = text(row, ["unit", "uom"]);
+          return {
+            productId: text(row, ["product_id"]) || undefined,
+            product: text(row, ["product_name", "product", "name"]),
+            ...(date ? { date } : {}),
+            p25: number(row, ["p25", "contribution_p25", "demand_p25"]),
+            p50: number(row, ["p50", "contribution_p50", "demand_p50", "quantity"]),
+            p75: number(row, ["p75", "contribution_p75", "demand_p75"]),
+            ...(forecastP25 != null ? { forecastP25 } : {}),
+            ...(forecastP50 != null ? { forecastP50 } : {}),
+            ...(forecastP75 != null ? { forecastP75 } : {}),
+            ...(recipeQuantity != null ? { recipeQuantity } : {}),
+            ...(recipeUnit ? { recipeUnit } : {}),
+            ...(quantity != null ? { quantity } : {}),
+            ...(unit ? { unit } : {}),
+          };
+        }),
         warnings: Array.from(
           new Set([
             ...warningMessages(result.warnings),

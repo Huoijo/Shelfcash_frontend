@@ -29,6 +29,11 @@ import type {
 import { ForecastChart } from "../components/ForecastChart";
 import { DecisionCenter } from "../components/DecisionCenter";
 import {
+  ProcurementDecisionWorkspace,
+  ProcurementLoadingWorkspace,
+  noFeasibleDecision,
+} from "../components/ProcurementDecisionWorkspace";
+import {
   Button,
   Details,
   GuidanceHint,
@@ -611,6 +616,28 @@ export function PlanView({
     }
   }
 
+  if (focus === "plan" && noFeasibleDecision(decision)) {
+    return (
+      <ProcurementDecisionWorkspace
+        busy={runBusy}
+        data={data}
+        decision={decision}
+        onRunAgain={() => void runPlanning()}
+        plan={plan}
+      />
+    );
+  }
+
+  if (
+    focus === "plan" &&
+    (runBusy ||
+      plan.status === "running" ||
+      decision?.status === "queued" ||
+      decision?.status === "running")
+  ) {
+    return <ProcurementLoadingWorkspace onRunAgain={() => void runPlanning()} />;
+  }
+
   if (decision && focus === "simulator") {
     const isRunning = runBusy || decision.status === "running" || decision.status === "queued";
     return (
@@ -622,7 +649,7 @@ export function PlanView({
         />
         <div className="plan-controls">
           <label className="field"><span>Số ngày mô phỏng (1–7)</span><input type="number" min="1" max="7" step="1" value={horizonDays} onChange={(event) => { setHorizonDays(clampHorizon(Number(event.target.value))); setControlsDirty(true); }} /></label>
-          <label className="field"><span>Ngân sách tối đa (tùy chọn)</span><input type="number" min="0" step="1000" inputMode="decimal" value={budgetOverride} placeholder={formatVnd(data.settings.remainingBudget)} onChange={(event) => { setBudgetOverride(event.target.value); setControlsDirty(true); }} /></label>
+          <label className="field"><span>Ngân sách tối đa</span><input type="number" min="0" step="1000" inputMode="decimal" value={budgetOverride} placeholder={formatVnd(data.settings.monthlyBudget)} onChange={(event) => { setBudgetOverride(event.target.value); setControlsDirty(true); }} /></label>
           <label className="check plan-open-orders"><input type="checkbox" checked={includeOpenPurchaseOrders} onChange={(event) => { setIncludeOpenPurchaseOrders(event.target.checked); setControlsDirty(true); }} /><span>Tính đơn mua hàng đang mở</span></label>
           <div className="plan-status"><span>Trạng thái</span><strong>{isRunning ? "Đang lập kế hoạch..." : decision.status === "completed" ? "Hoàn tất" : "Cần kiểm tra"}</strong></div>
         </div>
@@ -689,14 +716,14 @@ export function PlanView({
           />
         </label>
         <label className="field">
-          <span>Ngân sách tối đa (tùy chọn)</span>
+          <span>Ngân sách tối đa</span>
           <input
             type="number"
             min="0"
             step="1000"
             inputMode="decimal"
             value={budgetOverride}
-            placeholder={formatVnd(data.settings.remainingBudget)}
+            placeholder={formatVnd(data.settings.monthlyBudget)}
             onChange={(event) => {
               setBudgetOverride(event.target.value);
               setControlsDirty(true);

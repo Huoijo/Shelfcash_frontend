@@ -43,9 +43,18 @@ function lot(
 function fixture() {
   const data = buildEmptyBootstrapData("STORE_TEST", "Cửa hàng kiểm thử");
   const lots = [
-    lot("LOT-HEALTHY", "2026-09-15", "healthy", 7),
-    lot("LOT-EXPIRED", "2026-08-01", "expired", 3),
-    lot("LOT-EXPIRING", "2026-08-06", "expiring", 5),
+    {
+      ...lot("LOT-HEALTHY", "2026-09-15", "healthy", 7),
+      batchId: "BATCH-HEALTHY",
+    },
+    {
+      ...lot("LOT-EXPIRED", "2026-08-01", "expired", 3),
+      batchId: "BATCH-EXPIRED",
+    },
+    {
+      ...lot("LOT-EXPIRING", "2026-08-06", "expiring", 5),
+      batchId: "BATCH-EXPIRING",
+    },
   ];
   data.settings.remainingBudget = 2_000_000;
   data.settings.reservedBudget = 300_000;
@@ -98,14 +107,15 @@ test("InventoryView keeps aggregate inventory drillable to FEFO lots and version
 
   assert.match(html, /Tình trạng lô/);
   assert.match(html, /Lô Bột cacao theo thứ tự FEFO/);
-  assert.ok(html.indexOf("LOT-EXPIRED") < html.indexOf("LOT-EXPIRING"));
-  assert.ok(html.indexOf("LOT-EXPIRING") < html.indexOf("LOT-HEALTHY"));
+  assert.ok(html.indexOf("BATCH-EXPIRED") < html.indexOf("BATCH-EXPIRING"));
+  assert.ok(html.indexOf("BATCH-EXPIRING") < html.indexOf("BATCH-HEALTHY"));
   assert.match(html, />v3</);
   assert.match(html, />v5</);
   assert.match(html, />v7</);
   assert.match(html, /Khả dụng/);
   assert.match(html, /Gần hạn/);
   assert.match(html, /Hết hạn/);
+  assert.match(html, /BATCH-HEALTHY/);
 });
 
 test("TodayView renders real lot alerts and the backend planning state", () => {

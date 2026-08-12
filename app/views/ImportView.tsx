@@ -20,6 +20,7 @@ import {
   isProcessableSheet,
   issueMessages,
   mergeImportFiles,
+  type SheetMappingValidation,
   resultCounts,
   selectableSheetTypes,
   sheetTypeLabels,
@@ -61,6 +62,101 @@ type Phase =
   | "processing"
   | "failed"
   | "done";
+
+export const importSteps = [
+  "Chọn tệp",
+  "Ghép cột",
+  "Xử lý",
+  "Hoàn tất",
+] as const;
+
+export function ImportStepper({ activeStep }: { activeStep: number }) {
+  return (
+    <ol className="step-track" aria-label="Tiến trình nhập dữ liệu">
+      {importSteps.map((step, index) => {
+        const completed = index < activeStep;
+        const active = index === activeStep;
+        return (
+          <li
+            className={cn(completed && "complete", active && "active")}
+            aria-current={active ? "step" : undefined}
+            key={step}
+          >
+            <span className="step-track-label">
+              <i aria-hidden="true">
+                {completed ? <Check size={12} /> : index + 1}
+              </i>
+              <span>{step}</span>
+            </span>
+            {index < importSteps.length - 1 ? (
+              <span className="step-connector" aria-hidden="true" />
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+export function ImportSheetCard({
+  item,
+  validation,
+  selected,
+  onSelect,
+}: {
+  item: EditableSheetMapping;
+  validation: SheetMappingValidation | undefined;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const fileName = item.fileName || "Tệp đã tải";
+  const metadata = `${fileName} · ${item.rowCount.toLocaleString("vi-VN")} dòng`;
+  const typeLabel =
+    sheetTypeLabels[item.sheetType as keyof typeof sheetTypeLabels] ??
+    item.sheetType;
+  const mappingLabel = validation?.unknownSheetType
+    ? "Bỏ qua"
+    : validation?.fullyMapped
+      ? "Đã ghép đủ"
+      : `${validation?.mappedColumns ?? 0}/${validation?.totalColumns ?? item.columns.length} cột`;
+
+  return (
+    <button
+      type="button"
+      className={cn(
+        "sheet-card",
+        selected && "active",
+        validation?.unknownSheetType
+          ? "skipped"
+          : validation?.complete
+            ? "complete"
+            : "needs-review",
+      )}
+      aria-pressed={selected}
+      onClick={onSelect}
+    >
+      <span className="sheet-card-content">
+        <strong title={item.sheetName}>{item.sheetName}</strong>
+        <small title={metadata}>{metadata}</small>
+      </span>
+      <span className="sheet-card-meta">
+        <em title={typeLabel}>{typeLabel}</em>
+        <b
+          className={cn(
+            "mapping-state",
+            validation?.unknownSheetType
+              ? "skipped"
+              : validation?.fullyMapped
+                ? "complete"
+                : "pending",
+          )}
+        >
+          {mappingLabel}
+        </b>
+      </span>
+    </button>
+  );
+}
 
 function clampForecastHorizon(value: number): number {
   return Math.min(7, Math.max(1, Number.isFinite(value) ? value : 1));
@@ -567,16 +663,7 @@ export function ImportView({
         </Notice>
       ) : null}
 
-      <ol className="step-track" aria-label="Tiến trình nhập dữ liệu">
-        {["Chọn tệp", "Ghép cột", "Xử lý", "Hoàn tất"].map(
-          (step, index) => (
-            <li className={index <= activeStep ? "active" : ""} key={step}>
-              <i>{index < activeStep ? <Check size={12} /> : index + 1}</i>
-              <span>{step}</span>
-            </li>
-          ),
-        )}
-      </ol>
+      <ImportStepper activeStep={activeStep} />
 
       {phase === "select" ? (
         <>
@@ -735,77 +822,42 @@ export function ImportView({
 
       {(phase === "review" || phase === "confirmed") && selected ? (
         <>
-          <SectionHeading
-            title="Các bảng dữ liệu"
-            action={
-              <Button
-                variant="secondary"
-                busy={busy === "llm"}
-                disabled={
-                  Boolean(busy) ||
-                  connection?.service === "offline" ||
-                  selectedValidation?.unknownSheetType
-                }
-                title={
-                  selectedValidation?.unknownSheetType
-                    ? "Bảng chưa xác định sẽ được bỏ qua; không cần gợi ý lại"
-                    : undefined
-                }
-                onClick={() => void remapWithQwen()}
-              >
-                <Sparkles size={14} />
-                Gợi ý lại bằng AI
-              </Button>
-            }
-          />
+          <div className="import-sheet-heading">
+            <SectionHeading
+              title="Các bảng dữ liệu"
+              action={
+                <Button
+                  variant="secondary"
+                  busy={busy === "llm"}
+                  disabled={
+                    Boolean(busy) ||
+                    connection?.service === "offline" ||
+                    selectedValidation?.unknownSheetType
+                  }
+                  title={
+                    selectedValidation?.unknownSheetType
+                      ? "Bảng chưa xác định sẽ được bỏ qua; không cần gợi ý lại"
+                      : undefined
+                  }
+                  onClick={() => void remapWithQwen()}
+                >
+                  <Sparkles size={14} />
+                  Gợi ý lại bằng AI
+                </Button>
+              }
+            />
+          </div>
           <div className="sheet-grid">
             {mappings.map((item) => {
               const validation = validationBySheetId.get(item.id);
               return (
-                <button
-                  className={cn(
-                    "sheet-card",
-                    item.id === selected.id && "active",
-                    validation?.unknownSheetType
-                      ? "skipped"
-                      : validation?.complete
-                        ? "complete"
-                        : "needs-review",
-                  )}
+                <ImportSheetCard
                   key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                >
-                  <span>
-                    <strong>{item.sheetName}</strong>
-                    <small>
-                      {item.fileName || "Tệp đã tải"} ·{" "}
-                      {item.rowCount.toLocaleString("vi-VN")} dòng
-                    </small>
-                  </span>
-                  <span className="sheet-card-meta">
-                    <em>
-                      {sheetTypeLabels[
-                        item.sheetType as keyof typeof sheetTypeLabels
-                      ] ?? item.sheetType}
-                    </em>
-                    <b
-                      className={cn(
-                        "mapping-state",
-                        validation?.unknownSheetType
-                          ? "skipped"
-                          : validation?.fullyMapped
-                            ? "complete"
-                            : "pending",
-                      )}
-                    >
-                      {validation?.unknownSheetType
-                        ? "Bỏ qua"
-                        : validation?.fullyMapped
-                        ? "Đã ghép đủ"
-                        : `${validation?.mappedColumns ?? 0}/${validation?.totalColumns ?? item.columns.length} cột`}
-                    </b>
-                  </span>
-                </button>
+                  item={item}
+                  validation={validation}
+                  selected={item.id === selected.id}
+                  onSelect={() => setSelectedId(item.id)}
+                />
               );
             })}
           </div>
