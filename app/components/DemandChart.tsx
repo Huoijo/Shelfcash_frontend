@@ -11,7 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import type { DecisionDemandView } from "../../lib/decision-view";
-import { formatDate, formatQuantity } from "./ui";
+import { formatDate, formatQuantity, GuidanceHint } from "./ui";
 
 type DemandChartProps = {
   rows: DecisionDemandView[];
@@ -30,7 +30,7 @@ export function DemandChart({ rows, ingredientName, unit }: DemandChartProps) {
     : `Chưa có chuỗi nhu cầu cho ${ingredientName}.`;
 
   return <section aria-labelledby="demand-chart-title" className="decision-chart-panel">
-    <div className="decision-chart-heading"><div><span className="eyebrow">Nhu cầu nguyên liệu</span><h3 id="demand-chart-title">{ingredientName}</h3></div><span>{unit || "Đơn vị chưa xác định"}</span></div>
+    <div className="decision-chart-heading"><div><span className="eyebrow">Nhu cầu nguyên liệu</span><h3 id="demand-chart-title">{ingredientName} <GuidanceHint content="P50 là nhu cầu dự kiến; vùng màu là khoảng P25–P75." label="Cách đọc biểu đồ nhu cầu" /></h3></div><span>{unit || "Đơn vị chưa xác định"}</span></div>
     <p className="sr-only">{summary}</p>
     <div aria-label={summary} className="chart" role="img">
       <ResponsiveContainer height="100%" width="100%">
@@ -47,6 +47,5 @@ export function DemandChart({ rows, ingredientName, unit }: DemandChartProps) {
         </AreaChart>
       </ResponsiveContainer>
     </div>
-    <p className="decision-chart-summary">P50 là nhu cầu dự kiến; vùng màu là khoảng P25–P75.</p>
   </section>;
 }

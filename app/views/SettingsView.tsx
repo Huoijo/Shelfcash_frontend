@@ -140,6 +140,7 @@ export function SettingsView({
         <>
           <SectionHeading
             title="Quy tắc theo nguyên liệu"
+            guidance={<GuidanceHint content="Thêm nhà cung cấp mới trong Nhập dữ liệu." />}
           />
           <div className="table-wrap settings-table">
             <table>
@@ -180,9 +181,6 @@ export function SettingsView({
                     </td>
                     <td>
                       <strong>{item.supplier || "Chưa thiết lập"}</strong>
-                      {!item.supplierId ? (
-                        <small>Thêm nhà cung cấp qua Nhập dữ liệu</small>
-                      ) : null}
                     </td>
                     <td>
                       <input
@@ -468,7 +466,7 @@ export function SettingsView({
           <SectionHeading title="Dự báo và chiến lược mặc định" />
           <div className="two-column">
             <label className="field">
-              <span>Số ngày dự báo</span>
+              <span>Số ngày dự báo (1–7)</span>
               <input
                 type="number"
                 min={1}
@@ -485,7 +483,6 @@ export function SettingsView({
                   }))
                 }
               />
-              <small>Hệ thống hỗ trợ dự báo từ 1 đến 7 ngày.</small>
             </label>
             <label className="field">
               <span>Chiến lược mặc định</span>

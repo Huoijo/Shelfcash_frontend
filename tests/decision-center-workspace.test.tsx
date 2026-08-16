@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { DecisionCenter } from "../app/components/DecisionCenter.tsx";
 import { DecisionCenterWorkspace } from "../app/components/DecisionCenterWorkspace.tsx";
 import { adaptDecisionRunView } from "../lib/decision-view.ts";
 import type { BootstrapData, DecisionPackage, PlanResponse } from "../lib/types.ts";
@@ -59,6 +60,31 @@ test("Decision Center exposes both operational and seven-day planning views", ()
   assert.match(future, /Chưa tìm được phương án nhập thỏa toàn bộ ràng buộc/);
   assert.doesNotMatch(future, /internal-run-id/);
   assert.doesNotMatch(future, /0 ₫/);
+});
+
+test("DecisionCenter renders keyed deterministic strategies without calling array methods on an object", () => {
+  const markup = renderToStaticMarkup(
+    <DecisionCenter
+      decision={{
+        decision_run_id: "keyed-strategy-run",
+        status: "completed",
+        recommended_strategy: "balanced",
+        recommended_plan: { items: [] },
+        strategies: {
+          balanced: {
+            strategy: "balanced",
+            is_feasible: true,
+            business_metrics: { projected_purchase_cost: 120000 },
+            items: [],
+          },
+        },
+      } as unknown as DecisionPackage}
+      running={false}
+    />,
+  );
+
+  assert.match(markup, /Cân bằng/);
+  assert.match(markup, /120.000/);
 });
 
 test("Decision Run view model reads singular demand and deduplicates product forecasts by product and date", () => {

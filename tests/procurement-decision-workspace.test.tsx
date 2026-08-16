@@ -139,8 +139,8 @@ test("P50 inventory risk, customer-safe warnings and infeasible strategy candida
 
 test("PlanView routes the no-feasible decision state into the procurement workspace", () => {
   const source = readFileSync(new URL("../app/views/PlanView.tsx", import.meta.url), "utf8");
-  assert.match(source, /focus === "plan" && noFeasibleDecision\(decision\)/);
-  assert.match(source, /ProcurementDecisionWorkspace/);
+  assert.match(source, /ProcurementPlanningWorkspace/);
+  assert.match(source, /noFeasibleDecision\(decision\) \|\| decision\.status === "completed"/);
 });
 
 test("loading workspace identifies the processing stages without empty scenario cards", () => {
@@ -152,9 +152,9 @@ test("loading workspace identifies the processing stages without empty scenario 
   assert.doesNotMatch(markup, /Tiết kiệm/);
 });
 
-test("a feasible decision keeps the existing scenario and purchase-order flow", () => {
+test("a feasible decision routes into the procurement planning workspace", () => {
   const markup = renderToStaticMarkup(<PlanView data={data} decision={{ decision_run_id: "decision-feasible", status: "completed", recommended_strategy: "balanced", recommended_plan: { items: [{ ingredient_name: "Sữa tươi" }], valid: true } }} draftOrders={[]} onConfirmOrder={async () => undefined} onCreateOrders={async () => []} onReceiveOrder={async () => undefined} onRunPlanning={async () => undefined} onStrategyChange={() => undefined} onUpdateOrder={async () => undefined} plan={{ ...plan, status: "completed", scenarios: [], recommendations: [], strategy: "Cân bằng", enrichedInventory: [] }} strategy="Cân bằng" />);
-  assert.match(markup, /So sánh ba kịch bản/);
-  assert.match(markup, /Tạo đơn nháp/);
+  assert.match(markup, /Kế hoạch nhập hàng/);
+  assert.match(markup, /Nguyên liệu/);
   assert.doesNotMatch(markup, /Chưa tìm được kế hoạch nhập đủ an toàn/);
 });

@@ -64,7 +64,10 @@ export type DecisionStrategyView = {
   observedFillRate: number | null;
   requiredFillRate: number | null;
   items: Array<{
+    ingredientId: string;
     ingredientName: string;
+    supplierId: string;
+    supplierName: string;
     orderQuantity: number | null;
     unit: string;
     packCount: number | null;
@@ -86,6 +89,28 @@ export type DecisionRunView = {
   blockers: DecisionBlockerView[];
   warnings: string[];
   strategies: DecisionStrategyView[];
+};
+
+export type ProcurementIngredientRowView = {
+  ingredientId: string;
+  ingredientName: string;
+  unit: string;
+  onHand: number | null;
+  inbound: number | null;
+  safetyStock: number | null;
+  supplierName: string;
+  leadTimeDays: number | null;
+  p25: number | null;
+  p50: number | null;
+  p75: number | null;
+  stockoutDate: string;
+  shortageQuantity: number | null;
+  recommendedQuantity: number | null;
+  packCount: number | null;
+  packSize: number | null;
+  unitPrice: number | null;
+  purchaseCost: number | null;
+  feasible: boolean;
 };
 
 const strategyLabels: Record<string, string> = {
@@ -311,7 +336,10 @@ export function adaptDecisionRunView(
         const item = record(value);
         const ingredientId = text(item, ["ingredient_id"]);
         return {
+          ingredientId,
           ingredientName: ingredientName(ingredientId, item, data),
+          supplierId: text(item, ["supplier_id"]),
+          supplierName: text(item, ["supplier_name", "supplier"]),
           orderQuantity: numeric(item, ["order_quantity", "quantity"]),
           unit: text(item, ["unit"]),
           packCount: numeric(item, ["pack_count"]),
@@ -354,4 +382,71 @@ export function adaptDecisionRunView(
     warnings,
     strategies,
   };
+}
+
+export function buildProcurementIngredientRows(
+  decision: DecisionPackage | null,
+  data: BootstrapData,
+): ProcurementIngredientRowView[] {
+  const view = adaptDecisionRunView(decision, data);
+  const demandByIngredient = new Map<string, DecisionDemandView[]>();
+  for (const demand of view.demand) {
+    demandByIngredient.set(demand.ingredientId, [
+      ...(demandByIngredient.get(demand.ingredientId) ?? []),
+      demand,
+    ]);
+  }
+  const riskByIngredient = new Map(view.risks.map((risk) => [risk.ingredientId, risk]));
+  const recommended = view.strategies.find((strategy) => strategy.feasible === true)
+    ?? (decision?.recommended_strategy
+      ? view.strategies.find((strategy) => strategy.key === decision.recommended_strategy)
+      : undefined);
+  const recommendationByIngredient = new Map(
+    recommended?.items.map((item) => [item.ingredientId, item]) ?? [],
+  );
+  return Array.from(demandByIngredient.entries()).map(([ingredientId, demand]) => {
+    const inventory = data.inventory.find((item) => item.ingredientId === ingredientId);
+    const supplier = data.supplierConstraints.find((item) => item.ingredientId === ingredientId && item.active !== false);
+    const risk = riskByIngredient.get(ingredientId);
+    const proposed = recommendationByIngredient.get(ingredientId);
+    const totals = demand.reduce(
+      (sum, item) => ({
+        p25: sum.p25 + (item.p25 ?? 0),
+        p50: sum.p50 + (item.p50 ?? 0),
+        p75: sum.p75 + (item.p75 ?? 0),
+        anyP25: sum.anyP25 || item.p25 != null,
+        anyP50: sum.anyP50 || item.p50 != null,
+        anyP75: sum.anyP75 || item.p75 != null,
+      }),
+      { p25: 0, p50: 0, p75: 0, anyP25: false, anyP50: false, anyP75: false },
+    );
+    return {
+      ingredientId,
+      ingredientName: demand[0]?.ingredientName || "Nguyên liệu chưa xác định",
+      unit: demand[0]?.unit || inventory?.unit || "",
+      onHand: inventory?.onHand ?? null,
+      inbound: inventory?.inbound ?? null,
+      safetyStock: inventory?.safetyStock ?? null,
+      supplierName: proposed?.supplierName || supplier?.supplier || inventory?.supplier || "",
+      leadTimeDays: supplier?.leadTimeDays ?? inventory?.leadTimeDays ?? null,
+      p25: totals.anyP25 ? totals.p25 : null,
+      p50: totals.anyP50 ? totals.p50 : null,
+      p75: totals.anyP75 ? totals.p75 : null,
+      stockoutDate: risk?.stockoutDate || "",
+      shortageQuantity: risk?.shortageQuantity ?? null,
+      recommendedQuantity: proposed?.orderQuantity ?? null,
+      packCount: proposed?.packCount ?? null,
+      packSize: proposed?.packSize ?? null,
+      unitPrice: proposed?.unitPrice ?? supplier?.unitCost ?? null,
+      purchaseCost: proposed?.purchaseCost ?? null,
+      feasible: recommended?.feasible === true,
+    };
+  }).sort((left, right) => {
+    if (left.stockoutDate && right.stockoutDate) return left.stockoutDate.localeCompare(right.stockoutDate);
+    if (left.stockoutDate) return -1;
+    if (right.stockoutDate) return 1;
+    if (left.recommendedQuantity != null && right.recommendedQuantity == null) return -1;
+    if (right.recommendedQuantity != null && left.recommendedQuantity == null) return 1;
+    return left.ingredientName.localeCompare(right.ingredientName, "vi");
+  });
 }

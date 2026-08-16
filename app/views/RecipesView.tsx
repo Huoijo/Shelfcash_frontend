@@ -613,7 +613,7 @@ export function RecipesView({
               </label>
             </div>
             <label className="field">
-              <span>Tỷ lệ hao hụt</span>
+              <span>Tỷ lệ hao hụt (0 đến dưới 1)</span>
               <input
                 type="number"
                 min="0"
@@ -627,7 +627,6 @@ export function RecipesView({
                   setSaved("");
                 }}
               />
-              <small>Nhập từ 0 đến dưới 1; ví dụ 0,05 tương đương 5%.</small>
             </label>
             <div className="recipe-editor-head">
               <span>Nguyên liệu</span>

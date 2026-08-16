@@ -201,7 +201,7 @@ function AppNavigation({
 function errorMessage(caught: unknown, fallback: string): string {
   if (caught instanceof ShelfCashApiError) {
     const messages: Record<string, string> = {
-      ENDPOINT_NOT_ALLOWED: "Frontend đang gọi một API không được backend hỗ trợ.",
+      ENDPOINT_NOT_ALLOWED: "Yêu cầu này hiện chưa được hỗ trợ.",
       MISSING_FORECAST: "Chưa có dự báo phù hợp để lập kế hoạch.",
       MISSING_RECIPE: "Một số sản phẩm chưa có công thức hiệu lực.",
       INVALID_RECIPE_UNIT: "Đơn vị trong công thức không hợp lệ.",
@@ -1299,7 +1299,7 @@ export function ShelfCashApp({
         true,
       );
       setToast({
-        message: `${poId} đã chuyển sang ordered và ngân sách đã được reserve.`,
+        message: `${poId} đã chuyển sang đã đặt và ngân sách đã được giữ.`,
         tone: "success",
       });
     } catch (caught) {
@@ -1612,9 +1612,7 @@ export function ShelfCashApp({
   const CurrentPageIcon = currentNavigation.icon;
   const connectionLabel = refreshing
     ? "Đang tải dữ liệu mới"
-    : !connection
-      ? "Đang kiểm tra kết nối"
-      : connection.service === "offline"
+    : connection?.service === "offline"
         ? "Mất kết nối"
         : null;
   const closeMobileNavigation = () => {
@@ -1629,7 +1627,6 @@ export function ShelfCashApp({
           <i>SC</i>
           <span>
             <strong>ShelfCash</strong>
-            <small>Vận hành cửa hàng</small>
           </span>
         </div>
         <label className="store-select">
@@ -1776,7 +1773,6 @@ export function ShelfCashApp({
                 <i>SC</i>
                 <span>
                   <strong>ShelfCash</strong>
-                  <small>Vận hành cửa hàng</small>
                 </span>
               </div>
               <button

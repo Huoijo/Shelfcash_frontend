@@ -47,6 +47,7 @@ import type {
 import {
   Button,
   Confidence,
+  GuidanceHint,
   Notice,
   PageHeader,
   SectionHeading,
@@ -160,12 +161,6 @@ export function ImportSheetCard({
 
 function clampForecastHorizon(value: number): number {
   return Math.min(7, Math.max(1, Number.isFinite(value) ? value : 1));
-}
-
-function sourceLabel(source: string): string {
-  if (source === "llm") return "AI";
-  if (source === "rule_fallback") return "Quy tắc dự phòng";
-  return "Quy tắc";
 }
 
 function resultRowLabel(label: string): string {
@@ -799,13 +794,6 @@ export function ImportView({
       {phase !== "select" && created ? (
         <>
           <div className="import-meta">
-            <span>
-              Mã lần nhập <strong>{created.import_id.slice(0, 8)}</strong>
-            </span>
-            <span>
-              Nguồn đề xuất{" "}
-              <strong>{sourceLabel(created.source ?? "rule")}</strong>
-            </span>
             <Button
               variant="quiet"
               busy={busy === "status"}
@@ -891,7 +879,6 @@ export function ImportView({
                         : selected.confidence,
                     )}%`
               }
-              detail={`Nguồn đề xuất: ${sourceLabel(selected.source)}.`}
             />
           </div>
 
@@ -992,11 +979,6 @@ export function ImportView({
                           </option>
                         ))}
                       </select>
-                      <small>
-                        {unresolved
-                          ? "Cột này sẽ không được nhập."
-                          : `Đã ghép với ${canonicalFieldLabel(selectedField)}.`}
-                      </small>
                     </label>
                   );
                 })}
@@ -1132,11 +1114,7 @@ export function ImportView({
         <div className="processing-panel">
           <RefreshCw className="spin" size={20} />
           <span>
-            <strong>Đang xử lý dữ liệu</strong>
-            <small>
-              Bạn có thể chuyển sang mục khác; tiến trình vẫn được giữ trong
-              phiên này.
-            </small>
+            <strong>Đang xử lý dữ liệu <GuidanceHint content="Bạn có thể chuyển sang mục khác; tiến trình vẫn tiếp tục trong phiên này." label="Trong khi xử lý dữ liệu" /></strong>
           </span>
         </div>
       ) : null}

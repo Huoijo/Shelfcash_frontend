@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  Confidence,
   GuidanceHint,
   PageHeader,
   SectionHeading,
@@ -85,6 +87,26 @@ test("GuidanceHint exposes an accessible, keyboard-focusable guidance button", (
   assert.match(html, /type="button"/);
   assert.match(html, /role="tooltip"/);
   assert.match(html, /Chọn một dòng để xem tồn kho, lô và lịch sử sử dụng\./);
+});
+
+test("GuidanceHint supports tap toggling, focus, Escape and outside dismissal", () => {
+  const source = readFileSync(
+    new URL("../app/components/ui.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /onClick=\{\(\) => setOpen\(\(current\) => !current\)\}/);
+  assert.match(source, /onFocus=\{\(\) => setOpen\(true\)\}/);
+  assert.match(source, /onPointerDown=\{\(event\) => event\.preventDefault\(\)\}/);
+  assert.match(source, /event\.key === "Escape"/);
+  assert.match(source, /document\.addEventListener\("pointerdown"/);
+});
+
+test("Confidence does not render an empty detail wrapper", () => {
+  const html = renderToStaticMarkup(<Confidence title="Độ tin cậy 94%" />);
+
+  assert.match(html, /Độ tin cậy 94%/);
+  assert.doesNotMatch(html, /<strong>/);
 });
 
 test("SummaryGrid renders every dynamic card with the requested column layout", () => {

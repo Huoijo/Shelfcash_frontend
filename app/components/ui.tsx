@@ -295,8 +295,9 @@ export function GuidanceHint({
         aria-describedby={open ? id : undefined}
         aria-expanded={open}
         aria-label={label}
-        onClick={() => setOpen(true)}
+        onClick={() => setOpen((current) => !current)}
         onFocus={() => setOpen(true)}
+        onPointerDown={(event) => event.preventDefault()}
         type="button"
       >
         !
@@ -321,12 +322,12 @@ export function Confidence({
   detail,
 }: {
   title: string;
-  detail: string;
+  detail?: string;
 }) {
   return (
     <div className="confidence">
       <span>{title}</span>
-      <strong>{detail}</strong>
+      {detail ? <strong>{detail}</strong> : null}
     </div>
   );
 }

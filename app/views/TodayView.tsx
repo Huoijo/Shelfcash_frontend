@@ -299,13 +299,6 @@ export function TodayView({
         <section className="dashboard-panel dashboard-alerts">
           <SectionHeading
             title={`Có ${(alerts.length + missingCount).toLocaleString("vi-VN")} việc cần xử lý`}
-            action={
-              loading ? null : (
-                <span className="dashboard-count">
-                  {(alerts.length + missingCount).toLocaleString("vi-VN")} vấn đề
-                </span>
-              )
-            }
           />
           {loading ? (
             <div className="dashboard-loading-state" aria-live="polite">

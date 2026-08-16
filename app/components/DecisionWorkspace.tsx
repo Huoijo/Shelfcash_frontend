@@ -174,20 +174,20 @@ export function DecisionWorkspace({
               />
               <MetricRow label="Chi phí dự kiến" value={formatVnd(recommendation.cost)} />
               {recommendation.moq > 0 ? (
-                <MetricRow label="MOQ" value={formatQuantity(recommendation.moq, recommendation.unit)} />
+                <MetricRow label="Đặt tối thiểu" value={formatQuantity(recommendation.moq, recommendation.unit)} />
               ) : null}
               {recommendation.packSize > 0 ? (
                 <MetricRow label="Quy cách" value={formatQuantity(recommendation.packSize, recommendation.unit)} />
               ) : null}
               {recommendation.leadTimeDays > 0 ? (
-                <MetricRow label="Lead time" value={`${recommendation.leadTimeDays.toLocaleString("vi-VN")} ngày`} />
+                <MetricRow label="Thời gian giao" value={`${recommendation.leadTimeDays.toLocaleString("vi-VN")} ngày`} />
               ) : null}
             </dl>
 
             <SectionHeading title="Vì sao đề xuất?" />
             <ol className="decision-workspace-explanation">
               <li>
-                <strong>Forecast sản phẩm → BOM</strong>
+                <strong>Dự báo sản phẩm → công thức</strong>
                 <span>
                   {demand?.contributions.length
                     ? `${demand.contributions.length} sản phẩm có đóng góp vào nhu cầu nguyên liệu này.`
@@ -208,7 +208,7 @@ export function DecisionWorkspace({
               </li>
               <li>
                 <strong>Ràng buộc đặt hàng</strong>
-                <span>{recommendation.reason || "Chưa có diễn giải ràng buộc từ backend."}</span>
+                <span>{recommendation.reason || "Chưa có diễn giải cho đề xuất này."}</span>
               </li>
               <li>
                 <strong>Phương án đề xuất</strong>

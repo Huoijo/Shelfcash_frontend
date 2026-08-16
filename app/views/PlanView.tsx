@@ -29,10 +29,10 @@ import type {
 import { ForecastChart } from "../components/ForecastChart";
 import { DecisionCenter } from "../components/DecisionCenter";
 import {
-  ProcurementDecisionWorkspace,
   ProcurementLoadingWorkspace,
   noFeasibleDecision,
 } from "../components/ProcurementDecisionWorkspace";
+import { ProcurementPlanningWorkspace } from "../components/ProcurementPlanningWorkspace";
 import {
   Button,
   Details,
@@ -616,13 +616,18 @@ export function PlanView({
     }
   }
 
-  if (focus === "plan" && noFeasibleDecision(decision)) {
+  if (
+    focus === "plan" &&
+    decision &&
+    (noFeasibleDecision(decision) || decision.status === "completed")
+  ) {
     return (
-      <ProcurementDecisionWorkspace
+      <ProcurementPlanningWorkspace
         busy={runBusy}
         data={data}
         decision={decision}
         onRunAgain={() => void runPlanning()}
+        onCreateOrders={onCreateOrders}
         plan={plan}
       />
     );
@@ -1017,8 +1022,8 @@ export function PlanView({
                 </div>
               ) : (
                 <Notice tone="warning">
-                  Hệ thống chưa trả về dữ liệu phân bổ cho nguyên liệu này.
-                  Không nên hiểu là nguyên liệu không có nhu cầu.
+                  Chưa có dữ liệu phân bổ cho nguyên liệu này. Không nên hiểu
+                  là nguyên liệu không có nhu cầu.
                 </Notice>
               )}
             </Details>
@@ -1031,7 +1036,7 @@ export function PlanView({
       <section id="procurement-plan">
       <SectionHeading
         title="So sánh ba kịch bản"
-        guidance={<GuidanceHint content="Chọn kịch bản chỉ đổi dữ liệu đang xem." />}
+        guidance={<GuidanceHint content={`Chọn kịch bản chỉ đổi dữ liệu đang xem. ${strategyOption(strategy).note}`} />}
       />
       <SummaryGrid columns={3}>
         {strategyOptions.map((option) => (
@@ -1047,8 +1052,6 @@ export function PlanView({
           />
         ))}
       </SummaryGrid>
-      <p className="strategy-note">{strategyOption(strategy).note}</p>
-
       {selectedScenario && !selectedScenario.feasible ? (
         <Notice tone="warning">
           Kịch bản này chưa đáp ứng một hoặc nhiều điều kiện. Bạn vẫn có thể tạo
