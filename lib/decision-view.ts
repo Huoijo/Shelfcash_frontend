@@ -124,10 +124,8 @@ const warningCopy: Record<string, string> = {
     "Một phần tồn kho chưa có thông tin lô hoặc hạn dùng đầy đủ.",
   AGGREGATE_MODEL_EXCLUDED_PRESTART_EXPIRED_LOT:
     "Đã loại trừ tồn kho hết hạn trước ngày mô phỏng.",
-  CAPACITY_NOT_EVALUATED:
-    "Chưa đủ dữ liệu để đánh giá sức chứa kho.",
-  RISK_METRIC_NOT_AVAILABLE:
-    "Một số chỉ số rủi ro chưa thể tính.",
+  CAPACITY_NOT_EVALUATED: "Chưa đủ dữ liệu để đánh giá sức chứa kho.",
+  RISK_METRIC_NOT_AVAILABLE: "Một số chỉ số rủi ro chưa thể tính.",
   SCENARIO_HISTORY_INSUFFICIENT:
     "Chưa đủ lịch sử để đánh giá đầy đủ các kịch bản.",
   SHORTAGE_COST_FALLBACK_USED:
@@ -172,17 +170,27 @@ function boolean(source: RecordValue, keys: string[]): boolean | null {
   return null;
 }
 
-function ingredientName(ingredientId: string, source: RecordValue, data: BootstrapData): string {
+function ingredientName(
+  ingredientId: string,
+  source: RecordValue,
+  data: BootstrapData,
+): string {
   const direct = text(source, ["ingredient_name", "ingredient"]);
   if (direct) return direct;
   return (
-    data.ingredients.find((item) => item.ingredientId === ingredientId)?.ingredient ||
-    data.inventory.find((item) => item.ingredientId === ingredientId)?.ingredient ||
+    data.ingredients.find((item) => item.ingredientId === ingredientId)
+      ?.ingredient ||
+    data.inventory.find((item) => item.ingredientId === ingredientId)
+      ?.ingredient ||
     "Nguyên liệu chưa xác định"
   );
 }
 
-function productName(productId: string, source: RecordValue, data: BootstrapData): string {
+function productName(
+  productId: string,
+  source: RecordValue,
+  data: BootstrapData,
+): string {
   const direct = text(source, ["product_name", "product"]);
   if (direct) return direct;
   return (
@@ -195,7 +203,11 @@ function productName(productId: string, source: RecordValue, data: BootstrapData
 function friendlyWarning(value: unknown): string {
   const source = record(value);
   const code = typeof value === "string" ? value : text(source, ["code"]);
-  return warningCopy[code] || text(source, ["message"]) || "Có một lưu ý kỹ thuật cần được kiểm tra thêm.";
+  return (
+    warningCopy[code] ||
+    text(source, ["message"]) ||
+    "Có một lưu ý kỹ thuật cần được kiểm tra thêm."
+  );
 }
 
 function findingTitle(code: string): string {
@@ -211,11 +223,24 @@ function findingTitle(code: string): string {
   return "Một điều kiện lập kế hoạch chưa được đáp ứng.";
 }
 
-function findingMetrics(source: RecordValue): { observed: number | null; required: number | null } {
+function findingMetrics(source: RecordValue): {
+  observed: number | null;
+  required: number | null;
+} {
   const evidence = record(source.evidence);
   return {
-    observed: numeric(evidence, ["observed", "observed_fill_rate", "actual", "value"]),
-    required: numeric(evidence, ["required", "required_fill_rate", "minimum", "threshold"]),
+    observed: numeric(evidence, [
+      "observed",
+      "observed_fill_rate",
+      "actual",
+      "value",
+    ]),
+    required: numeric(evidence, [
+      "required",
+      "required_fill_rate",
+      "minimum",
+      "threshold",
+    ]),
   };
 }
 
@@ -268,8 +293,14 @@ export function adaptDecisionRunView(
       };
     })
     .filter((item) => Boolean(item.targetDate))
-    .sort((left, right) => left.targetDate.localeCompare(right.targetDate) || left.ingredientName.localeCompare(right.ingredientName, "vi"));
-  const demandByIngredient = new Map(demand.map((item) => [item.ingredientId, item]));
+    .sort(
+      (left, right) =>
+        left.targetDate.localeCompare(right.targetDate) ||
+        left.ingredientName.localeCompare(right.ingredientName, "vi"),
+    );
+  const demandByIngredient = new Map(
+    demand.map((item) => [item.ingredientId, item]),
+  );
   const productForecastMap = new Map<string, DecisionProductForecastView>();
   for (const demandItem of demand) {
     for (const contribution of demandItem.contributions) {
@@ -281,7 +312,11 @@ export function adaptDecisionRunView(
         unit: "sản phẩm",
         points: [],
       };
-      if (!entry.points.some((point) => point.targetDate === demandItem.targetDate)) {
+      if (
+        !entry.points.some(
+          (point) => point.targetDate === demandItem.targetDate,
+        )
+      ) {
         entry.points.push({
           targetDate: demandItem.targetDate,
           p25: contribution.forecastP25,
@@ -306,31 +341,50 @@ export function adaptDecisionRunView(
       return {
         ingredientId,
         ingredientName: ingredientName(ingredientId, source, data),
-        stockoutDate: text(source, ["projected_stockout_date", "stockout_date"]),
-        shortageQuantity: numeric(source, ["shortage_quantity", "expected_shortage"]),
-        beginningInventory: numeric(source, ["beginning_inventory", "begin_inventory"]),
+        stockoutDate: text(source, [
+          "projected_stockout_date",
+          "stockout_date",
+        ]),
+        shortageQuantity: numeric(source, [
+          "shortage_quantity",
+          "expected_shortage",
+        ]),
+        beginningInventory: numeric(source, [
+          "beginning_inventory",
+          "begin_inventory",
+        ]),
         fillRate: numeric(source, ["fill_rate"]),
         unit: text(source, ["unit"]) || demandItem?.unit || "",
       };
     })
-    .filter((item) => Boolean(item.stockoutDate) || (item.shortageQuantity ?? 0) > 0);
+    .filter(
+      (item) => Boolean(item.stockoutDate) || (item.shortageQuantity ?? 0) > 0,
+    );
 
   const strategies = strategyEntries(raw).map(([key, source]) => {
     const plan = record(source.recommended_plan);
-    const items = list(source.items).length ? list(source.items) : list(plan.items);
+    const items = list(source.items).length
+      ? list(source.items)
+      : list(plan.items);
     const findings = list(record(source.critic).findings);
     const safetyFinding = findings.find(
-      (value) => text(record(value), ["code"]) === "EXACT_SIMULATION_SAFETY_FLOOR",
+      (value) =>
+        text(record(value), ["code"]) === "EXACT_SIMULATION_SAFETY_FLOOR",
     );
     const metrics = findingMetrics(record(safetyFinding));
     const businessMetrics = record(source.business_metrics);
     return {
       key,
       label: strategyLabels[key] || key,
-      feasible: boolean(source, ["is_feasible", "feasible"]) ?? boolean(plan, ["valid"]),
+      feasible:
+        boolean(source, ["is_feasible", "feasible"]) ??
+        boolean(plan, ["valid"]),
       itemCount: items.length,
-      purchaseCost: numeric(source, ["purchase_cost"]) ?? numeric(businessMetrics, ["projected_purchase_cost"]),
-      observedFillRate: metrics.observed ?? numeric(businessMetrics, ["expected_fill_rate"]),
+      purchaseCost:
+        numeric(source, ["purchase_cost"]) ??
+        numeric(businessMetrics, ["projected_purchase_cost"]),
+      observedFillRate:
+        metrics.observed ?? numeric(businessMetrics, ["expected_fill_rate"]),
       requiredFillRate: metrics.required,
       items: items.map((value) => {
         const item = record(value);
@@ -345,7 +399,11 @@ export function adaptDecisionRunView(
           packCount: numeric(item, ["pack_count"]),
           packSize: numeric(item, ["pack_size"]),
           unitPrice: numeric(item, ["unit_price", "unit_cost"]),
-          purchaseCost: numeric(item, ["purchase_cost", "line_cost", "estimated_cost"]),
+          purchaseCost: numeric(item, [
+            "purchase_cost",
+            "line_cost",
+            "estimated_cost",
+          ]),
           deliveryCost: numeric(item, ["delivery_cost"]),
           orderDate: text(item, ["order_date"]),
           arrivalDate: text(item, ["arrival_date", "expected_arrival_date"]),
@@ -361,21 +419,28 @@ export function adaptDecisionRunView(
       const metrics = findingMetrics(finding);
       return { title: findingTitle(text(finding, ["code"])), ...metrics };
     })
-    .filter((item, index, all) => all.findIndex((candidate) => candidate.title === item.title) === index);
+    .filter(
+      (item, index, all) =>
+        all.findIndex((candidate) => candidate.title === item.title) === index,
+    );
   const warnings = [
     ...list(raw.warnings),
     ...strategyEntries(raw).flatMap(([, source]) => [
       ...list(source.warnings),
       ...list(record(source.critic).warnings),
     ]),
-  ].map(friendlyWarning).filter((item, index, all) => Boolean(item) && all.indexOf(item) === index);
+  ]
+    .map(friendlyWarning)
+    .filter((item, index, all) => Boolean(item) && all.indexOf(item) === index);
 
   return {
     demand,
     dates: Array.from(new Set(demand.map((item) => item.targetDate))).sort(),
     productForecasts: Array.from(productForecastMap.values()).map((item) => ({
       ...item,
-      points: item.points.sort((left, right) => left.targetDate.localeCompare(right.targetDate)),
+      points: item.points.sort((left, right) =>
+        left.targetDate.localeCompare(right.targetDate),
+      ),
     })),
     risks,
     blockers,
@@ -387,6 +452,7 @@ export function adaptDecisionRunView(
 export function buildProcurementIngredientRows(
   decision: DecisionPackage | null,
   data: BootstrapData,
+  strategyKey?: string,
 ): ProcurementIngredientRowView[] {
   const view = adaptDecisionRunView(decision, data);
   const demandByIngredient = new Map<string, DecisionDemandView[]>();
@@ -396,57 +462,77 @@ export function buildProcurementIngredientRows(
       demand,
     ]);
   }
-  const riskByIngredient = new Map(view.risks.map((risk) => [risk.ingredientId, risk]));
-  const recommended = view.strategies.find((strategy) => strategy.feasible === true)
-    ?? (decision?.recommended_strategy
-      ? view.strategies.find((strategy) => strategy.key === decision.recommended_strategy)
-      : undefined);
+  const riskByIngredient = new Map(
+    view.risks.map((risk) => [risk.ingredientId, risk]),
+  );
+  const recommended = strategyKey
+    ? view.strategies.find((strategy) => strategy.key === strategyKey)
+    : (view.strategies.find((strategy) => strategy.feasible === true) ??
+      (decision?.recommended_strategy
+        ? view.strategies.find(
+            (strategy) => strategy.key === decision.recommended_strategy,
+          )
+        : undefined));
   const recommendationByIngredient = new Map(
     recommended?.items.map((item) => [item.ingredientId, item]) ?? [],
   );
-  return Array.from(demandByIngredient.entries()).map(([ingredientId, demand]) => {
-    const inventory = data.inventory.find((item) => item.ingredientId === ingredientId);
-    const supplier = data.supplierConstraints.find((item) => item.ingredientId === ingredientId && item.active !== false);
-    const risk = riskByIngredient.get(ingredientId);
-    const proposed = recommendationByIngredient.get(ingredientId);
-    const totals = demand.reduce(
-      (sum, item) => ({
-        p25: sum.p25 + (item.p25 ?? 0),
-        p50: sum.p50 + (item.p50 ?? 0),
-        p75: sum.p75 + (item.p75 ?? 0),
-        anyP25: sum.anyP25 || item.p25 != null,
-        anyP50: sum.anyP50 || item.p50 != null,
-        anyP75: sum.anyP75 || item.p75 != null,
-      }),
-      { p25: 0, p50: 0, p75: 0, anyP25: false, anyP50: false, anyP75: false },
-    );
-    return {
-      ingredientId,
-      ingredientName: demand[0]?.ingredientName || "Nguyên liệu chưa xác định",
-      unit: demand[0]?.unit || inventory?.unit || "",
-      onHand: inventory?.onHand ?? null,
-      inbound: inventory?.inbound ?? null,
-      safetyStock: inventory?.safetyStock ?? null,
-      supplierName: proposed?.supplierName || supplier?.supplier || inventory?.supplier || "",
-      leadTimeDays: supplier?.leadTimeDays ?? inventory?.leadTimeDays ?? null,
-      p25: totals.anyP25 ? totals.p25 : null,
-      p50: totals.anyP50 ? totals.p50 : null,
-      p75: totals.anyP75 ? totals.p75 : null,
-      stockoutDate: risk?.stockoutDate || "",
-      shortageQuantity: risk?.shortageQuantity ?? null,
-      recommendedQuantity: proposed?.orderQuantity ?? null,
-      packCount: proposed?.packCount ?? null,
-      packSize: proposed?.packSize ?? null,
-      unitPrice: proposed?.unitPrice ?? supplier?.unitCost ?? null,
-      purchaseCost: proposed?.purchaseCost ?? null,
-      feasible: recommended?.feasible === true,
-    };
-  }).sort((left, right) => {
-    if (left.stockoutDate && right.stockoutDate) return left.stockoutDate.localeCompare(right.stockoutDate);
-    if (left.stockoutDate) return -1;
-    if (right.stockoutDate) return 1;
-    if (left.recommendedQuantity != null && right.recommendedQuantity == null) return -1;
-    if (right.recommendedQuantity != null && left.recommendedQuantity == null) return 1;
-    return left.ingredientName.localeCompare(right.ingredientName, "vi");
-  });
+  return Array.from(demandByIngredient.entries())
+    .map(([ingredientId, demand]) => {
+      const inventory = data.inventory.find(
+        (item) => item.ingredientId === ingredientId,
+      );
+      const supplier = data.supplierConstraints.find(
+        (item) => item.ingredientId === ingredientId && item.active !== false,
+      );
+      const risk = riskByIngredient.get(ingredientId);
+      const proposed = recommendationByIngredient.get(ingredientId);
+      const totals = demand.reduce(
+        (sum, item) => ({
+          p25: sum.p25 + (item.p25 ?? 0),
+          p50: sum.p50 + (item.p50 ?? 0),
+          p75: sum.p75 + (item.p75 ?? 0),
+          anyP25: sum.anyP25 || item.p25 != null,
+          anyP50: sum.anyP50 || item.p50 != null,
+          anyP75: sum.anyP75 || item.p75 != null,
+        }),
+        { p25: 0, p50: 0, p75: 0, anyP25: false, anyP50: false, anyP75: false },
+      );
+      return {
+        ingredientId,
+        ingredientName:
+          demand[0]?.ingredientName || "Nguyên liệu chưa xác định",
+        unit: demand[0]?.unit || inventory?.unit || "",
+        onHand: inventory?.onHand ?? null,
+        inbound: inventory?.inbound ?? null,
+        safetyStock: inventory?.safetyStock ?? null,
+        supplierName:
+          proposed?.supplierName ||
+          supplier?.supplier ||
+          inventory?.supplier ||
+          "",
+        leadTimeDays: supplier?.leadTimeDays ?? inventory?.leadTimeDays ?? null,
+        p25: totals.anyP25 ? totals.p25 : null,
+        p50: totals.anyP50 ? totals.p50 : null,
+        p75: totals.anyP75 ? totals.p75 : null,
+        stockoutDate: risk?.stockoutDate || "",
+        shortageQuantity: risk?.shortageQuantity ?? null,
+        recommendedQuantity: proposed?.orderQuantity ?? null,
+        packCount: proposed?.packCount ?? null,
+        packSize: proposed?.packSize ?? null,
+        unitPrice: proposed?.unitPrice ?? supplier?.unitCost ?? null,
+        purchaseCost: proposed?.purchaseCost ?? null,
+        feasible: recommended?.feasible === true,
+      };
+    })
+    .sort((left, right) => {
+      if (left.stockoutDate && right.stockoutDate)
+        return left.stockoutDate.localeCompare(right.stockoutDate);
+      if (left.stockoutDate) return -1;
+      if (right.stockoutDate) return 1;
+      if (left.recommendedQuantity != null && right.recommendedQuantity == null)
+        return -1;
+      if (right.recommendedQuantity != null && left.recommendedQuantity == null)
+        return 1;
+      return left.ingredientName.localeCompare(right.ingredientName, "vi");
+    });
 }

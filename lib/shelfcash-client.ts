@@ -953,7 +953,7 @@ export async function getForecastResult(
 export async function trainForecastModel(input: {
   storeId: string;
   cutoffDate: string;
-  modelVersion: string;
+  modelVersion?: string;
   historyDays?: number;
   idempotencyKey?: string;
   requestId?: string;
@@ -967,7 +967,9 @@ export async function trainForecastModel(input: {
       {
         store_id: input.storeId,
         cutoff_date: input.cutoffDate,
-        model_version: input.modelVersion,
+        ...(input.modelVersion?.trim()
+          ? { model_version: input.modelVersion.trim() }
+          : {}),
         ...(input.historyDays !== undefined
           ? { history_days: input.historyDays }
           : {}),

@@ -55,6 +55,7 @@ import {
   SummaryGrid,
   cn,
 } from "../components/ui";
+import { useActionAttempts } from "../hooks/useActionAttempts";
 
 type Phase =
   | "select"
@@ -273,10 +274,8 @@ export function ImportView({
   const [statusText, setStatusText] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
-  const [error, setError] = useState<{ message: string; code?: string } | null>(
-    null,
-  );
   const [result, setResult] = useState<IngestionResult | null>(null);
+  const actionAttempts = useActionAttempts();
 
   const selected =
     mappings.find((item) => item.id === selectedId) ?? mappings[0];
@@ -321,11 +320,18 @@ export function ImportView({
     );
   }, [selected]);
 
-  function beginAction(action: string): boolean {
-    if (actionInFlight.current) return false;
+  function actionKey(action: string): string {
+    return `import:${created?.import_id ?? "new"}:${action}`;
+  }
+
+  function beginAction(action: string):
+    | { action: string; key: string; attemptId: number }
+    | null {
+    if (actionInFlight.current) return null;
     actionInFlight.current = action;
     setBusy(action);
-    return true;
+    const key = actionKey(action);
+    return { action, key, attemptId: actionAttempts.begin(key) };
   }
 
   function finishAction(action: string) {
@@ -336,11 +342,16 @@ export function ImportView({
   function addFiles(nextFiles: FileList | File[]) {
     const selection = mergeImportFiles(files, nextFiles);
     setFiles(selection.files);
-    setError(
-      selection.errors.length
-        ? { message: selection.errors.join(" ") }
-        : null,
-    );
+    const attemptId = actionAttempts.begin(actionKey("file-selection"));
+    if (selection.errors.length) {
+      actionAttempts.fail(
+        actionKey("file-selection"),
+        attemptId,
+        selection.errors.join(" "),
+      );
+    } else {
+      actionAttempts.clear(actionKey("file-selection"));
+    }
     setResult(null);
     setPhase("select");
   }
@@ -354,7 +365,9 @@ export function ImportView({
     setChecked(false);
     setWarnings([]);
     setErrors([]);
-    setError(null);
+    ["file-selection", "upload", "llm", "status", "confirm", "process", "synchronize"].forEach(
+      (action) => actionAttempts.clear(actionKey(action)),
+    );
     setResult(null);
     setStatusText("");
   }
@@ -363,11 +376,13 @@ export function ImportView({
     if (!files.length || !storeId.trim()) return;
     const fileErrors = validateImportFiles(files);
     if (fileErrors.length) {
-      setError({ message: fileErrors.join(" ") });
+      const key = actionKey("upload");
+      const attemptId = actionAttempts.begin(key);
+      actionAttempts.fail(key, attemptId, fileErrors.join(" "));
       return;
     }
-    if (!beginAction("upload")) return;
-    setError(null);
+    const action = beginAction("upload");
+    if (!action) return;
     setWarnings([]);
     setErrors([]);
     const fingerprint = JSON.stringify({
@@ -398,6 +413,7 @@ export function ImportView({
         throw new Error("Hệ thống không tạo được mã lần nhập.");
       }
       const editable = buildEditableMappings(response);
+      if (!actionAttempts.isCurrent(action.key, action.attemptId)) return;
       setCreated(response);
       setMappings(editable);
       setSelectedId(editable[0]?.id ?? "");
@@ -409,12 +425,13 @@ export function ImportView({
           ? "Hệ thống đã nhận diện đầy đủ. Bạn vẫn có thể kiểm tra trước khi xử lý."
           : "Kiểm tra loại dữ liệu và cách ghép cột.",
       );
+      actionAttempts.succeed(action.key, action.attemptId, "Đã tạo lần nhập mới.");
       delete idempotency.current.upload;
     } catch (caught) {
       if (!retryableTransportFailure(caught)) {
         delete idempotency.current.upload;
       }
-      setError(errorState(caught));
+      actionAttempts.fail(action.key, action.attemptId, errorState(caught).message);
     } finally {
       finishAction("upload");
       if (inputRef.current) inputRef.current.value = "";
@@ -429,21 +446,26 @@ export function ImportView({
       current.map((item) => (item.id === selected.id ? updater(item) : item)),
     );
     setChecked(false);
-    setError(null);
+    actionAttempts.clear(actionKey("mapping-validation"));
   }
 
   async function remapWithQwen() {
     if (!selected || !isProcessableSheet(selected)) return;
-    if (!beginAction("llm")) return;
-    setError(null);
+    const action = beginAction("llm");
+    if (!action) return;
     try {
       const suggestion = await mapSheet(selected.profile);
       updateSelected((item) => applyMappingSuggestion(item, suggestion));
       setStatusText(
         `Đã cập nhật gợi ý ghép cột cho “${selected.sheetName}”.`,
       );
+      actionAttempts.succeed(
+        action.key,
+        action.attemptId,
+        `Đã cập nhật gợi ý ghép cột cho “${selected.sheetName}”.`,
+      );
     } catch (caught) {
-      setError(errorState(caught));
+      actionAttempts.fail(action.key, action.attemptId, errorState(caught).message);
     } finally {
       finishAction("llm");
     }
@@ -451,8 +473,8 @@ export function ImportView({
 
   async function refreshStatus() {
     if (!created?.import_id) return;
-    if (!beginAction("status")) return;
-    setError(null);
+    const action = beginAction("status");
+    if (!action) return;
     try {
       const response = await getImport(created.import_id);
       setWarnings(issueMessages(response.warnings));
@@ -495,8 +517,9 @@ export function ImportView({
           ? `Trạng thái xử lý: ${importStatusLabel(response.status)}`
           : "Đã đồng bộ trạng thái mới nhất.",
       );
+      actionAttempts.succeed(action.key, action.attemptId, "Đã đồng bộ trạng thái mới nhất.");
     } catch (caught) {
-      setError(errorState(caught));
+      actionAttempts.fail(action.key, action.attemptId, errorState(caught).message);
     } finally {
       finishAction("status");
     }
@@ -514,9 +537,13 @@ export function ImportView({
     try {
       await onImported(payload, files);
     } catch (caught) {
-      setError({
-        message: `${errorState(caught).message} Dữ liệu đã được xử lý; hãy đồng bộ lại.`,
-      });
+      const key = actionKey("synchronize");
+      const attemptId = actionAttempts.begin(key);
+      actionAttempts.fail(
+        key,
+        attemptId,
+        `${errorState(caught).message} Dữ liệu đã được xử lý; hãy đồng bộ lại.`,
+      );
     }
   }
 
@@ -529,14 +556,17 @@ export function ImportView({
       if (firstIncomplete) setSelectedId(firstIncomplete.sheetId);
       setChecked(false);
       setStatusText("Hoàn tất các trường bắt buộc trước khi xác nhận.");
-      setError({
-        message:
-          "Chưa thể tiếp tục. Hãy ghép đủ các trường bắt buộc và gỡ trường chuẩn bị trùng.",
-      });
+      const key = actionKey("mapping-validation");
+      const attemptId = actionAttempts.begin(key);
+      actionAttempts.fail(
+        key,
+        attemptId,
+        "Chưa thể tiếp tục. Hãy ghép đủ các trường bắt buộc và gỡ trường chuẩn bị trùng.",
+      );
       return;
     }
-    if (!beginAction("confirm")) return;
-    setError(null);
+    const action = beginAction("confirm");
+    if (!action) return;
     const confirmPayload = toConfirmMappings(mappings);
     const fingerprint = JSON.stringify({
       importId: created.import_id,
@@ -565,11 +595,12 @@ export function ImportView({
       setPhase("confirmed");
       setStatusText("Đã xác nhận cách ghép cột.");
       delete idempotency.current.confirm;
+      actionAttempts.succeed(action.key, action.attemptId, "Đã xác nhận cách ghép cột.");
     } catch (caught) {
       if (!retryableTransportFailure(caught)) {
         delete idempotency.current.confirm;
       }
-      setError(errorState(caught));
+      actionAttempts.fail(action.key, action.attemptId, errorState(caught).message);
     } finally {
       finishAction("confirm");
     }
@@ -589,8 +620,8 @@ export function ImportView({
 
   async function runProcess() {
     if (!created?.import_id || phase !== "confirmed") return;
-    if (!beginAction("process")) return;
-    setError(null);
+    const action = beginAction("process");
+    if (!action) return;
     setPhase("processing");
     setStatusText("Đang chuẩn hóa và kiểm tra dữ liệu…");
     if (idempotency.current.process?.importId !== created.import_id) {
@@ -616,13 +647,24 @@ export function ImportView({
       }
       const payload = await waitForResult(created.import_id);
       await completeImport(payload, true);
+      actionAttempts.succeed(action.key, action.attemptId, "Dữ liệu đã được xử lý và đồng bộ.");
     } catch (caught) {
       const stillProcessing = importStillProcessing(caught);
-      setPhase("processing");
+      setPhase(stillProcessing ? "processing" : "confirmed");
       setStatusText(
-        "Dữ liệu có thể vẫn đang được xử lý. Không cần gửi lại; chọn Đồng bộ để kiểm tra trạng thái.",
+        stillProcessing
+          ? "Dữ liệu có thể vẫn đang được xử lý. Không cần gửi lại; chọn Đồng bộ để kiểm tra trạng thái."
+          : "Yêu cầu bị máy chủ từ chối trước khi xử lý xong. Hãy xem lỗi và chỉnh dữ liệu trước khi thử lại.",
       );
-      setError(stillProcessing ? null : errorState(caught));
+      if (stillProcessing) {
+        actionAttempts.unknown(
+          action.key,
+          action.attemptId,
+          "Không xác định được kết quả yêu cầu; máy chủ có thể vẫn đang xử lý. Chọn Đồng bộ để kiểm tra trước khi gửi lại.",
+        );
+      } else {
+        actionAttempts.fail(action.key, action.attemptId, errorState(caught).message);
+      }
     } finally {
       finishAction("process");
     }
@@ -777,9 +819,15 @@ export function ImportView({
         </>
       ) : null}
 
-      {error ? (
-        <Notice tone="error">{error.message}</Notice>
-      ) : null}
+      {actionAttempts.entries().flatMap(([actionKey, state]) =>
+        ["error", "unknown"].includes(state.status) && state.message
+          ? [[actionKey, state] as const]
+          : [],
+      ).map(([actionKey, state]) => (
+        <Notice key={`${actionKey}:${state.attemptId}`} tone={state.status === "unknown" ? "warning" : "error"}>
+          {state.message}
+        </Notice>
+      ))}
       {warnings.map((warning) => (
         <Notice tone="warning" key={warning}>
           {warning}

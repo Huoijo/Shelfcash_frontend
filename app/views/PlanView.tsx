@@ -14,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { ShelfCashApiError } from "../../lib/shelfcash-client";
 import type {
   BootstrapData,
   CoreStrategy,
@@ -27,12 +28,12 @@ import type {
   Strategy,
 } from "../../lib/types";
 import { ForecastChart } from "../components/ForecastChart";
-import { DecisionCenter } from "../components/DecisionCenter";
 import {
   ProcurementLoadingWorkspace,
   noFeasibleDecision,
 } from "../components/ProcurementDecisionWorkspace";
 import { ProcurementPlanningWorkspace } from "../components/ProcurementPlanningWorkspace";
+import { SimulationResultPanel } from "../components/SimulationResultPanel";
 import {
   Button,
   Details,
@@ -47,6 +48,8 @@ import {
   formatQuantity,
   formatVnd,
 } from "../components/ui";
+import { useActionAttempts } from "../hooks/useActionAttempts";
+import type { SimulationProgress } from "../../lib/simulation-orchestration";
 
 interface StrategyOption {
   label: Strategy;
@@ -103,6 +106,7 @@ export interface SimulationRunInput {
   horizonDays: number;
   includeOpenPurchaseOrders: boolean;
   budgetOverride?: number;
+  onProgress?: (progress: SimulationProgress) => void;
 }
 
 function clampHorizon(value: number): number {
@@ -140,6 +144,65 @@ function currentLocalDateTime(): string {
   const now = new Date();
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 16);
+}
+
+function actionFailureMessage(caught: unknown, fallback: string): string {
+  if (caught instanceof ShelfCashApiError) {
+    const messages: Record<string, string> = {
+      INSUFFICIENT_TRAINING_DATA:
+        "Chưa đủ lịch sử bán hàng để huấn luyện forecast.",
+      FORECAST_TRAINING_FAILED:
+        "Không thể huấn luyện forecast. Thử lại sau hoặc kiểm tra dữ liệu đầu vào.",
+      FORECAST_ARTIFACT_INVALID: "Forecast model hiện tại không hợp lệ.",
+      FORECAST_INPUT_INVALID: "Thông tin mô phỏng không hợp lệ.",
+      DUPLICATE_REQUEST:
+        "Yêu cầu trùng khớp không hợp lệ; không tạo lượt mô phỏng mới.",
+    };
+    const message = messages[caught.code] ?? caught.message ?? fallback;
+    return retryableTransportFailure(caught)
+      ? `${message} Máy chủ có thể vẫn đang xử lý yêu cầu; hãy Đồng bộ hoặc kiểm tra lại trước khi thử lại.`
+      : message;
+  }
+  const detail = caught instanceof Error ? caught.message : fallback;
+  return retryableTransportFailure(caught)
+    ? `${detail} Máy chủ có thể vẫn đang xử lý yêu cầu; hãy Đồng bộ hoặc kiểm tra lại trước khi thử lại.`
+    : detail;
+}
+
+function SimulationProgressPanel({ progress }: { progress: SimulationProgress | null }) {
+  if (!progress) return null;
+  const steps: Array<{ stage: SimulationProgress["stage"]; label: string }> = [
+    { stage: "preparing", label: "Chuẩn bị dữ liệu mô phỏng" },
+    { stage: "checking-model", label: "Kiểm tra forecast model" },
+    ...(progress.trainingRequired
+      ? [{ stage: "training-model" as const, label: "Huấn luyện forecast model" }]
+      : []),
+    { stage: "creating-forecast", label: "Tạo dự báo 7 ngày" },
+    { stage: "running-decision", label: "Tính quyết định mua hàng" },
+    { stage: "completed", label: "Hoàn tất" },
+  ];
+  const activeIndex = steps.findIndex((step) => step.stage === progress.stage);
+  return (
+    <section className="simulation-progress-panel" aria-live="polite" aria-label="Tiến trình mô phỏng">
+      <strong>{progress.message}</strong>
+      <ol>
+        {steps.map((step, index) => (
+          <li key={step.stage} className={index < activeIndex ? "complete" : index === activeIndex ? "active" : ""}>
+            {step.label}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function retryableTransportFailure(caught: unknown): boolean {
+  return (
+    caught instanceof ShelfCashApiError &&
+    ["NETWORK_ERROR", "BACKEND_UNREACHABLE", "REQUEST_TIMEOUT", "JOB_TIMEOUT"].includes(
+      caught.code,
+    )
+  );
 }
 
 function lineKey(line: Recommendation, index: number): string {
@@ -258,8 +321,7 @@ export function PlanView({
   const [budgetOverride, setBudgetOverride] = useState("");
   const [includeOpenPurchaseOrders, setIncludeOpenPurchaseOrders] = useState(true);
   const [controlsDirty, setControlsDirty] = useState(false);
-  const [runBusy, setRunBusy] = useState(false);
-  const [trainingBusy, setTrainingBusy] = useState(false);
+  const [simulationProgress, setSimulationProgress] = useState<SimulationProgress | null>(null);
   const [modelVersion, setModelVersion] = useState("");
   const [historyDays, setHistoryDays] = useState(365);
   const [selectedForecastKey, setSelectedForecastKey] = useState("");
@@ -268,9 +330,7 @@ export function PlanView({
   );
   const [adjusted, setAdjusted] = useState<Recommendation[]>([]);
   const [confirmed, setConfirmed] = useState(false);
-  const [actionBusy, setActionBusy] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const actionAttempts = useActionAttempts();
   const [selectedOrderId, setSelectedOrderId] = useState(
     draftOrders.at(-1)?.poId ?? "",
   );
@@ -305,7 +365,6 @@ export function PlanView({
   useEffect(() => {
     setAdjusted(selectedRecommendations.map((row) => ({ ...row })));
     setConfirmed(false);
-    setMessage("");
   }, [selectedRecommendations]);
 
   useEffect(() => {
@@ -345,6 +404,17 @@ export function PlanView({
   const selectedDemand = plan.ingredientDemand[selectedIngredient];
   const selectedOrder = draftOrders.find(
     (order) => order.poId === selectedOrderId,
+  );
+  const planningAction = `decision-run:${data.settings.storeId}`;
+  const trainingAction = `forecast-training:${data.settings.storeId}`;
+  const createOrdersAction = `purchase-order:create:${data.settings.storeId}`;
+  const updateOrderAction = `purchase-order:update:${selectedOrder?.poId ?? "none"}`;
+  const confirmOrderAction = `purchase-order:confirm:${selectedOrder?.poId ?? "none"}`;
+  const receiveOrderAction = `purchase-order:receive:${selectedOrder?.poId ?? "none"}`;
+  const runBusy = actionAttempts.get(planningAction)?.status === "loading";
+  const trainingBusy = actionAttempts.get(trainingAction)?.status === "loading";
+  const feedback = actionAttempts.entries().filter(([, state]) =>
+    ["success", "error", "unknown"].includes(state.status),
   );
   const eligibleRecommendations = adjusted.filter(
     (row) => row.orderQty > 0 && Boolean(row.supplierId),
@@ -415,62 +485,81 @@ export function PlanView({
   }, [selectedOrder]);
 
   async function runPlanning() {
-    setRunBusy(true);
-    setMessage("");
-    setError("");
+    const attemptId = actionAttempts.begin(planningAction);
     try {
       const parsedBudget = budgetOverride.trim() === "" ? undefined : Number(budgetOverride);
       if (parsedBudget !== undefined && (!Number.isFinite(parsedBudget) || parsedBudget < 0)) {
-        setError("Ngân sách mô phỏng phải là số từ 0 trở lên.");
+        actionAttempts.fail(
+          planningAction,
+          attemptId,
+          "Ngân sách mô phỏng phải là số từ 0 trở lên.",
+        );
         return;
       }
       await onRunPlanning({
         horizonDays,
         includeOpenPurchaseOrders,
         ...(parsedBudget === undefined ? {} : { budgetOverride: parsedBudget }),
+        onProgress: setSimulationProgress,
       });
+      if (!actionAttempts.isCurrent(planningAction, attemptId)) return;
       setControlsDirty(false);
-      setMessage("Mô phỏng đã hoàn tất.");
+      actionAttempts.succeed(planningAction, attemptId, "Mô phỏng đã hoàn tất.");
     } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Không thể chạy quy trình lập kế hoạch.",
+      const message = actionFailureMessage(
+        caught,
+        "Không thể chạy quy trình lập kế hoạch.",
       );
+      if (retryableTransportFailure(caught)) {
+        actionAttempts.unknown(planningAction, attemptId, message);
+      } else {
+        actionAttempts.fail(planningAction, attemptId, message);
+      }
     } finally {
-      setRunBusy(false);
+      if (actionAttempts.isCurrent(planningAction, attemptId)) {
+        setSimulationProgress(null);
+      }
     }
   }
 
   async function trainModel() {
     if (!onTrainModel || !modelVersion.trim()) return;
-    setTrainingBusy(true);
-    setMessage("");
-    setError("");
+    const attemptId = actionAttempts.begin(trainingAction);
     try {
       await onTrainModel(modelVersion.trim(), historyDays);
-      setMessage("Mô hình dự báo đã sẵn sàng. Hãy chạy lại kế hoạch.");
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Không thể huấn luyện mô hình dự báo.",
+      actionAttempts.succeed(
+        trainingAction,
+        attemptId,
+        "Mô hình dự báo đã sẵn sàng. Hãy chạy lại kế hoạch.",
       );
-    } finally {
-      setTrainingBusy(false);
+    } catch (caught) {
+      const message = actionFailureMessage(caught, "Không thể huấn luyện mô hình dự báo.");
+      if (retryableTransportFailure(caught)) {
+        actionAttempts.unknown(trainingAction, attemptId, message);
+      } else {
+        actionAttempts.fail(trainingAction, attemptId, message);
+      }
     }
   }
 
   async function createOrders() {
-    setActionBusy("create");
-    setMessage("");
-    setError("");
+    const attemptId = actionAttempts.begin(createOrdersAction);
     try {
       const orders = await onCreateOrders(eligibleRecommendations);
-      setMessage(`Đã tạo ${orders.length} đơn nháp theo nhà cung cấp.`);
+      if (!actionAttempts.isCurrent(createOrdersAction, attemptId)) return;
+      actionAttempts.succeed(
+        createOrdersAction,
+        attemptId,
+        `Đã tạo ${orders.length} đơn nháp theo nhà cung cấp.`,
+      );
       setConfirmed(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Không thể tạo đơn.");
-    } finally {
-      setActionBusy("");
+      const message = actionFailureMessage(caught, "Không thể tạo đơn.");
+      if (retryableTransportFailure(caught)) {
+        actionAttempts.unknown(createOrdersAction, attemptId, message);
+      } else {
+        actionAttempts.fail(createOrdersAction, attemptId, message);
+      }
     }
   }
 
@@ -484,42 +573,48 @@ export function PlanView({
         : [];
     });
     if (lineUpdates.length === 0) {
-      setError(
+      const attemptId = actionAttempts.begin(updateOrderAction);
+      actionAttempts.fail(
+        updateOrderAction,
+        attemptId,
         "Không có dòng đơn hợp lệ để cập nhật. Mỗi dòng cần có mã hệ thống và số lượng lớn hơn 0.",
       );
       return;
     }
-    setActionBusy("update");
-    setMessage("");
-    setError("");
+    const attemptId = actionAttempts.begin(updateOrderAction);
     try {
       await onUpdateOrder(selectedOrder.poId, lineUpdates);
-      setMessage("Đã lưu số lượng mới cho đơn nháp.");
+      actionAttempts.succeed(updateOrderAction, attemptId, "Đã lưu số lượng mới cho đơn nháp.");
     } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Không thể sửa đơn nháp.",
-      );
-    } finally {
-      setActionBusy("");
+      const message = actionFailureMessage(caught, "Không thể sửa đơn nháp.");
+      if (retryableTransportFailure(caught)) {
+        actionAttempts.unknown(updateOrderAction, attemptId, message);
+      } else {
+        actionAttempts.fail(updateOrderAction, attemptId, message);
+      }
     }
   }
 
   async function confirmOrder() {
     if (!selectedOrder || selectedOrder.status !== "draft") return;
-    setActionBusy("confirm");
-    setMessage("");
-    setError("");
+    const attemptId = actionAttempts.begin(confirmOrderAction);
     try {
       await onConfirmOrder(selectedOrder.poId);
-      setMessage("Đơn đã được xác nhận và ngân sách đã được giữ chỗ.");
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Không thể xác nhận đơn. Đơn nháp vẫn được giữ lại.",
+      actionAttempts.succeed(
+        confirmOrderAction,
+        attemptId,
+        "Đơn đã được xác nhận và ngân sách đã được giữ chỗ.",
       );
-    } finally {
-      setActionBusy("");
+    } catch (caught) {
+      const message = actionFailureMessage(
+        caught,
+        "Không thể xác nhận đơn. Đơn nháp vẫn được giữ lại.",
+      );
+      if (retryableTransportFailure(caught)) {
+        actionAttempts.unknown(confirmOrderAction, attemptId, message);
+      } else {
+        actionAttempts.fail(confirmOrderAction, attemptId, message);
+      }
     }
   }
 
@@ -585,19 +680,23 @@ export function PlanView({
     });
 
     if (!receivedAt || lines.length === 0) {
-      setError("Chọn thời gian nhận và nhập số lượng lớn hơn 0 cho ít nhất một lô.");
+      const attemptId = actionAttempts.begin(receiveOrderAction);
+      actionAttempts.fail(
+        receiveOrderAction,
+        attemptId,
+        "Chọn thời gian nhận và nhập số lượng lớn hơn 0 cho ít nhất một lô.",
+      );
       return;
     }
 
     const receivedInstant = new Date(receivedAt);
     if (Number.isNaN(receivedInstant.getTime())) {
-      setError("Thời gian nhận hàng không hợp lệ.");
+      const attemptId = actionAttempts.begin(receiveOrderAction);
+      actionAttempts.fail(receiveOrderAction, attemptId, "Thời gian nhận hàng không hợp lệ.");
       return;
     }
 
-    setActionBusy("receive");
-    setMessage("");
-    setError("");
+    const attemptId = actionAttempts.begin(receiveOrderAction);
     try {
       await onReceiveOrder(selectedOrder.poId, {
         receivedAt: receivedInstant.toISOString(),
@@ -606,18 +705,24 @@ export function PlanView({
           : {}),
         lines,
       });
-      setMessage("Đã ghi nhận các lô vừa nhận và cập nhật trạng thái đơn.");
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Không thể nhận hàng.",
+      actionAttempts.succeed(
+        receiveOrderAction,
+        attemptId,
+        "Đã ghi nhận các lô vừa nhận và cập nhật trạng thái đơn.",
       );
-    } finally {
-      setActionBusy("");
+    } catch (caught) {
+      const message = actionFailureMessage(caught, "Không thể nhận hàng.");
+      if (retryableTransportFailure(caught)) {
+        actionAttempts.unknown(receiveOrderAction, attemptId, message);
+      } else {
+        actionAttempts.fail(receiveOrderAction, attemptId, message);
+      }
     }
   }
 
   if (
     focus === "plan" &&
+    !runBusy &&
     decision &&
     (noFeasibleDecision(decision) || decision.status === "completed")
   ) {
@@ -640,7 +745,12 @@ export function PlanView({
       decision?.status === "queued" ||
       decision?.status === "running")
   ) {
-    return <ProcurementLoadingWorkspace onRunAgain={() => void runPlanning()} />;
+    return (
+      <>
+        <ProcurementLoadingWorkspace onRunAgain={() => void runPlanning()} />
+        <SimulationProgressPanel progress={simulationProgress} />
+      </>
+    );
   }
 
   if (decision && focus === "simulator") {
@@ -650,14 +760,15 @@ export function PlanView({
         <PageHeader
           title="Mô phỏng"
           context={`${data.settings.storeName} · ${data.today} · ${horizonDays} ngày`}
-          action={<Button variant="primary" busy={isRunning} onClick={() => void runPlanning()} aria-label="Chạy mô phỏng"><Play size={16} />Chạy mô phỏng</Button>}
+          action={<Button variant="primary" busy={isRunning} onClick={() => void runPlanning()} aria-label="Chạy mô phỏng"><Play size={16} />{isRunning ? "Đang chạy mô phỏng…" : "Chạy mô phỏng"}</Button>}
         />
         <div className="plan-controls">
-          <label className="field"><span>Số ngày mô phỏng (1–7)</span><input type="number" min="1" max="7" step="1" value={horizonDays} onChange={(event) => { setHorizonDays(clampHorizon(Number(event.target.value))); setControlsDirty(true); }} /></label>
-          <label className="field"><span>Ngân sách tối đa</span><input type="number" min="0" step="1000" inputMode="decimal" value={budgetOverride} placeholder={formatVnd(data.settings.monthlyBudget)} onChange={(event) => { setBudgetOverride(event.target.value); setControlsDirty(true); }} /></label>
-          <label className="check plan-open-orders"><input type="checkbox" checked={includeOpenPurchaseOrders} onChange={(event) => { setIncludeOpenPurchaseOrders(event.target.checked); setControlsDirty(true); }} /><span>Tính đơn mua hàng đang mở</span></label>
+          <label className="field"><span>Số ngày mô phỏng (1–7)</span><input type="number" min="1" max="7" step="1" disabled={isRunning} value={horizonDays} onChange={(event) => { setHorizonDays(clampHorizon(Number(event.target.value))); setControlsDirty(true); }} /></label>
+          <label className="field"><span>Ngân sách tối đa</span><input type="number" min="0" step="1000" inputMode="decimal" disabled={isRunning} value={budgetOverride} placeholder={formatVnd(data.settings.monthlyBudget)} onChange={(event) => { setBudgetOverride(event.target.value); setControlsDirty(true); }} /></label>
+          <label className="check plan-open-orders"><input type="checkbox" disabled={isRunning} checked={includeOpenPurchaseOrders} onChange={(event) => { setIncludeOpenPurchaseOrders(event.target.checked); setControlsDirty(true); }} /><span>Tính đơn mua hàng đang mở</span></label>
           <div className="plan-status"><span>Trạng thái</span><strong>{isRunning ? "Đang lập kế hoạch..." : decision.status === "completed" ? "Hoàn tất" : "Cần kiểm tra"}</strong></div>
         </div>
+        <SimulationProgressPanel progress={simulationProgress} />
         {controlsDirty && !isRunning ? <Notice tone="warning">Kết quả dưới đây được tạo trước khi bạn thay đổi điều kiện. Hãy chạy lại mô phỏng.</Notice> : null}
         <Details summary="Ràng buộc đang áp dụng">
           <ul className="warning-list">
@@ -667,15 +778,11 @@ export function PlanView({
             <li>{data.inventory.filter((item) => item.leadTimeDays != null).length} nguyên liệu có thời gian giao hàng</li>
           </ul>
         </Details>
-        <DecisionCenter key={decision.decision_run_id} decision={decision} running={isRunning} />
-        {decision.status === "completed" ? (
-          <Details summary="Đơn nháp">
-            <p className="quiet-copy">
-              Kết quả mô phỏng này chưa thể chuyển trực tiếp thành đơn nháp vì
-              chưa có dữ liệu tham chiếu từng dòng đặt hàng.
-            </p>
-          </Details>
-        ) : null}
+        <SimulationResultPanel
+          data={data}
+          decision={decision}
+          running={isRunning}
+        />
       </>
     );
   }
@@ -700,7 +807,7 @@ export function PlanView({
             onClick={() => void runPlanning()}
           >
             <Play size={16} />
-            Chạy mô phỏng
+            {runBusy ? "Đang chạy mô phỏng…" : "Chạy mô phỏng"}
           </Button>
         }
       />
@@ -713,6 +820,7 @@ export function PlanView({
             min="1"
             max="7"
             step="1"
+            disabled={runBusy}
             value={horizonDays}
             onChange={(event) => {
               setHorizonDays(clampHorizon(Number(event.target.value)));
@@ -727,6 +835,7 @@ export function PlanView({
             min="0"
             step="1000"
             inputMode="decimal"
+            disabled={runBusy}
             value={budgetOverride}
             placeholder={formatVnd(data.settings.monthlyBudget)}
             onChange={(event) => {
@@ -738,6 +847,7 @@ export function PlanView({
         <label className="check plan-open-orders">
           <input
             type="checkbox"
+            disabled={runBusy}
             checked={includeOpenPurchaseOrders}
             onChange={(event) => {
               setIncludeOpenPurchaseOrders(event.target.checked);
@@ -761,6 +871,7 @@ export function PlanView({
           </div>
         </fieldset>
       </div>
+      <SimulationProgressPanel progress={simulationProgress} />
 
       {plan.status === "idle" ? (
         <Notice tone="info">
@@ -825,8 +936,20 @@ export function PlanView({
           {plan.failureMessage || "Không thể hoàn tất quy trình lập kế hoạch."}
         </Notice>
       ) : null}
-      {message ? <Notice tone="success">{message}</Notice> : null}
-      {error ? <Notice tone="error">{error}</Notice> : null}
+      {feedback.map(([actionKey, state]) => (
+        <Notice
+          key={`${actionKey}:${state.attemptId}`}
+          tone={
+            state.status === "success"
+              ? "success"
+              : state.status === "unknown"
+                ? "warning"
+                : "error"
+          }
+        >
+          {state.message}
+        </Notice>
+      ))}
 
       {plan.status === "completed" ? (
         <Notice tone="warning">
@@ -1202,7 +1325,7 @@ export function PlanView({
         </label>
         <Button
           variant="primary"
-          busy={actionBusy === "create"}
+          busy={actionAttempts.get(createOrdersAction)?.status === "loading"}
           disabled={
             plan.status !== "completed" ||
             !confirmed ||
@@ -1417,7 +1540,7 @@ export function PlanView({
                   })}
                   <Button
                     variant="primary"
-                    busy={actionBusy === "receive"}
+                    busy={actionAttempts.get(receiveOrderAction)?.status === "loading"}
                     onClick={() => void receiveOrder()}
                   >
                     <PackageCheck size={16} />
@@ -1434,21 +1557,35 @@ export function PlanView({
 
               <div className="order-actions">
                 <Button
-                  onClick={() =>
-                    void downloadOrder(selectedOrder, "xlsx").catch(() =>
-                      setError("Không thể xuất Excel."),
-                    )
-                  }
+                  onClick={() => {
+                    const actionKey = `purchase-order:export-xlsx:${selectedOrder.poId}`;
+                    const attemptId = actionAttempts.begin(actionKey);
+                    void downloadOrder(selectedOrder, "xlsx").then(
+                      () => actionAttempts.succeed(actionKey, attemptId, "Đã xuất Excel."),
+                      (caught) => actionAttempts.fail(
+                        actionKey,
+                        attemptId,
+                        caught instanceof Error ? caught.message : "Không thể xuất Excel.",
+                      ),
+                    );
+                  }}
                 >
                   <FileSpreadsheet size={16} />
                   Xuất Excel
                 </Button>
                 <Button
-                  onClick={() =>
-                    void downloadOrder(selectedOrder, "pdf").catch(() =>
-                      setError("Không thể xuất PDF."),
-                    )
-                  }
+                  onClick={() => {
+                    const actionKey = `purchase-order:export-pdf:${selectedOrder.poId}`;
+                    const attemptId = actionAttempts.begin(actionKey);
+                    void downloadOrder(selectedOrder, "pdf").then(
+                      () => actionAttempts.succeed(actionKey, attemptId, "Đã xuất PDF."),
+                      (caught) => actionAttempts.fail(
+                        actionKey,
+                        attemptId,
+                        caught instanceof Error ? caught.message : "Không thể xuất PDF.",
+                      ),
+                    );
+                  }}
                 >
                   <Download size={16} />
                   Xuất PDF
@@ -1456,7 +1593,7 @@ export function PlanView({
                 {selectedOrder.status === "draft" ? (
                   <>
                     <Button
-                      busy={actionBusy === "update"}
+                      busy={actionAttempts.get(updateOrderAction)?.status === "loading"}
                       onClick={() => void updateDraftOrder()}
                     >
                       <Save size={16} />
@@ -1464,7 +1601,7 @@ export function PlanView({
                     </Button>
                     <Button
                       variant="primary"
-                      busy={actionBusy === "confirm"}
+                      busy={actionAttempts.get(confirmOrderAction)?.status === "loading"}
                       onClick={() => void confirmOrder()}
                     >
                       <Check size={16} />

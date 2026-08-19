@@ -23,16 +23,13 @@ import {
   strategyFromApi,
 } from "../lib/contract-adapters";
 import { dateInTimeZone } from "../lib/data";
-import {
-  buildDecisionRunRequest,
-  shouldPollDecisionRun,
-} from "../lib/decision-run";
+import { shouldPollDecisionRun } from "../lib/decision-run";
+import { runSimulationAttempt } from "../lib/simulation-orchestration";
 import {
   createIdempotencyKey,
   createInventoryAdjustment,
   createInventoryCount,
   confirmPurchaseOrder,
-  createDecisionRun,
   getBootstrap,
   getConnectionHealth,
   getDecisionRun,
@@ -362,10 +359,29 @@ export function ShelfCashApp({
   const [importDraftFiles, setImportDraftFiles] = useState<File[]>([]);
   const [connection, setConnection] =
     useState<BackendConnectionHealth | null>(null);
-  const [toast, setToast] = useState<{
+  const [toasts, setToasts] = useState<Array<{
+    id: number;
+    actionKey: string;
     message: string;
     tone: "success" | "error";
-  } | null>(null);
+  }>>([]);
+  const toastSequence = useRef(0);
+  const setToast = useCallback((toast: {
+    message: string;
+    tone: "success" | "error";
+    actionKey?: string;
+  } | null) => {
+    if (!toast) {
+      setToasts([]);
+      return;
+    }
+    const actionKey = toast.actionKey ?? `${toast.tone}:${toast.message}`;
+    const id = ++toastSequence.current;
+    setToasts((current) => [
+      ...current.filter((item) => item.actionKey !== actionKey),
+      { id, actionKey, message: toast.message, tone: toast.tone },
+    ]);
+  }, []);
   const [refreshing, setRefreshing] = useState(false);
   const [inventoryConstraints, setInventoryConstraints] = useState<
     InventoryConstraint[]
@@ -502,7 +518,7 @@ export function ShelfCashApp({
         }
       }
     },
-    [],
+    [setToast],
   );
 
   useEffect(() => {
@@ -1042,13 +1058,10 @@ export function ShelfCashApp({
     horizonDays,
     includeOpenPurchaseOrders,
     budgetOverride,
+    onProgress,
   }: SimulationRunInput): Promise<void> {
     if (!data.settings.storeId.trim()) {
       throw new Error("Hãy cấu hình hoặc import một store trước.");
-    }
-    const forecastRunId = plan.forecastRunId || data.settings.latestForecastRunId;
-    if (!forecastRunId || forecastRunId === "FORECAST_RUN_ID") {
-      throw new Error("Chưa có lượt dự báo hợp lệ để lập kế hoạch nhập hàng.");
     }
     const operation = ++operationSequence.current;
     decisionRunAbort.current?.abort();
@@ -1056,31 +1069,30 @@ export function ShelfCashApp({
     decisionRunAbort.current = abortController;
     setRefreshing(true);
     try {
-      const created = await createDecisionRun({
+      const resolved = await runSimulationAttempt({
+        attemptId: operation,
         storeId: data.settings.storeId,
-        request: buildDecisionRunRequest({
-          forecastRunId,
-          asOfDate: data.today,
-          horizonDays,
-          includeOpenPurchaseOrders,
-          budgetOverride,
-          monthlyBudget: data.settings.monthlyBudget,
-        }),
+        cutoffDate: data.today,
+        horizonDays,
+        includeOpenPurchaseOrders,
+        budgetOverride,
+        monthlyBudget: data.settings.monthlyBudget,
         signal: abortController.signal,
+        onProgress,
       });
-      if (operation !== operationSequence.current) return;
-      if (shouldPollDecisionRun(created.status)) setDecision(created);
-      const resolved = shouldPollDecisionRun(created.status)
-        ? await waitForDecisionRun(created.decision_run_id, created, {
-            signal: abortController.signal,
-          })
-        : created;
       if (operation === operationSequence.current) {
-        setDecision(resolved);
-        if (resolved.decision_run_id) {
+        setDecision(resolved.decision);
+        setPlan((current) => ({
+          ...current,
+          status: "completed",
+          cutoffDate: resolved.forecast.cutoff_date ?? data.today,
+          horizonDays: resolved.forecast.horizon_days ?? horizonDays,
+          forecastRunId: resolved.forecast.forecast_run_id,
+        }));
+        if (resolved.decision.decision_run_id) {
           window.localStorage.setItem(
             `shelfcash:decision-run:${data.settings.storeId}`,
-            resolved.decision_run_id,
+            resolved.decision.decision_run_id,
           );
         }
       }
@@ -1183,10 +1195,6 @@ export function ShelfCashApp({
           ...orders,
         ];
       });
-      setToast({
-        message: `Đã tạo ${orders.length} đơn nháp, nhóm theo nhà cung cấp.`,
-        tone: "success",
-      });
       return orders;
     } catch (caught) {
       if (!retryableTransportFailure(caught)) {
@@ -1254,7 +1262,6 @@ export function ShelfCashApp({
       });
       updateIdempotencyKeys.current.delete(poId);
       replaceOrder(result);
-      setToast({ message: `Đã cập nhật ${poId}.`, tone: "success" });
     } catch (caught) {
       if (!retryableTransportFailure(caught)) {
         updateIdempotencyKeys.current.delete(poId);
@@ -1298,10 +1305,6 @@ export function ShelfCashApp({
         strategy,
         true,
       );
-      setToast({
-        message: `${poId} đã chuyển sang đã đặt và ngân sách đã được giữ.`,
-        tone: "success",
-      });
     } catch (caught) {
       if (!retryableTransportFailure(caught)) {
         confirmIdempotencyKeys.current.delete(poId);
@@ -1368,10 +1371,6 @@ export function ShelfCashApp({
         strategy,
         true,
       );
-      setToast({
-        message: `Đã ghi nhận lô hàng cho ${poId}; kho và ngân sách đã được tải lại.`,
-        tone: "success",
-      });
     } catch (caught) {
       if (!retryableTransportFailure(caught)) {
         receiveIdempotencyKeys.current.delete(poId);
@@ -1403,7 +1402,8 @@ export function ShelfCashApp({
       inventoryMutationKeys.current.delete(fingerprint);
       await reloadFromBackend(data, data.settings.storeId, strategy, true);
       setToast({
-        message: `Đã ghi kiểm kho cho lô ${input.lotId}.`,
+        actionKey: `inventory:count:${input.lotId}`,
+        message: "Đã ghi nhận kết quả kiểm kho và đồng bộ tồn kho.",
         tone: "success",
       });
     } catch (caught) {
@@ -1441,7 +1441,8 @@ export function ShelfCashApp({
       inventoryMutationKeys.current.delete(fingerprint);
       await reloadFromBackend(data, data.settings.storeId, strategy, true);
       setToast({
-        message: `Đã điều chỉnh lô ${input.lotId}.`,
+        actionKey: `inventory:adjust:${input.lotId}`,
+        message: "Đã lưu điều chỉnh và đồng bộ tồn kho.",
         tone: "success",
       });
     } catch (caught) {
@@ -1453,6 +1454,7 @@ export function ShelfCashApp({
         caught.code === "VERSION_CONFLICT"
       ) {
         await reloadFromBackend(data, data.settings.storeId, strategy, true);
+        throw caught;
       }
       throw new Error(errorMessage(caught, "Không thể điều chỉnh tồn kho."));
     }
@@ -1482,10 +1484,6 @@ export function ShelfCashApp({
         timeoutMs: 10 * 60_000,
       });
       trainingIdempotencyKeys.current.delete(fingerprint);
-      setToast({
-        message: "Mô hình dự báo đã sẵn sàng. Hãy chạy lại kế hoạch.",
-        tone: "success",
-      });
     } catch (caught) {
       if (!retryableTransportFailure(caught)) {
         trainingIdempotencyKeys.current.delete(fingerprint);
@@ -1528,6 +1526,15 @@ export function ShelfCashApp({
             onOpenPlan={openPlan}
             onCountLot={countInventoryLot}
             onAdjustLot={adjustInventoryLot}
+            onRefreshInventory={async () => {
+              const refreshed = await reloadFromBackend(
+                data,
+                data.settings.storeId,
+                strategy,
+                true,
+              );
+              if (!refreshed) throw new Error("Không thể tải lại dữ liệu kho.");
+            }}
           />
         );
       case "menu":
@@ -1824,12 +1831,19 @@ export function ShelfCashApp({
         </div>
       ) : null}
 
-      {toast ? (
-        <Toast
-          message={toast.message}
-          tone={toast.tone}
-          onClose={() => setToast(null)}
-        />
+      {toasts.length ? (
+        <div className="toast-stack" aria-live="polite">
+          {toasts.map((toast) => (
+            <Toast
+              key={toast.id}
+              message={toast.message}
+              tone={toast.tone}
+              onClose={() =>
+                setToasts((current) => current.filter((item) => item.id !== toast.id))
+              }
+            />
+          ))}
+        </div>
       ) : null}
     </div>
   );

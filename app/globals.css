@@ -110,6 +110,8 @@
   --focus: rgba(47, 102, 89, 0.42);
   --sidebar-width: 248px;
   --header-height: 60px;
+  --inventory-detail-scroll-gap: 16px;
+  --recipe-detail-scroll-gap: 16px;
   --content-max: 1760px;
   --radius-card: 12px;
   --radius-control: 9px;
@@ -1310,6 +1312,592 @@ tbody tr.selected {
 .inventory-table tbody tr,
 .product-table tbody tr {
   cursor: pointer;
+}
+
+.inventory-table tbody tr:focus-visible {
+  outline: 3px solid var(--blue);
+  outline-offset: -3px;
+}
+
+.product-table tbody tr:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}
+
+.inventory-toolbar {
+  background: var(--surface);
+  position: sticky;
+  top: var(--header-height);
+  z-index: 10;
+}
+
+.inventory-selected-detail {
+  animation: inventory-detail-enter 200ms ease-out both;
+  background: linear-gradient(135deg, #edf5f1 0%, #f8faf8 72%);
+  border: 1px solid #cfe0d9;
+  border-radius: 16px;
+  margin: 16px 0 28px;
+  padding: 20px;
+  scroll-margin-top: calc(var(--header-height) + var(--inventory-detail-scroll-gap));
+}
+
+.inventory-detail-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.inventory-focus-header .eyebrow {
+  color: var(--pine);
+  display: block;
+  margin-top: 24px;
+}
+
+.inventory-focus-title {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 4px;
+}
+
+.inventory-focus-title h2 {
+  font-size: clamp(2rem, 1.6rem + 1.4vw, 3rem);
+  letter-spacing: -0.045em;
+  margin: 0;
+}
+
+.inventory-focus-title > strong {
+  color: var(--pine-dark);
+  font-size: var(--font-control);
+}
+
+.inventory-focus-title > strong.is-critical {
+  color: var(--red);
+}
+
+.inventory-operational-conclusion {
+  color: var(--muted);
+  margin: 10px 0 0;
+  max-width: 76ch;
+}
+
+.inventory-summary-strip {
+  border-bottom: 1px solid #cfe0d9;
+  border-top: 1px solid #cfe0d9;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 20px 0 26px;
+}
+
+.inventory-summary-strip > div {
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.inventory-summary-strip > div + div {
+  border-left: 1px solid #cfe0d9;
+}
+
+.inventory-summary-strip dt {
+  color: var(--muted);
+  font-size: var(--font-caption);
+  font-weight: 650;
+}
+
+.inventory-summary-strip dd {
+  font-size: clamp(1.1rem, 1rem + 0.35vw, 1.35rem);
+  font-weight: 720;
+  margin: 4px 0 0;
+}
+
+.inventory-summary-strip .is-critical {
+  background: rgba(248, 233, 231, 0.82);
+}
+
+.inventory-summary-strip .is-critical dd {
+  color: var(--red);
+}
+
+.inventory-summary-strip .is-empty {
+  color: var(--muted);
+  font-size: var(--font-body);
+  font-weight: 550;
+}
+
+.inventory-selected-detail .section-heading {
+  margin-top: 0;
+}
+
+.inventory-selected-detail .tab-list {
+  margin-bottom: 16px;
+  margin-top: 16px;
+}
+
+.lot-detail-table tbody tr.is-expired td:first-child {
+  box-shadow: inset 4px 0 0 var(--red);
+}
+
+.lot-detail-table tbody tr.is-expired {
+  background: rgba(248, 233, 231, 0.5);
+}
+
+.inventory-list-divider {
+  border-top: 1px solid var(--line-strong);
+  margin: 30px 0 24px;
+}
+
+.inventory-table tbody tr.selected {
+  background: var(--pine-soft);
+}
+
+.inventory-table tbody tr.selected td:first-child {
+  box-shadow: inset 4px 0 0 var(--pine);
+}
+
+.inventory-selected-marker {
+  color: var(--pine);
+  display: inline-block;
+  font-size: var(--font-caption);
+  font-weight: 720;
+  margin-right: 8px;
+}
+
+.inventory-selection-helper {
+  margin: 12px 0 20px;
+}
+
+.recipe-selected-detail {
+  animation: recipe-detail-enter 200ms ease-out both;
+  background: linear-gradient(135deg, #edf5f1 0%, #f8faf8 72%);
+  border: 1px solid #cfe0d9;
+  border-radius: 16px;
+  margin: 16px 0 28px;
+  padding: 20px;
+  scroll-margin-top: calc(var(--header-height) + var(--recipe-detail-scroll-gap));
+}
+
+.recipe-focus-header {
+  border-bottom: 1px solid #cfe0d9;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+}
+
+.recipe-focus-header .eyebrow {
+  color: var(--pine);
+  display: block;
+  margin-top: 22px;
+}
+
+.recipe-focus-header h2 {
+  font-size: clamp(2rem, 1.6rem + 1.4vw, 3rem);
+  letter-spacing: -0.045em;
+  margin: 4px 0 0;
+}
+
+.recipe-focus-header p {
+  color: var(--muted);
+  margin: 7px 0 0;
+}
+
+.recipe-list-divider {
+  border-top: 1px solid var(--line-strong);
+  margin: 30px 0 24px;
+}
+
+.product-table tbody tr.selected {
+  background: var(--pine-soft);
+}
+
+.product-table tbody tr.selected td:first-child {
+  box-shadow: inset 4px 0 0 var(--pine);
+}
+
+.recipe-selection-helper {
+  margin: 18px 1px 22px;
+}
+
+.inventory-data-workspace {
+  padding-top: 2px;
+}
+
+.inventory-subheading {
+  color: var(--ink);
+  font-size: var(--font-control);
+  margin: 22px 0 10px;
+}
+
+.inventory-data-quality-strip {
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.inventory-data-quality-strip > div {
+  min-width: 0;
+  padding: 13px 15px;
+}
+
+.inventory-data-quality-strip > div + div {
+  border-left: 1px solid var(--line);
+}
+
+.inventory-data-quality-strip dt {
+  color: var(--muted);
+  font-size: var(--font-caption);
+  font-weight: 650;
+}
+
+.inventory-data-quality-strip dd {
+  font-size: var(--font-body);
+  font-weight: 680;
+  line-height: 1.4;
+  margin: 4px 0 0;
+}
+
+.inventory-data-quality-strip dd.is-good {
+  color: var(--pine-dark);
+}
+
+.inventory-data-quality-strip dd.is-warning {
+  color: var(--amber-dark);
+}
+
+.inventory-data-workspace > .details {
+  margin: 20px 0 24px;
+}
+
+.inventory-action-picker {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.inventory-action-card {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  min-height: 104px;
+  padding: 15px;
+  text-align: left;
+  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.inventory-action-card:hover {
+  border-color: #9ebdaf;
+  transform: translateY(-1px);
+}
+
+.inventory-action-card:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.inventory-action-card strong,
+.inventory-action-card span {
+  display: block;
+}
+
+.inventory-action-card strong {
+  font-size: var(--font-control);
+}
+
+.inventory-action-card span {
+  color: var(--muted);
+  font-size: var(--font-caption);
+  line-height: 1.45;
+  margin-top: 6px;
+}
+
+.inventory-action-card.is-active {
+  background: var(--pine-soft);
+  border-color: var(--pine);
+  box-shadow: inset 4px 0 0 var(--pine);
+}
+
+.inventory-action-card.is-secondary:not(.is-active) {
+  border-color: #dfc7c2;
+}
+
+.inventory-action-card.is-secondary.is-active {
+  background: #fbf4e8;
+  border-color: #d7aa5f;
+  box-shadow: inset 4px 0 0 var(--amber);
+}
+
+.inventory-action-surface {
+  animation: inventory-data-action-enter 190ms ease-out both;
+  background: linear-gradient(135deg, #f4f8f5 0%, var(--surface) 72%);
+  border: 1px solid #cfe0d9;
+  border-radius: 14px;
+  margin-top: 14px;
+  max-width: 780px;
+  padding: 19px;
+}
+
+.inventory-action-surface.is-adjustment {
+  background: linear-gradient(135deg, #fcf7ed 0%, var(--surface) 72%);
+  border-color: #e1cfae;
+}
+
+.inventory-action-surface .section-heading {
+  margin-bottom: 16px;
+}
+
+.inventory-action-form-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 16px 0;
+}
+
+.field-error {
+  color: var(--red);
+  font-size: var(--font-caption);
+  margin-top: 5px;
+}
+
+.inventory-change-preview {
+  align-items: baseline;
+  background: rgba(255, 255, 255, 0.6);
+  border-left: 3px solid var(--pine);
+  display: grid;
+  gap: 2px 16px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin: 18px 0;
+  max-width: 500px;
+  padding: 11px 13px;
+}
+
+.inventory-change-preview span {
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.inventory-change-preview strong {
+  font-size: var(--font-body);
+  text-align: right;
+}
+
+.inventory-action-surface .notice {
+  margin: 14px 0;
+}
+
+.inventory-conflict-notice {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.inventory-confirm-layer {
+  align-items: center;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 60;
+}
+
+.inventory-confirm-backdrop {
+  background: rgba(27, 38, 35, 0.42);
+  border: 0;
+  cursor: default;
+  inset: 0;
+  position: absolute;
+}
+
+.inventory-confirm-dialog {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  box-shadow: 0 24px 72px rgba(20, 35, 30, 0.28);
+  max-width: 550px;
+  padding: 22px;
+  position: relative;
+  width: min(100%, 550px);
+}
+
+.inventory-confirm-dialog header h2 {
+  margin: 4px 0 0;
+}
+
+.inventory-confirm-summary {
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 0 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 20px 0;
+}
+
+.inventory-confirm-summary > div {
+  border-bottom: 1px solid var(--line);
+  padding: 11px 0;
+}
+
+.inventory-confirm-summary > div:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.inventory-confirm-summary dt {
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.inventory-confirm-summary dd {
+  font-weight: 680;
+  margin: 3px 0 0;
+}
+
+.inventory-confirm-dialog footer {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+@keyframes inventory-data-action-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.simulation-progress-panel {
+  background: var(--surface-strong);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  margin: 16px 0;
+  padding: 16px;
+}
+
+.simulation-progress-panel > strong {
+  display: block;
+  font-size: var(--font-body);
+}
+
+.simulation-progress-panel ol {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+}
+
+.simulation-progress-panel li {
+  color: var(--muted);
+  padding-left: 22px;
+  position: relative;
+}
+
+.simulation-progress-panel li::before {
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  content: "";
+  height: 10px;
+  left: 0;
+  position: absolute;
+  top: 0.35em;
+  width: 10px;
+}
+
+.simulation-progress-panel li.complete {
+  color: var(--pine);
+}
+
+.simulation-progress-panel li.complete::before {
+  background: var(--pine);
+  border-color: var(--pine);
+}
+
+.simulation-progress-panel li.active {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.simulation-progress-panel li.active::before {
+  animation: simulation-progress-pulse 1.1s ease-in-out infinite;
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+@keyframes simulation-progress-pulse {
+  50% { opacity: 0.45; }
+}
+
+@keyframes inventory-detail-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes inventory-detail-refresh {
+  from {
+    opacity: 0.76;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes recipe-detail-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes recipe-detail-refresh {
+  from {
+    opacity: 0.76;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inventory-selected-detail {
+    animation: none;
+  }
+
+  .recipe-selected-detail {
+    animation: none;
+  }
+
+  .inventory-action-card,
+  .inventory-action-surface {
+    animation: none;
+    transition: none;
+  }
+
+  .simulation-progress-panel li.active::before {
+    animation: none;
+  }
 }
 
 td > strong,
@@ -2697,8 +3285,8 @@ td > small {
 }
 
 html:has(.procurement-planning-workspace) {
-  scroll-behavior: smooth;
-  scroll-snap-type: y mandatory;
+  scroll-behavior: auto;
+  scroll-snap-type: none;
 }
 
 .procurement-dashboard-scene,
@@ -2722,10 +3310,6 @@ html:has(.procurement-planning-workspace) {
 }
 
 @media (max-width: 700px) {
-  html:has(.procurement-planning-workspace) {
-    scroll-snap-type: y proximity;
-  }
-
   .procurement-dashboard-scene {
     padding-bottom: 34px;
   }
@@ -2844,6 +3428,117 @@ html:has(.procurement-planning-workspace) {
   font-size: var(--font-control);
   margin: 5px 0;
   overflow-wrap: anywhere;
+}
+
+.procurement-strategy-review {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin-top: 16px;
+  padding: 16px;
+}
+
+.procurement-strategy-review > header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.procurement-strategy-review h2 {
+  font-size: var(--font-control);
+  margin: 0;
+}
+
+.procurement-strategy-review p {
+  color: var(--muted);
+  font-size: var(--font-caption);
+  line-height: 1.45;
+  margin: 5px 0 0;
+  max-width: 74ch;
+}
+
+.procurement-strategy-status {
+  border-radius: 999px;
+  font-size: var(--font-caption);
+  font-weight: 720;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+
+.procurement-strategy-status.is-feasible {
+  background: var(--pine-soft);
+  color: var(--pine-dark);
+}
+
+.procurement-strategy-status.is-infeasible {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.procurement-strategy-options {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.procurement-strategy-option {
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  cursor: pointer;
+  min-height: 106px;
+  padding: 13px;
+  text-align: left;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.procurement-strategy-option:hover {
+  border-color: #aabfb6;
+}
+
+.procurement-strategy-option:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.procurement-strategy-option > span,
+.procurement-strategy-option > strong,
+.procurement-strategy-option > small {
+  display: block;
+}
+
+.procurement-strategy-option > span {
+  color: var(--muted);
+  font-size: var(--font-caption);
+  font-weight: 700;
+}
+
+.procurement-strategy-option > strong {
+  font-size: var(--font-body);
+  line-height: 1.35;
+  margin-top: 6px;
+}
+
+.procurement-strategy-option > small {
+  color: var(--muted);
+  font-size: var(--font-caption);
+  line-height: 1.35;
+  margin-top: 6px;
+}
+
+.procurement-strategy-option.is-active.is-feasible {
+  background: var(--pine-soft);
+  border-color: var(--pine);
+  box-shadow: inset 4px 0 0 var(--pine);
+}
+
+.procurement-strategy-option.is-active.is-infeasible {
+  background: #fff8ed;
+  border-color: #d6a962;
+  box-shadow: inset 4px 0 0 var(--amber);
 }
 
 .procurement-scene-link {
@@ -3029,6 +3724,43 @@ html:has(.procurement-planning-workspace) {
   border: 0;
   padding: 12px 10px;
   position: static;
+}
+
+.procurement-header-abbr {
+  border-bottom: 1px dashed currentColor;
+  cursor: help;
+  position: relative;
+  text-decoration: none;
+}
+
+.procurement-header-abbr::after {
+  background: var(--ink);
+  border-radius: 7px;
+  color: var(--surface);
+  content: attr(data-tooltip);
+  font-size: var(--font-caption);
+  font-weight: 550;
+  left: 0;
+  line-height: 1.35;
+  opacity: 0;
+  padding: 8px 10px;
+  pointer-events: none;
+  position: absolute;
+  text-transform: none;
+  top: calc(100% + 9px);
+  transition: opacity 140ms ease;
+  white-space: nowrap;
+  z-index: 8;
+}
+
+.procurement-header-abbr:hover::after,
+.procurement-header-abbr:focus-visible::after {
+  opacity: 1;
+}
+
+.procurement-header-abbr:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
 }
 
 .procurement-table-wrap th:nth-child(1),
@@ -3426,6 +4158,7 @@ html:has(.procurement-planning-workspace) {
 
   .procurement-risk-list,
   .procurement-strategy-list,
+  .procurement-strategy-options,
   .procurement-highlights,
   .decision-chart-grid,
   .decision-risk-list,
@@ -4592,22 +5325,30 @@ html:has(.procurement-planning-workspace) {
   gap: 34px;
 }
 
+.toast-stack {
+  bottom: 24px;
+  display: grid;
+  gap: 8px;
+  left: 50%;
+  max-width: min(420px, calc(100vw - 34px));
+  position: fixed;
+  transform: translateX(-50%);
+  width: 100%;
+  z-index: 50;
+}
+
 .toast {
   align-items: center;
   background: var(--surface-strong);
   border: 1px solid var(--line-strong);
   border-radius: 10px;
-  bottom: 24px;
   box-shadow: 0 14px 36px rgba(36, 48, 45, 0.12);
   display: flex;
   font-size: var(--font-caption);
   gap: 9px;
-  left: 50%;
-  max-width: min(420px, calc(100vw - 34px));
+  max-width: 100%;
   padding: 11px 12px;
-  position: fixed;
-  transform: translateX(-50%);
-  z-index: 50;
+  position: relative;
 }
 
 .toast-success > svg {
@@ -4797,6 +5538,74 @@ html:has(.procurement-planning-workspace) {
 }
 
 @media (max-width: 700px) {
+  .inventory-selected-detail {
+    border-radius: 12px;
+    padding: 16px;
+  }
+
+  .recipe-selected-detail {
+    border-radius: 12px;
+    padding: 16px;
+  }
+
+  .inventory-detail-actions {
+    align-items: flex-start;
+    flex-direction: column-reverse;
+  }
+
+  .inventory-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inventory-summary-strip > div:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .inventory-summary-strip > div:nth-child(n + 3) {
+    border-top: 1px solid #cfe0d9;
+  }
+
+  .inventory-data-quality-strip,
+  .inventory-action-picker,
+  .inventory-action-form-grid,
+  .inventory-confirm-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .inventory-data-quality-strip > div + div {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .inventory-confirm-summary > div:nth-last-child(-n + 2) {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .inventory-confirm-summary > div:last-child {
+    border-bottom: 0;
+  }
+
+  .inventory-confirm-layer {
+    align-items: flex-end;
+    padding: 10px;
+  }
+
+  .inventory-confirm-dialog {
+    border-radius: 14px;
+    max-height: calc(100dvh - 20px);
+    overflow: auto;
+    padding: 18px;
+  }
+
+  .inventory-confirm-dialog footer {
+    flex-direction: column-reverse;
+  }
+
+  .inventory-confirm-dialog footer .button {
+    justify-content: center;
+    width: 100%;
+  }
+
   .main-content {
     padding: 20px 16px 56px;
   }

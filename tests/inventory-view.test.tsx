@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ForecastChart } from "../app/components/ForecastChart.tsx";
-import { InventoryView } from "../app/views/InventoryView.tsx";
+import { friendlyLotLabel, InventoryView } from "../app/views/InventoryView.tsx";
 import { TodayView } from "../app/views/TodayView.tsx";
 import { emptyBackendPlan } from "../lib/contract-adapters.ts";
 import { buildEmptyBootstrapData } from "../lib/data.ts";
@@ -99,23 +99,85 @@ function fixture() {
   return { data, plan };
 }
 
-test("InventoryView keeps aggregate inventory drillable to FEFO lots and versions", () => {
+test("InventoryView starts as a scan list and keeps the detail anchor before the table", () => {
   const { data, plan } = fixture();
   const html = renderToStaticMarkup(
     <InventoryView data={data} plan={plan} onOpenPlan={() => undefined} />,
   );
+  const source = readFileSync(
+    new URL("../app/views/InventoryView.tsx", import.meta.url),
+    "utf8",
+  );
 
   assert.match(html, /Tình trạng lô/);
-  assert.match(html, /Lô Bột cacao theo thứ tự FEFO/);
-  assert.ok(html.indexOf("BATCH-EXPIRED") < html.indexOf("BATCH-EXPIRING"));
-  assert.ok(html.indexOf("BATCH-EXPIRING") < html.indexOf("BATCH-HEALTHY"));
-  assert.match(html, />v3</);
-  assert.match(html, />v5</);
-  assert.match(html, />v7</);
-  assert.match(html, /Khả dụng/);
-  assert.match(html, /Gần hạn/);
-  assert.match(html, /Hết hạn/);
-  assert.match(html, /BATCH-HEALTHY/);
+  assert.match(html, /Chọn một nguyên liệu để xem tồn kho, lô và lịch sử sử dụng/);
+  assert.doesNotMatch(html, /Lô Bột cacao theo thứ tự FEFO/);
+  assert.ok(
+    source.indexOf('className="inventory-selected-detail"') <
+      source.indexOf('className="table-wrap inventory-table"'),
+  );
+  assert.match(source, /detailAnchorRef\.current/);
+  assert.match(source, /requestAnimationFrame/);
+  assert.match(source, /--inventory-detail-scroll-gap/);
+  assert.match(source, /prefers-reduced-motion: reduce/);
+  assert.match(source, /rowRefs\.current\.get\(selectedIngredientId\)/);
+});
+
+test("FEFO uses a friendly batch label and never promotes a raw lot UUID", () => {
+  const rawId = "438619bf-168c-4bd9-8c2e-e41bba4e889f";
+  const baseLot = lot(rawId, "2026-08-03", "healthy", 1);
+  assert.equal(friendlyLotLabel(baseLot), "Lô nhận ngày 01/07/2026");
+  assert.equal(
+    friendlyLotLabel({ ...baseLot, batchId: "BATCH-03-08" }),
+    "BATCH-03-08",
+  );
+});
+
+test("inventory detail preserves unavailable forecast values instead of converting null to zero", () => {
+  const source = readFileSync(
+    new URL("../app/views/InventoryView.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /function quantityOrUnavailable/);
+  assert.match(source, /Chưa có dự báo đủ điều kiện để hiển thị nhu cầu 7 ngày/);
+  assert.doesNotMatch(source, /point\.p50 \?\? 0/);
+});
+
+test("selected inventory detail has a focused operational hierarchy", () => {
+  const source = readFileSync(
+    new URL("../app/views/InventoryView.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /Đang xem nguyên liệu/);
+  assert.match(source, /inventory-focus-header/);
+  assert.match(source, /inventory-summary-strip/);
+  assert.match(source, /Chi tiết tồn kho theo FEFO/);
+  assert.match(source, /Các lô được ưu tiên sử dụng theo hạn dùng gần nhất/);
+  assert.match(source, /Toàn bộ .* hiện không còn khả dụng do đã hết hạn/);
+  assert.match(source, /inventory-list-divider/);
+  assert.match(source, /Tiếp tục chọn nguyên liệu/);
+  assert.match(source, /className=\{lot\.status === "expired" \? "is-expired"/);
+});
+
+test("inventory data tab gates each write behind an action choice and confirmation", () => {
+  const source = readFileSync(
+    new URL("../app/views/InventoryView.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /Tình trạng dữ liệu/);
+  assert.match(source, /Điều kiện nhập hàng · Xem/);
+  assert.match(source, /Bạn muốn làm gì\?/);
+  assert.match(source, /Kiểm kho thực tế/);
+  assert.match(source, /Điều chỉnh sai lệch/);
+  assert.match(source, /Xem lại thay đổi/);
+  assert.match(source, /Xem lại điều chỉnh/);
+  assert.match(source, /Xác nhận ghi kiểm kho/);
+  assert.match(source, /Xác nhận ghi điều chỉnh/);
+  assert.match(source, /expectedVersion: selectedLot\.version/);
+  assert.match(source, /Điều chỉnh này sẽ làm tồn kho âm/);
+  assert.match(source, /VERSION_CONFLICT/);
 });
 
 test("TodayView renders real lot alerts and the backend planning state", () => {

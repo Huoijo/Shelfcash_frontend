@@ -63,9 +63,48 @@ test("renders the executive overview and procurement workspace as distinct scrol
   assert.doesNotMatch(markup, /<aside/);
 });
 
-test("uses native scene snapping and a sticky workspace header without a nested vertical table scroll", () => {
+test("shows infeasible backend candidates with their returned service level", () => {
+  const infeasibleDecision = {
+    ...decision,
+    status: "completed_with_no_feasible_recommendation",
+    recommended_strategy: null,
+    recommended_plan: { valid: false, items: [] },
+    strategies: {
+      balanced: {
+        is_feasible: false,
+        items: [],
+        critic: {
+          findings: [
+            {
+              code: "EXACT_SIMULATION_SAFETY_FLOOR",
+              evidence: { observed: 0.809, required: 0.9 },
+            },
+          ],
+        },
+      },
+    },
+  } as unknown as DecisionPackage;
+  const markup = renderToStaticMarkup(
+    <ProcurementPlanningWorkspace
+      busy={false}
+      data={data}
+      decision={infeasibleDecision}
+      onRunAgain={() => undefined}
+      plan={{ status: "completed", recommendations: [], scenarios: [], enrichedInventory: [] } as unknown as PlanResponse}
+    />,
+  );
+
+  assert.match(markup, /0\/1 phương án đáp ứng toàn bộ/);
+  assert.match(markup, /Phương án đã đánh giá/);
+  assert.match(markup, /Đáp ứng 80,9% · yêu cầu 90%/);
+  assert.match(markup, /Đề xuất phương án/);
+  assert.doesNotMatch(markup, /Xem đơn nhập nháp/);
+});
+
+test("keeps a sticky workspace header without forcing the page to snap while users scroll", () => {
   const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
-  assert.match(styles, /scroll-snap-type: y mandatory/);
+  assert.match(styles, /html:has\(.procurement-planning-workspace\) \{[\s\S]*scroll-snap-type: none/);
+  assert.doesNotMatch(styles, /scroll-snap-type: y mandatory/);
   assert.match(styles, /\.procurement-workspace-header \{[\s\S]*position: sticky/);
   assert.match(styles, /\.procurement-table-wrap \{[\s\S]*overflow-x: auto;[\s\S]*overflow-y: visible/);
   assert.match(styles, /prefers-reduced-motion: reduce/);
@@ -73,11 +112,14 @@ test("uses native scene snapping and a sticky workspace header without a nested 
 
 test("keeps table labels in the shared table grid and toggles the inspector from the selected row", () => {
   const source = readFileSync(new URL("../app/components/ProcurementPlanningWorkspace.tsx", import.meta.url), "utf8");
-  assert.match(source, /<thead><tr><th scope="col">Nguyên liệu<\/th>/);
+  assert.match(source, /<th scope="col">Nguyên liệu<\/th>/);
+  assert.match(source, /NCC &amp; TG/);
+  assert.match(source, /NCC: Nhà cung cấp · TG: Thời gian giao hàng/);
   assert.doesNotMatch(source, /procurement-table-columns/);
   assert.match(source, /current === ingredientId \? "" : ingredientId/);
   const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(styles, /\.procurement-table-wrap th \{[\s\S]*position: static/);
+  assert.match(styles, /\.procurement-header-abbr:hover::after/);
   assert.match(styles, /\.procurement-master-detail:not\(\.has-selection\)[\s\S]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(styles, /\.procurement-master-detail:not\(\.has-selection\) \.procurement-inspector[\s\S]*display: none/);
 });

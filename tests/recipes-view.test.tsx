@@ -53,23 +53,13 @@ test("RecipesView shows ID-linked counts, backend metadata and ingredient option
     assert.ok(productRow);
     assert.match(productRow, new RegExp(`${count} nguyên liệu`));
   }
-  assert.match(html, /01\/06\/2026/);
-  assert.match(html, />v1</);
-
-  const ingredientSelect = html.match(
-    /<select[^>]*aria-label="Nguyên liệu dòng 1"[^>]*>(.*?)<\/select>/s,
-  );
-  assert.ok(ingredientSelect);
-  assert.equal(ingredientSelect[1]?.match(/<option\b/g)?.length, 10);
-  for (const ingredient of bootstrapRecipesComponentsFixture.ingredients ?? []) {
-    assert.match(html, new RegExp(String(ingredient.ingredient)));
-  }
+  assert.match(html, /Chọn một món để xem và chỉnh công thức/);
+  assert.doesNotMatch(html, /aria-label="Nguyên liệu dòng 1"/);
 });
 
 test("RecipesView safely shows empty recipes without inventing metadata", () => {
   const html = renderRecipes({ recipes: undefined });
   assert.match(html, /0 nguyên liệu/);
-  assert.match(html, />Chưa có</);
   assert.doesNotMatch(html, /undefined\/undefined\/undefined/);
 });
 
@@ -98,22 +88,15 @@ test("RecipesView does not crash when the bootstrap payload is malformed", () =>
 });
 
 test("RecipesView renders effective date, yield and process-loss controls from backend detail", () => {
-  const html = renderRecipes({
-    recipes: bootstrapRecipesComponentsFixture.recipes,
-    recipeYieldQuantity: 2,
-    recipeProcessLossRate: 0.05,
-  });
+  const source = readFileSync(
+    new URL("../app/views/RecipesView.tsx", import.meta.url),
+    "utf8",
+  );
 
-  assert.match(html, /aria-label="Ngày hiệu lực công thức"/);
-  assert.match(
-    html,
-    /aria-label="Sản lượng công thức"[^>]*value="2"/,
-  );
-  assert.match(
-    html,
-    /aria-label="Tỷ lệ hao hụt công thức"[^>]*value="0\.05"/,
-  );
-  assert.doesNotMatch(html, /Phiên bản trước/);
+  assert.match(source, /aria-label="Ngày hiệu lực công thức"/);
+  assert.match(source, /aria-label="Sản lượng công thức"/);
+  assert.match(source, /aria-label="Tỷ lệ hao hụt công thức"/);
+  assert.doesNotMatch(source, /Phiên bản trước/);
 });
 
 test("RecipesView passes the canonical recipe metadata and starts without a recipe at version zero", () => {
@@ -129,7 +112,7 @@ test("RecipesView passes the canonical recipe metadata and starts without a reci
   assert.doesNotMatch(source, /productVersions/);
 });
 
-test("combo renders component editing and never enters the direct recipe path", () => {
+test("RecipesView excludes combo products and only opens direct recipes for single items", () => {
   const combo = {
     product_id: "COMBO_001",
     product: "Combo buổi sáng",
@@ -171,24 +154,45 @@ test("combo renders component editing and never enters the direct recipe path", 
     />,
   );
 
-  assert.match(html, /Thành phần Combo/);
-  assert.match(html, /Combo không có công thức trực tiếp/);
-  assert.match(html, /Sản phẩm 1 · SP-001/);
-  assert.match(html, /Lưu thành phần Combo/);
+  assert.doesNotMatch(html, /Combo buổi sáng/);
+  assert.doesNotMatch(html, /Thành phần Combo/);
+  assert.doesNotMatch(html, /Lưu thành phần Combo/);
+  assert.match(html, /Sản phẩm 1/);
   assert.doesNotMatch(html, /Lưu công thức/);
   assert.equal(canEditDirectRecipe({ itemType: "combo" }), false);
   assert.equal(canEditDirectRecipe({ itemType: "single" }), true);
   assert.equal(canEditDirectRecipe({}), false);
 
   const source = readFileSync(
+    new URL("../app/views/RecipesView.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /data\.products\.filter\(\(item\) => item\.itemType === "single"\)/);
+  assert.match(source, /Lưu công thức/);
+
+  const appSource = readFileSync(
     new URL("../app/ShelfCashApp.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(source, /!canEditDirectRecipe\(product\)/);
-  assert.match(source, /caught\.code === "RECIPE_NOT_ALLOWED_FOR_COMBO"/);
-  assert.match(source, /await refreshMenuData\(\)/);
-  assert.match(source, /version: currentCombo\.version/);
-  assert.match(source, /components,\n\s*idempotencyKey,/);
-  assert.match(source, /comboComponentMutationKeys\.current\.get\(fingerprint\)/);
-  assert.match(source, /caught\.code === "VERSION_CONFLICT"/);
+  assert.match(appSource, /!canEditDirectRecipe\(product\)/);
+  assert.match(appSource, /caught\.code === "RECIPE_NOT_ALLOWED_FOR_COMBO"/);
+});
+
+test("RecipesView starts as a scan list and scrolls the selected recipe into focus", () => {
+  const source = readFileSync(
+    new URL("../app/views/RecipesView.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /useState\(""\)/);
+  assert.match(source, /recipe-selected-detail/);
+  assert.match(source, /detailAnchorRef\.current/);
+  assert.match(source, /requestAnimationFrame/);
+  assert.match(source, /--recipe-detail-scroll-gap/);
+  assert.match(source, /Quay lại danh sách món/);
+  assert.match(source, /Tiếp tục chọn món/);
+  assert.ok(
+    source.indexOf('className="recipe-selected-detail"') <
+      source.indexOf('className="table-wrap product-table"'),
+  );
 });

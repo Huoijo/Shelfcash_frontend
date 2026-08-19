@@ -55,7 +55,7 @@ test("failed imports expose only a retained-file new-import flow", () => {
   );
   assert.match(source, /phase === "failed"[\s\S]*Tạo lần nhập mới/);
   assert.match(source, /onClick=\{resetImport\}/);
-  assert.match(source, /if \(!beginAction\("process"\)\) return/);
+  assert.match(source, /const action = beginAction\("process"\);[\s\S]*if \(!action\) return/);
   assert.match(source, /selectedValidation\?\.unknownSheetType/);
   assert.doesNotMatch(
     source,

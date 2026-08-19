@@ -81,7 +81,7 @@ function recipeDefaults(product: Product | undefined, today: string) {
   };
 }
 
-function ComboComponentsEditor({
+export function ComboComponentsEditor({
   combo,
   items,
   onSave,
@@ -279,10 +279,6 @@ export function RecipesView({
   data,
   onLoadDetails = defaultLoadDetails,
   onSave,
-  onSaveComponents = async () => ({
-    saved: false,
-    message: "Chưa thể lưu thành phần Combo.",
-  }),
   onOpenPlan,
 }: {
   data: BootstrapData;
@@ -300,12 +296,11 @@ export function RecipesView({
   onOpenPlan: () => void;
 }) {
   const products = useMemo(
-    () => data.products,
+    () => data.products.filter((item) => item.itemType === "single"),
     [data.products],
   );
-  const [selectedProductKey, setSelectedProductKey] = useState(
-    products[0] ? productIdentityKey(products[0]) : "",
-  );
+  const [selectedProductKey, setSelectedProductKey] = useState("");
+  const [selectionScrollRequest, setSelectionScrollRequest] = useState(0);
   const selectedProduct = products.find(
     (item) => productIdentityKey(item) === selectedProductKey,
   );
@@ -317,10 +312,6 @@ export function RecipesView({
     productIdentityKey(detailedProduct) === productIdentityKey(selectedProduct)
       ? detailedProduct
       : selectedProduct;
-  const combo =
-    product?.itemType === "combo"
-      ? data.menu.find((item) => item.productId === product.productId)
-      : undefined;
   const currentRows = useMemo(
     () => recipeLinesForProduct(data.recipes, product),
     [data.recipes, product],
@@ -341,6 +332,9 @@ export function RecipesView({
   const [confirmed, setConfirmed] = useState(false);
   const [saved, setSaved] = useState("");
   const [saving, setSaving] = useState(false);
+  const detailAnchorRef = useRef<HTMLElement>(null);
+  const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const handledScrollRequest = useRef(0);
   const ingredientOptions = useMemo(
     () => mergeRecipeIngredients(data.ingredients ?? [], data.inventory),
     [data.ingredients, data.inventory],
@@ -365,9 +359,7 @@ export function RecipesView({
     ) {
       return;
     }
-    setSelectedProductKey(
-      products[0] ? productIdentityKey(products[0]) : "",
-    );
+    setSelectedProductKey("");
   }, [products, selectedProductKey]);
 
   useEffect(() => {
@@ -429,111 +421,74 @@ export function RecipesView({
     setSaved("");
   }
 
+  function scrollToElement(element: HTMLElement | null, behavior: ScrollBehavior) {
+    if (!element) return;
+    const header = document.querySelector<HTMLElement>(".top-header");
+    const topOffset = header?.getBoundingClientRect().height ?? 0;
+    const safeGap = Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue(
+        "--recipe-detail-scroll-gap",
+      ),
+    );
+    element.style.scrollMarginTop = `${topOffset + safeGap}px`;
+    element.scrollIntoView({ behavior, block: "start" });
+  }
+
+  function selectProduct(productKey: string) {
+    setSelectedProductKey(productKey);
+    setSelectionScrollRequest((current) => current + 1);
+  }
+
+  function returnToProductList() {
+    const row = rowRefs.current.get(selectedProductKey) ?? null;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    scrollToElement(row, reducedMotion ? "auto" : "smooth");
+    row?.focus({ preventScroll: true });
+  }
+
+  useEffect(() => {
+    if (
+      !product ||
+      selectionScrollRequest === 0 ||
+      handledScrollRequest.current === selectionScrollRequest
+    ) {
+      return;
+    }
+    handledScrollRequest.current = selectionScrollRequest;
+    const frame = window.requestAnimationFrame(() => {
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      scrollToElement(detailAnchorRef.current, reducedMotion ? "auto" : "smooth");
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [product, selectionScrollRequest]);
+
   return (
     <>
       <PageHeader title="Công thức" />
 
-      <div className="table-wrap product-table">
-        <table>
-          <thead>
-            <tr>
-              <th>Sản phẩm</th>
-              <th>Loại</th>
-              <th>Giá bán</th>
-              <th>Số nguyên liệu</th>
-              <th>Trạng thái</th>
-            </tr>
-          </thead>
-          <tbody>
-            {products.map((item) => {
-              const itemKey = productIdentityKey(item);
-              const count = recipeLinesForProduct(
-                data.recipes,
-                item,
-              ).length;
-              const componentCount = data.menu.find(
-                (menuItem) => menuItem.productId === item.productId,
-              )?.components.length ?? 0;
-              return (
-                <tr
-                  key={itemKey}
-                  className={
-                    itemKey === selectedProductKey ? "selected" : ""
-                  }
-                  onClick={() => setSelectedProductKey(itemKey)}
-                >
-                  <td>
-                    <strong>{item.product}</strong>
-                    <small>{item.sku}</small>
-                  </td>
-                  <td>
-                    {item.itemType === "combo"
-                      ? "Combo"
-                      : item.itemType === "single"
-                        ? "Món lẻ"
-                        : "Đang xác định"}
-                  </td>
-                  <td>{formatVnd(item.price)}</td>
-                  <td>
-                    {item.itemType === "combo"
-                      ? `${componentCount} món thành phần`
-                      : item.itemType === "single"
-                        ? `${count} nguyên liệu`
-                        : "Chưa xác định"}
-                  </td>
-                  <td>
-                    <StatusPill
-                      status={
-                        item.itemType === "combo" || item.recipeStatus === "Hoàn chỉnh"
-                          ? "healthy"
-                          : "missing"
-                      }
-                      label={
-                        item.itemType === "combo"
-                          ? "Thành phần Combo"
-                          : item.itemType === "single"
-                            ? item.recipeStatus
-                            : "Đang xác định loại món"
-                      }
-                    />
-                  </td>
-                </tr>
-              );
-            })}
-            {!products.length ? (
-              <tr>
-                <td className="table-empty" colSpan={5}>
-                  Chưa có sản phẩm để thiết lập công thức hoặc thành phần Combo.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-
-      {product?.itemType === "combo" ? (
-        combo ? (
-          <ComboComponentsEditor
-            combo={combo}
-            items={data.menu}
-            onSave={onSaveComponents}
-            onOpenSingle={(productId) => {
-              const single = products.find(
-                (item) => item.productId === productId && item.itemType === "single",
-              );
-              if (single) setSelectedProductKey(productIdentityKey(single));
-            }}
-          />
-        ) : (
-          <Notice tone="warning">
-            Chưa tải được danh sách thành phần của Combo này. Hãy làm mới Menu rồi thử lại.
-          </Notice>
-        )
-      ) : product?.itemType === "single" ? (
-        <>
+      {product?.itemType === "single" ? (
+        <section
+          aria-labelledby="selected-recipe-title"
+          className="recipe-selected-detail"
+          ref={detailAnchorRef}
+          style={{
+            animationName:
+              selectionScrollRequest % 2 === 0
+                ? "recipe-detail-refresh"
+                : "recipe-detail-enter",
+          }}
+        >
+          <header className="recipe-focus-header">
+            <Button onClick={returnToProductList} variant="quiet">
+              Quay lại danh sách món
+            </Button>
+            <span className="eyebrow">Đang xem công thức</span>
+            <h2 id="selected-recipe-title">{product.product}</h2>
+            <p>{product.sku} · {product.recipeStatus}</p>
+          </header>
           {detailsError ? <Notice tone="error">{detailsError}</Notice> : null}
           <SectionHeading
-            title={`Thiết lập công thức · ${product.product}`}
+            title="Thiết lập công thức"
           />
           <SummaryGrid columns={4}>
             <StatCard
@@ -828,12 +783,79 @@ export function RecipesView({
             </div>
           </div>
 
-        </>
-      ) : product ? (
-        <Notice tone="info">
-          Đang xác định loại sản phẩm. Chưa tải công thức hoặc thành phần cho đến khi Menu trả về `item_type`.
-        </Notice>
-      ) : null}
+        </section>
+      ) : (
+        <p className="quiet-help recipe-selection-helper">
+          Chọn một món để xem và chỉnh công thức.
+        </p>
+      )}
+
+      <div className="recipe-list-divider" />
+      <SectionHeading
+        title="Tiếp tục chọn món"
+        subtitle="Danh sách món lẻ cần thiết lập công thức."
+      />
+      <div className="table-wrap product-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Sản phẩm</th>
+              <th>Loại</th>
+              <th>Giá bán</th>
+              <th>Số nguyên liệu</th>
+              <th>Trạng thái</th>
+            </tr>
+          </thead>
+          <tbody>
+            {products.map((item) => {
+              const itemKey = productIdentityKey(item);
+              const count = recipeLinesForProduct(data.recipes, item).length;
+              const selected = itemKey === selectedProductKey;
+              return (
+                <tr
+                  key={itemKey}
+                  ref={(node) => {
+                    if (node) rowRefs.current.set(itemKey, node);
+                    else rowRefs.current.delete(itemKey);
+                  }}
+                  className={selected ? "selected" : ""}
+                  data-selected={selected || undefined}
+                  onClick={() => selectProduct(itemKey)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      selectProduct(itemKey);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <td>
+                    <strong>{item.product}</strong>
+                    <small>{item.sku}</small>
+                  </td>
+                  <td>Món lẻ</td>
+                  <td>{formatVnd(item.price)}</td>
+                  <td>{count} nguyên liệu</td>
+                  <td>
+                    <StatusPill
+                      status={item.recipeStatus === "Hoàn chỉnh" ? "healthy" : "missing"}
+                      label={item.recipeStatus}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+            {!products.length ? (
+              <tr>
+                <td className="table-empty" colSpan={5}>
+                  Chưa có món lẻ để thiết lập công thức.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
