@@ -1900,6 +1900,125 @@ tbody tr.selected {
   }
 }
 
+/* Decision Brief is deliberately separate from the simulation diagnostics. */
+.decision-brief-workspace {
+  display: grid;
+  gap: 24px;
+}
+
+.decision-brief-summary,
+.decision-brief-procurement,
+.decision-brief-demand,
+.decision-brief-risk,
+.decision-brief-critic,
+.decision-brief-explanation,
+.decision-brief-no-feasible,
+.decision-brief-unavailable {
+  border: 1px solid var(--line, #d9ded8);
+  border-radius: 18px;
+  background: var(--surface, #fff);
+  padding: 24px;
+}
+
+.decision-brief-summary { border-color: var(--accent, #147a62); }
+.decision-brief-summary-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.decision-brief-summary-header h1 { margin: 4px 0 0; }
+.decision-brief-metrics,
+.decision-brief-demand > div {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.decision-brief-metrics article,
+.decision-brief-demand article {
+  border-radius: 12px;
+  background: var(--surface-subtle, #f5f8f5);
+  padding: 14px;
+}
+
+.decision-brief-metrics span,
+.decision-brief-procurement-card dt,
+.decision-brief-demand dt { display: block; color: var(--muted, #607066); font-size: .84rem; }
+.decision-brief-metrics strong { display: block; margin-top: 5px; font-size: 1.08rem; }
+.decision-brief-procurement > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.decision-brief-procurement-card { border: 1px solid var(--line, #d9ded8); border-radius: 14px; padding: 18px; }
+.decision-brief-procurement-card header { display: flex; justify-content: space-between; gap: 16px; }
+.decision-brief-procurement-card h3 { margin: 0; }
+.decision-brief-procurement-card header strong { display: block; font-size: 1.2rem; margin-top: 6px; }
+.decision-brief-procurement-card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 18px 0; }
+.decision-brief-procurement-card dd { margin: 3px 0 0; font-weight: 600; }
+.decision-brief-reasons > span { font-size: .84rem; color: var(--muted, #607066); }
+.decision-brief-reasons > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.decision-brief-reasons small { padding: 4px 8px; border-radius: 999px; background: #e7f4ef; }
+.decision-brief-demand article dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0 0; }
+.decision-brief-demand dd { margin: 3px 0 0; }
+.decision-brief-demand .prominent { font-weight: 700; color: var(--accent, #147a62); }
+.decision-brief-no-feasible { border-color: #d99e39; background: #fff9ed; }
+.decision-brief-explanation > header { display: flex; gap: 10px; align-items: flex-start; }
+.decision-brief-explanation h2 { margin: 0; }
+.decision-brief-explanation header p { margin: 4px 0 0; }
+.decision-brief-quick-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.decision-brief-explanation form { display: flex; gap: 8px; }
+.decision-brief-explanation input { flex: 1; min-width: 0; }
+.decision-brief-answer { margin-top: 16px; border-left: 3px solid var(--accent, #147a62); padding: 12px 16px; background: var(--surface-subtle, #f5f8f5); }
+.decision-brief-answer p { white-space: pre-wrap; }
+.decision-brief-ingredients > header p { margin: 5px 0 18px; color: var(--muted, #607066); }
+.decision-brief-ingredient-layout { display: grid; grid-template-columns: minmax(230px, .75fr) minmax(0, 1.5fr); gap: 18px; }
+.decision-brief-ingredient-list { display: grid; align-content: start; gap: 8px; }
+.decision-brief-ingredient-list button { align-items: center; background: var(--surface-subtle, #f5f8f5); border: 1px solid var(--line, #d9ded8); border-radius: 10px; cursor: pointer; display: flex; gap: 10px; justify-content: space-between; padding: 12px; text-align: left; }
+.decision-brief-ingredient-list button:hover, .decision-brief-ingredient-list button.active { background: #e7f4ef; border-color: var(--accent, #147a62); }
+.decision-brief-ingredient-list strong, .decision-brief-ingredient-list small { display: block; }
+.decision-brief-ingredient-list small { color: var(--muted, #607066); margin-top: 3px; }
+.decision-brief-ingredient-list b { color: var(--accent, #147a62); white-space: nowrap; }
+.decision-brief-ingredient-detail { background: var(--surface-subtle, #f5f8f5); border: 1px solid var(--line, #d9ded8); border-radius: 14px; padding: 18px; }
+.decision-brief-ingredient-detail > header { align-items: flex-start; display: flex; gap: 14px; justify-content: space-between; }
+.decision-brief-ingredient-detail h3 { margin: 4px 0 0; }
+.decision-brief-ingredient-detail > header > strong { color: var(--accent, #147a62); }
+.decision-demand-chart { display: grid; gap: 12px; margin: 22px 0; }
+.decision-demand-chart-row { align-items: center; display: grid; gap: 10px; grid-template-columns: 130px minmax(80px, 1fr) 100px; }
+.decision-demand-chart-row > span { color: var(--muted, #607066); font-size: .86rem; }
+.decision-demand-chart-row > strong { text-align: right; }
+.decision-demand-chart-track { background: #dfe9e3; border-radius: 999px; height: 10px; overflow: hidden; }
+.decision-demand-chart-track i { border-radius: inherit; display: block; height: 100%; }
+.decision-demand-chart-track .p25 { background: #a2b7aa; }
+.decision-demand-chart-track .p50 { background: var(--accent, #147a62); }
+.decision-demand-chart-track .p75 { background: #d19a43; }
+.decision-what-if > header h2 { margin: 0; }
+.decision-what-if > header p { margin: 4px 0 16px; }
+.decision-what-if > form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; align-items: end; gap: 10px; }
+.decision-what-if label span { display: block; color: var(--muted, #607066); font-size: .84rem; margin-bottom: 4px; }
+.decision-what-if input, .decision-what-if select { box-sizing: border-box; width: 100%; }
+.decision-what-if-result { margin-top: 18px; }
+.decision-what-if-result > dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.decision-what-if-result dl > div { background: var(--surface-subtle, #f5f8f5); border-radius: 10px; padding: 10px; }
+.decision-what-if-result dt { color: var(--muted, #607066); font-size: .82rem; }
+.decision-what-if-result dd { font-weight: 700; margin: 4px 0 0; }
+.decision-what-if-plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.decision-what-if-plans > section { display: grid; align-content: start; gap: 10px; }
+.decision-what-if-plans h3 { margin: 0; }
+
+@media (max-width: 760px) {
+  .decision-brief-metrics,
+  .decision-brief-demand > div,
+  .decision-what-if > form,
+  .decision-brief-ingredient-layout { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 460px) {
+  .decision-brief-metrics,
+  .decision-brief-demand > div,
+  .decision-brief-demand article dl,
+  .decision-brief-procurement-card dl,
+  .decision-what-if-result > dl,
+  .decision-what-if-plans,
+  .decision-brief-ingredient-layout { grid-template-columns: 1fr; }
+  .decision-demand-chart-row { grid-template-columns: 1fr; gap: 5px; }
+  .decision-demand-chart-row > strong { text-align: left; }
+  .decision-brief-explanation form { flex-direction: column; }
+}
+
 td > strong,
 td > small {
   display: block;
@@ -3539,6 +3658,157 @@ html:has(.procurement-planning-workspace) {
   background: #fff8ed;
   border-color: #d6a962;
   box-shadow: inset 4px 0 0 var(--amber);
+}
+
+.procurement-plan-focus {
+  align-items: end;
+  background: #eef6f1;
+  border: 1px solid #b9d5c5;
+  border-radius: 12px;
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding: 18px;
+}
+
+.procurement-plan-focus.is-simulated {
+  background: #fff8ed;
+  border-color: #e5c78d;
+}
+
+.procurement-plan-focus h2,
+.procurement-plan-line-detail h3 {
+  font-size: var(--font-section-title);
+  margin: 4px 0 0;
+}
+
+.procurement-plan-focus-status {
+  font-weight: 720;
+  margin: 5px 0 0;
+}
+
+.procurement-plan-focus-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 15px;
+  margin-top: 13px;
+}
+
+.procurement-plan-focus-metrics span {
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.procurement-plan-lines {
+  animation: procurement-detail-crossfade 200ms ease both;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.procurement-plan-lines .procurement-section-heading {
+  margin-bottom: 14px;
+}
+
+.procurement-plan-lines .procurement-section-heading p,
+.procurement-context .procurement-workspace-header p {
+  color: var(--muted);
+  font-size: var(--font-caption);
+  margin: 5px 0 0;
+}
+
+.procurement-plan-table-wrap {
+  overflow-x: auto;
+}
+
+.procurement-plan-table-wrap table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--font-caption);
+  min-width: 940px;
+  width: 100%;
+}
+
+.procurement-plan-table-wrap th {
+  background: #e6f1e9;
+  color: var(--muted);
+  font-size: 0.71rem;
+  letter-spacing: .04em;
+  padding: 10px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.procurement-plan-table-wrap td {
+  border-bottom: 1px solid var(--line);
+  padding: 12px 10px;
+  vertical-align: middle;
+}
+
+.procurement-plan-table-wrap tbody tr { cursor: pointer; }
+.procurement-plan-table-wrap tbody tr:hover { background: #f6faf7; }
+.procurement-plan-table-wrap tbody tr.selected { background: #edf6f0; outline: 2px solid var(--pine); outline-offset: -2px; }
+.procurement-plan-table-wrap strong,
+.procurement-plan-table-wrap small { display: block; }
+.procurement-plan-table-wrap small { color: var(--muted); margin-top: 3px; }
+
+.procurement-plan-state {
+  border-radius: 999px;
+  display: inline-block;
+  font-weight: 720;
+  padding: 4px 7px;
+}
+.procurement-plan-state.is-feasible { background: var(--pine-soft); color: var(--pine-dark); }
+.procurement-plan-state.is-simulated { background: var(--amber-soft); color: var(--amber); }
+
+.procurement-plan-line-detail {
+  animation: procurement-detail-crossfade 200ms ease both;
+  background: #f7faf8;
+  border: 1px solid #c6dcd0;
+  border-radius: 10px;
+  margin-top: 12px;
+  padding: 14px;
+}
+
+.procurement-plan-line-detail dl {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 14px 0 0;
+}
+.procurement-plan-line-detail dl > div { background: var(--surface); padding: 9px; }
+.procurement-plan-line-detail dt { color: var(--muted); font-size: var(--font-caption); }
+.procurement-plan-line-detail dd { font-size: var(--font-control); font-weight: 700; margin: 4px 0 0; }
+
+.procurement-context { margin-top: 20px; }
+.procurement-context .procurement-workspace-header { position: static; }
+.procurement-context .procurement-table-toolbar { margin-top: 12px; }
+.procurement-context .procurement-table-wrap table { min-width: 760px; }
+.procurement-context .procurement-table-wrap th:nth-child(1),
+.procurement-context .procurement-table-wrap td:nth-child(1) { width: 24%; }
+.procurement-context .procurement-table-wrap th:nth-child(2),
+.procurement-context .procurement-table-wrap td:nth-child(2),
+.procurement-context .procurement-table-wrap th:nth-child(3),
+.procurement-context .procurement-table-wrap td:nth-child(3) { width: 16%; }
+.procurement-context .procurement-table-wrap th:nth-child(4),
+.procurement-context .procurement-table-wrap td:nth-child(4) { width: 22%; }
+.procurement-context .procurement-table-wrap th:nth-child(5),
+.procurement-context .procurement-table-wrap td:nth-child(5) { width: 22%; }
+.procurement-context .procurement-table-wrap td:nth-child(2),
+.procurement-context .procurement-table-wrap td:nth-child(3) { background-color: #e5f5f8; }
+.procurement-context .procurement-table-wrap td:nth-child(4) { background-color: #fff0dc; }
+.procurement-context .procurement-table-wrap td:nth-child(5) { background-color: var(--surface); box-shadow: none; }
+
+@keyframes procurement-detail-crossfade {
+  from { opacity: .38; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .procurement-plan-lines,
+  .procurement-plan-line-detail { animation: none; }
 }
 
 .procurement-scene-link {

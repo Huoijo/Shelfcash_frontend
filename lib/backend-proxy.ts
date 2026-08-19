@@ -128,6 +128,10 @@ const routeRules: RouteRule[] = [
     methods: methods("GET"),
   },
   {
+    pattern: /^\/api\/v1\/decision-runs\/[^/]+\/brief$/,
+    methods: methods("GET"),
+  },
+  {
     pattern: /^\/api\/v1\/decision-runs\/[^/]+\/(?:explanation|what-if)$/,
     methods: methods("POST"),
   },

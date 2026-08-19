@@ -51,11 +51,12 @@ test("renders the executive overview and procurement workspace as distinct scrol
   assert.match(markup, /Nguyên liệu/);
   assert.match(markup, /procurement-dashboard-scene/);
   assert.match(markup, /procurement-workspace-scene/);
-  assert.match(markup, /Xem danh sách nguyên liệu/);
-  assert.match(markup, /Danh sách nguyên liệu/);
+  assert.match(markup, /Xem dòng nhập đề xuất/);
+  assert.match(markup, /Dòng nhập đề xuất/);
+  assert.match(markup, /Bối cảnh nguyên liệu/);
   assert.match(markup, /Sữa tươi thanh trùng/);
-  assert.match(markup, /Tồn hiện có/);
-  assert.match(markup, /Cần xử lý/);
+  assert.match(markup, /Xem toàn bộ nguyên liệu · 1/);
+  assert.match(markup, /Nguyên liệu cần xử lý/);
   assert.match(markup, /Nhà cung cấp/);
   assert.match(markup, /Xem đơn nhập nháp/);
   assert.match(markup, /aria-label="Cách xem chi tiết nguyên liệu"/);
@@ -97,7 +98,8 @@ test("shows infeasible backend candidates with their returned service level", ()
   assert.match(markup, /0\/1 phương án đáp ứng toàn bộ/);
   assert.match(markup, /Phương án đã đánh giá/);
   assert.match(markup, /Đáp ứng 80,9% · yêu cầu 90%/);
-  assert.match(markup, /Đề xuất phương án/);
+  assert.match(markup, /Dòng nhập đề xuất/);
+  assert.doesNotMatch(markup, /Backend chưa trả mức đáp ứng/);
   assert.doesNotMatch(markup, /Xem đơn nhập nháp/);
 });
 
@@ -113,8 +115,9 @@ test("keeps a sticky workspace header without forcing the page to snap while use
 test("keeps table labels in the shared table grid and toggles the inspector from the selected row", () => {
   const source = readFileSync(new URL("../app/components/ProcurementPlanningWorkspace.tsx", import.meta.url), "utf8");
   assert.match(source, /<th scope="col">Nguyên liệu<\/th>/);
-  assert.match(source, /NCC &amp; TG/);
-  assert.match(source, /NCC: Nhà cung cấp · TG: Thời gian giao hàng/);
+  assert.match(source, /Dòng nhập đề xuất/);
+  assert.match(source, /Bối cảnh nguyên liệu/);
+  assert.match(source, /selectedStrategyKey/);
   assert.doesNotMatch(source, /procurement-table-columns/);
   assert.match(source, /current === ingredientId \? "" : ingredientId/);
   const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");

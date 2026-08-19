@@ -36,7 +36,7 @@ import {
   formatVnd,
 } from "./ui";
 
-type Filter = "all" | "buy" | "risk" | "expiry";
+type Filter = "all" | "risk" | "expiry";
 
 function serviceLevel(value: number | null): string | null {
   if (value == null || !Number.isFinite(value)) return null;
@@ -258,10 +258,56 @@ export function ProcurementPlanningWorkspace({
     () => buildProcurementIngredientRows(decision, data, activeStrategyKey),
     [activeStrategyKey, decision, data],
   );
-  const [filter, setFilter] = useState<Filter>("all");
-  const [query, setQuery] = useState("");
+  const planRows = useMemo(
+    () =>
+      (activeStrategy?.items ?? []).map((item) => {
+        const context = allRows.find(
+          (row) => row.ingredientId === item.ingredientId,
+        );
+        return {
+          ...(context ?? {
+            ingredientId: item.ingredientId,
+            ingredientName: item.ingredientName,
+            unit: item.unit,
+            onHand: null,
+            inbound: null,
+            safetyStock: null,
+            supplierName: "",
+            leadTimeDays: null,
+            p25: null,
+            p50: null,
+            p75: null,
+            stockoutDate: "",
+            shortageQuantity: null,
+            recommendedQuantity: null,
+            packCount: null,
+            packSize: null,
+            unitPrice: null,
+            purchaseCost: null,
+            feasible: activeStrategy?.feasible === true,
+          }),
+          ingredientName: item.ingredientName,
+          unit: item.unit || context?.unit || "",
+          supplierName: item.supplierName || context?.supplierName || "",
+          recommendedQuantity: item.orderQuantity,
+          packCount: item.packCount,
+          packSize: item.packSize,
+          unitPrice: item.unitPrice,
+          purchaseCost: item.purchaseCost,
+          feasible: activeStrategy?.feasible === true,
+          orderDate: item.orderDate,
+          arrivalDate: item.arrivalDate,
+          emergency: item.emergency,
+        };
+      }),
+    [activeStrategy, allRows],
+  );
+  const [contextFilter, setContextFilter] = useState<Filter>("all");
+  const [contextQuery, setContextQuery] = useState("");
   const [supplierFilter, setSupplierFilter] = useState("");
-  const [selectedId, updateSelectedId] = useState("");
+  const [selectedPlanId, setSelectedPlanId] = useState("");
+  const [selectedContextId, setSelectedContextId] = useState("");
+  const [contextOpen, setContextOpen] = useState(false);
   const [explaining, setExplaining] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -292,8 +338,8 @@ export function ProcurementPlanningWorkspace({
   const supplierOptions = Array.from(
     new Set(allRows.map((row) => row.supplierName).filter(Boolean)),
   ).sort((a, b) => a.localeCompare(b, "vi"));
-  const rows = allRows.filter((row) => {
-    const needle = query.trim().toLocaleLowerCase("vi");
+  const contextRows = allRows.filter((row) => {
+    const needle = contextQuery.trim().toLocaleLowerCase("vi");
     if (
       needle &&
       !`${row.ingredientName} ${row.supplierName}`
@@ -302,19 +348,21 @@ export function ProcurementPlanningWorkspace({
     )
       return false;
     if (supplierFilter && row.supplierName !== supplierFilter) return false;
-    if (filter === "buy") return row.recommendedQuantity != null;
-    if (filter === "risk")
+    if (contextFilter === "buy") return row.recommendedQuantity != null;
+    if (contextFilter === "risk")
       return Boolean(row.stockoutDate || (row.shortageQuantity ?? 0) > 0);
-    if (filter === "expiry") return false;
+    if (contextFilter === "expiry") return false;
     return true;
   });
-  const selected =
-    allRows.find((row) => row.ingredientId === selectedId) ?? null;
-  const selectedDemand = selected
-    ? view.demand.filter((item) => item.ingredientId === selected.ingredientId)
+  const selectedPlan =
+    planRows.find((row) => row.ingredientId === selectedPlanId) ?? null;
+  const selectedContext =
+    allRows.find((row) => row.ingredientId === selectedContextId) ?? null;
+  const selectedDemand = selectedContext
+    ? view.demand.filter((item) => item.ingredientId === selectedContext.ingredientId)
     : [];
-  const selectedRisk = selected
-    ? view.risks.find((item) => item.ingredientId === selected.ingredientId)
+  const selectedRisk = selectedContext
+    ? view.risks.find((item) => item.ingredientId === selectedContext.ingredientId)
     : undefined;
   const eligibleRecommendations = plan.recommendations.filter((line) =>
     allRows.some(
@@ -330,15 +378,19 @@ export function ProcurementPlanningWorkspace({
     eligibleRecommendations.length > 0 &&
     Boolean(onCreateOrders);
 
-  function toggleSelected(ingredientId: string) {
-    updateSelectedId((current) =>
+  function toggleContextSelected(ingredientId: string) {
+    setSelectedContextId((current) =>
       current === ingredientId ? "" : ingredientId,
     );
   }
 
+  function togglePlanSelected(ingredientId: string) {
+    setSelectedPlanId((current) => (current === ingredientId ? "" : ingredientId));
+  }
+
   function selectStrategy(strategyKey: string) {
     setSelectedStrategyKey(strategyKey);
-    updateSelectedId("");
+    setSelectedPlanId("");
     setExplaining(false);
   }
 
@@ -458,7 +510,7 @@ export function ProcurementPlanningWorkspace({
           </article>
         </div>
         {noFeasible ? (
-          <Notice tone="warning">
+          <Notice tone="warning" id="procurement-constraints">
             <strong>
               Chưa tìm được phương án nhập đáp ứng toàn bộ ràng buộc.
             </strong>{" "}
@@ -508,11 +560,13 @@ export function ProcurementPlanningWorkspace({
                   >
                     <span>{strategy.label}</span>
                     <strong>
-                      {strategy.feasible
+                      {strategy.feasible === true
                         ? "Đáp ứng toàn bộ ràng buộc"
-                        : observed
-                          ? `Đáp ứng ${observed}${required ? ` · yêu cầu ${required}` : ""}`
-                          : "Backend chưa trả mức đáp ứng"}
+                        : strategy.feasible === false
+                          ? observed
+                            ? `Đáp ứng ${observed}${required ? ` · yêu cầu ${required}` : ""}`
+                            : "Chưa có dữ liệu đánh giá mức đáp ứng"
+                          : "Chưa có dữ liệu đánh giá mức đáp ứng"}
                     </strong>
                     <small>
                       {strategy.itemCount
@@ -525,6 +579,60 @@ export function ProcurementPlanningWorkspace({
             </div>
           </section>
         ) : null}
+        {activeStrategy ? (
+          <section
+            aria-labelledby="procurement-plan-focus-title"
+            className={`procurement-plan-focus ${activeStrategy.feasible === true ? "is-feasible" : "is-simulated"}`}
+            key={activeStrategyKey}
+          >
+            <div className="procurement-plan-focus-copy">
+              <span className="eyebrow">Phương án đang xem</span>
+              <h2 id="procurement-plan-focus-title">{activeStrategy.label}</h2>
+              <p className="procurement-plan-focus-status">
+                {activeStrategy.feasible === true
+                  ? "Đáp ứng toàn bộ ràng buộc"
+                  : "Phương án mô phỏng — chưa đủ điều kiện tạo đơn"}
+              </p>
+              <div className="procurement-plan-focus-metrics">
+                {activeStrategy.itemCount ? (
+                  <span>
+                    {activeStrategy.feasible === true
+                      ? `${activeStrategy.itemCount} nguyên liệu cần nhập`
+                      : `${activeStrategy.itemCount} dòng mua tham khảo`}
+                  </span>
+                ) : null}
+                {activeStrategy.purchaseCost != null ? (
+                  <span>{formatVnd(activeStrategy.purchaseCost)} chi phí dự kiến</span>
+                ) : null}
+                {new Set(planRows.map((row) => row.supplierName).filter(Boolean)).size ? (
+                  <span>{new Set(planRows.map((row) => row.supplierName).filter(Boolean)).size} nhà cung cấp</span>
+                ) : null}
+                {planRows.map((row) => row.arrivalDate).filter(Boolean).sort().length ? (
+                  <span>
+                    Giao dự kiến {dateWindow(planRows.map((row) => row.arrivalDate).filter(Boolean))}
+                  </span>
+                ) : null}
+                {activeStrategy.feasible === false && serviceLevel(activeStrategy.observedFillRate) ? (
+                  <span>
+                    Mức đáp ứng thấp nhất: {serviceLevel(activeStrategy.observedFillRate)}
+                    {serviceLevel(activeStrategy.requiredFillRate)
+                      ? ` · yêu cầu ${serviceLevel(activeStrategy.requiredFillRate)}`
+                      : ""}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            {activeStrategy.feasible === true && canCreate ? (
+              <Button onClick={() => setReviewOpen(true)}>
+                Xem đơn nhập nháp · {eligibleRecommendations.length} dòng
+              </Button>
+            ) : activeStrategy.feasible === false && view.blockers.length ? (
+              <a className="button secondary" href="#procurement-constraints">
+                Xem lý do chưa khả thi
+              </a>
+            ) : null}
+          </section>
+        ) : null}
         {message ? (
           <Notice tone={message.startsWith("Đã tạo") ? "success" : "error"}>
             {message}
@@ -535,7 +643,7 @@ export function ProcurementPlanningWorkspace({
           onClick={scrollToWorkspace}
           type="button"
         >
-          <span>Xem danh sách nguyên liệu</span>
+          <span>Xem dòng nhập đề xuất</span>
           <ArrowDown aria-hidden="true" size={19} />
         </button>
       </section>
@@ -546,14 +654,95 @@ export function ProcurementPlanningWorkspace({
         ref={workspaceRef}
         aria-labelledby="procurement-workspace-title"
       >
+        <section className="procurement-plan-lines" aria-labelledby="procurement-plan-lines-title" key={activeStrategyKey}>
+          <header className="procurement-section-heading">
+            <div>
+              <span className="eyebrow">Kế hoạch đề xuất</span>
+              <h2 id="procurement-plan-lines-title">Dòng nhập đề xuất</h2>
+              <p>Chỉ hiển thị các nguyên liệu thuộc phương án {activeStrategy?.label ?? "đang chọn"}.</p>
+            </div>
+          </header>
+          {planRows.length ? (
+            <div className="procurement-plan-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Nguyên liệu</th>
+                    <th scope="col">Nhà cung cấp</th>
+                    <th scope="col">Cần mua</th>
+                    <th scope="col">Đơn giá</th>
+                    <th scope="col">Thành tiền</th>
+                    <th scope="col">Đặt hàng</th>
+                    <th scope="col">Dự kiến đến</th>
+                    <th scope="col">Trạng thái</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {planRows.map((row) => (
+                    <tr
+                      aria-selected={selectedPlan?.ingredientId === row.ingredientId}
+                      className={selectedPlan?.ingredientId === row.ingredientId ? "selected" : ""}
+                      key={row.ingredientId}
+                      onClick={() => togglePlanSelected(row.ingredientId)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          togglePlanSelected(row.ingredientId);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <td><strong>{row.ingredientName}</strong><small>{row.unit || "Đơn vị chưa xác định"}</small>{row.emergency ? <span className="procurement-severity critical">Ưu tiên khẩn</span> : null}</td>
+                      <td>{row.supplierName || "Chưa có nhà cung cấp được chọn"}</td>
+                      <td>{quantity(row.recommendedQuantity, row.unit)}{row.packCount != null ? <small>{`${row.packCount} gói${row.packSize == null ? "" : ` × ${formatQuantity(row.packSize, row.unit)}`}`}</small> : null}</td>
+                      <td>{row.unitPrice == null ? "—" : `${formatVnd(row.unitPrice)} / ${row.unit || "đơn vị"}`}</td>
+                      <td>{row.purchaseCost == null ? "—" : formatVnd(row.purchaseCost)}</td>
+                      <td>{row.orderDate ? formatDate(row.orderDate) : "—"}</td>
+                      <td>{row.arrivalDate ? formatDate(row.arrivalDate) : "—"}</td>
+                      <td><span className={`procurement-plan-state ${row.feasible ? "is-feasible" : "is-simulated"}`}>{row.feasible ? "Khả thi" : "Mô phỏng"}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <Notice tone="info">Phương án này chưa có dòng nhập được đề xuất.</Notice>
+          )}
+          {selectedPlan ? (
+            <article className="procurement-plan-line-detail" aria-live="polite">
+              <div>
+                <span className="eyebrow">Chi tiết dòng nhập</span>
+                <h3>Vì sao cần mua {selectedPlan.ingredientName}?</h3>
+              </div>
+              <dl>
+                <div><dt>Tồn hiện có</dt><dd>{quantity(selectedPlan.onHand, selectedPlan.unit)}</dd></div>
+                <div><dt>Nhu cầu P50</dt><dd>{quantity(selectedPlan.p50, selectedPlan.unit)}</dd></div>
+                <div><dt>Khoảng P25–P75</dt><dd>{quantity(selectedPlan.p25, selectedPlan.unit)} – {quantity(selectedPlan.p75, selectedPlan.unit)}</dd></div>
+                <div><dt>Hàng sắp về</dt><dd>{quantity(selectedPlan.inbound, selectedPlan.unit)}</dd></div>
+                {selectedPlan.packSize != null ? <div><dt>Quy cách gói</dt><dd>{formatQuantity(selectedPlan.packSize, selectedPlan.unit)}</dd></div> : null}
+              </dl>
+            </article>
+          ) : null}
+        </section>
+        <section className="procurement-context" aria-labelledby="procurement-workspace-title">
         <header className="procurement-workspace-header">
+          <div>
+          <span className="eyebrow">Kiểm chứng</span>
           <h2 id="procurement-workspace-title">
-            Danh sách nguyên liệu{" "}
+            Bối cảnh nguyên liệu{" "}
             <GuidanceHint
-              content="Chọn một dòng để xem nhu cầu, rủi ro tồn kho và điều kiện nhà cung cấp; chọn lại dòng đang mở để đóng chi tiết."
+              content="Chọn một dòng để xem nhu cầu, rủi ro tồn kho và điều kiện nhà cung cấp; việc này không thay đổi kế hoạch đề xuất."
               label="Cách xem chi tiết nguyên liệu"
             />
           </h2>
+          <p>Xem tồn kho, nhu cầu và rủi ro của toàn bộ nguyên liệu.</p>
+          </div>
+          <Button aria-expanded={contextOpen} onClick={() => setContextOpen((open) => !open)} variant="secondary">
+            {contextOpen ? "Ẩn bối cảnh" : `Xem toàn bộ nguyên liệu · ${allRows.length}`}
+          </Button>
+        </header>
+        {contextOpen ? <>
           <div className="procurement-table-toolbar">
             <div className="procurement-search">
               <Search aria-hidden="true" size={16} />
@@ -562,9 +751,9 @@ export function ProcurementPlanningWorkspace({
                   Tìm nguyên liệu hoặc nhà cung cấp
                 </span>
                 <input
-                  onChange={(event) => setQuery(event.target.value)}
+                  onChange={(event) => setContextQuery(event.target.value)}
                   placeholder="Tìm nguyên liệu / nhà cung cấp"
-                  value={query}
+                  value={contextQuery}
                 />
               </label>
             </div>
@@ -573,11 +762,10 @@ export function ProcurementPlanningWorkspace({
               <label>
                 <span className="sr-only">Lọc nguyên liệu</span>
                 <select
-                  onChange={(event) => setFilter(event.target.value as Filter)}
-                  value={filter}
+                  onChange={(event) => setContextFilter(event.target.value as Filter)}
+                  value={contextFilter}
                 >
                   <option value="all">Tất cả</option>
-                  <option value="buy">Cần nhập</option>
                   <option value="risk">Nguy cơ thiếu</option>
                   <option value="expiry" disabled>
                     Sắp hết hạn
@@ -599,79 +787,58 @@ export function ProcurementPlanningWorkspace({
                 </select>
               </label>
             </div>
-            {feasible ? (
-              <Button
-                disabled={!canCreate}
-                onClick={() => setReviewOpen(true)}
-              >{`Xem đơn nhập nháp · ${eligibleRecommendations.length} dòng`}</Button>
-            ) : null}
           </div>
-          {filter !== "all" ? (
+          {contextFilter !== "all" ? (
             <div className="procurement-filter-chip">
               <span>
-                {filter === "buy"
-                  ? "Cần nhập"
-                  : filter === "risk"
+                {contextFilter === "risk"
                     ? "Nguy cơ thiếu"
                     : "Sắp hết hạn"}
               </span>
               <button
                 aria-label="Xóa bộ lọc"
-                onClick={() => setFilter("all")}
+                onClick={() => setContextFilter("all")}
                 type="button"
               >
                 ×
               </button>
             </div>
           ) : null}
-        </header>
         <div
-          className={`procurement-master-detail${selected ? " has-selection" : ""}`}
+          className={`procurement-master-detail${selectedContext ? " has-selection" : ""}`}
         >
           <section
             className="procurement-table-panel"
-            aria-label="Bảng nguyên liệu cần nhập"
+            aria-label="Bảng bối cảnh nguyên liệu"
           >
             <div className="procurement-table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th scope="col">Nguyên liệu</th>
-                    <th scope="col">
-                      <abbr
-                        aria-label="NCC là Nhà cung cấp; TG là Thời gian giao hàng"
-                        className="procurement-header-abbr"
-                        data-tooltip="NCC: Nhà cung cấp · TG: Thời gian giao hàng"
-                        tabIndex={0}
-                      >
-                        NCC &amp; TG
-                      </abbr>
-                    </th>
                     <th scope="col">Tồn hiện có</th>
                     <th scope="col">Hàng sắp về</th>
                     <th scope="col">Nhu cầu kỳ này</th>
-                    <th scope="col">Đề xuất phương án</th>
-                    <th scope="col">Đơn giá</th>
-                    <th scope="col">Thành tiền</th>
+                    <th scope="col">Hạn / rủi ro</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row) => (
+                  {contextRows.map((row) => (
                     <tr
                       aria-selected={
-                        selected?.ingredientId === row.ingredientId
+                        selectedContext?.ingredientId === row.ingredientId
                       }
                       className={
-                        selected?.ingredientId === row.ingredientId
+                        selectedContext?.ingredientId === row.ingredientId
                           ? "selected"
                           : ""
                       }
                       key={row.ingredientId}
-                      onClick={() => toggleSelected(row.ingredientId)}
+                      onClick={() => toggleContextSelected(row.ingredientId)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          toggleSelected(row.ingredientId);
+                          toggleContextSelected(row.ingredientId);
                         }
                       }}
                       role="button"
@@ -687,14 +854,6 @@ export function ProcurementPlanningWorkspace({
                         >
                           {severity(row)}
                         </span>
-                      </td>
-                      <td>
-                        {row.supplierName || "Chưa có nhà cung cấp phù hợp"}
-                        <small>
-                          {row.leadTimeDays == null
-                            ? "Chưa có thời gian giao"
-                            : `${row.leadTimeDays} ngày`}
-                        </small>
                       </td>
                       <td>
                         {quantity(row.onHand, row.unit)}
@@ -714,45 +873,20 @@ export function ProcurementPlanningWorkspace({
                         </small>
                       </td>
                       <td>
-                        {row.recommendedQuantity == null ? (
-                          activeStrategy ? (
-                            "Không có đề xuất"
-                          ) : (
-                            "Chọn phương án để xem"
-                          )
-                        ) : (
-                          <>
-                            {formatQuantity(row.recommendedQuantity, row.unit)}
-                            <small>
-                              {row.packCount == null
-                                ? ""
-                                : `${row.packCount} gói${row.packSize == null ? "" : ` · ${formatQuantity(row.packSize, row.unit)}`}`}
-                            </small>
-                          </>
-                        )}
-                      </td>
-                      <td>
-                        {row.unitPrice == null
-                          ? "Chưa có dữ liệu"
-                          : formatVnd(row.unitPrice)}
-                      </td>
-                      <td>
-                        {row.purchaseCost == null
-                          ? "Chưa có dữ liệu"
-                          : formatVnd(row.purchaseCost)}
+                        {row.stockoutDate ? `Nguy cơ thiếu từ ${formatDate(row.stockoutDate)}` : row.shortageQuantity != null ? `Thiếu dự kiến ${formatQuantity(row.shortageQuantity, row.unit)}` : "Chưa ghi nhận rủi ro"}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            {!rows.length ? (
+            {!contextRows.length ? (
               <Notice tone="info">
                 Không có nguyên liệu khớp với bộ lọc hiện tại.
               </Notice>
             ) : null}
           </section>
-          {selected ? (
+          {selectedContext ? (
             <aside
               aria-labelledby="ingredient-inspector-title"
               className="procurement-inspector is-open"
@@ -761,34 +895,34 @@ export function ProcurementPlanningWorkspace({
                 <div>
                   <span className="eyebrow">Chi tiết nguyên liệu</span>
                   <h2 id="ingredient-inspector-title">
-                    {selected.ingredientName}
+                    {selectedContext.ingredientName}
                   </h2>
-                  <p>Đơn vị: {selected.unit || "chưa xác định"}</p>
+                  <p>Đơn vị: {selectedContext.unit || "chưa xác định"}</p>
                 </div>
                 <span
-                  className={`procurement-severity ${severityClass(selected)}`}
+                  className={`procurement-severity ${severityClass(selectedContext)}`}
                 >
-                  {severity(selected)}
+                  {severity(selectedContext)}
                 </span>
               </header>
               <dl className="procurement-inspector-metrics">
                 <div>
                   <dt>Tồn hiện có</dt>
-                  <dd>{quantity(selected.onHand, selected.unit)}</dd>
+                  <dd>{quantity(selectedContext.onHand, selectedContext.unit)}</dd>
                 </div>
                 <div>
                   <dt>Hàng sắp về</dt>
-                  <dd>{quantity(selected.inbound, selected.unit)}</dd>
+                  <dd>{quantity(selectedContext.inbound, selectedContext.unit)}</dd>
                 </div>
                 <div>
                   <dt>Nhu cầu P50 kỳ này</dt>
-                  <dd>{quantity(selected.p50, selected.unit)}</dd>
+                  <dd>{quantity(selectedContext.p50, selectedContext.unit)}</dd>
                 </div>
                 <div>
                   <dt>Khoảng dự báo</dt>
                   <dd>
-                    {quantity(selected.p25, selected.unit)} –{" "}
-                    {quantity(selected.p75, selected.unit)}
+                    {quantity(selectedContext.p25, selectedContext.unit)} –{" "}
+                    {quantity(selectedContext.p75, selectedContext.unit)}
                   </dd>
                 </div>
                 {selectedRisk?.shortageQuantity != null ? (
@@ -797,7 +931,7 @@ export function ProcurementPlanningWorkspace({
                     <dd>
                       {formatQuantity(
                         selectedRisk.shortageQuantity,
-                        selected.unit,
+                        selectedContext.unit,
                       )}
                     </dd>
                   </div>
@@ -811,9 +945,9 @@ export function ProcurementPlanningWorkspace({
               </dl>
               {selectedDemand.length ? (
                 <DemandChart
-                  ingredientName={selected.ingredientName}
+                  ingredientName={selectedContext.ingredientName}
                   rows={selectedDemand}
-                  unit={selected.unit}
+                  unit={selectedContext.unit}
                 />
               ) : (
                 <Notice tone="info">
@@ -837,13 +971,13 @@ export function ProcurementPlanningWorkspace({
                               Định lượng:{" "}
                               {contribution.recipeQuantity == null
                                 ? "Chưa có dữ liệu"
-                                : `${formatQuantity(contribution.recipeQuantity)} ${contribution.recipeUnit || selected.unit} / sản phẩm`}
+                                : `${formatQuantity(contribution.recipeQuantity)} ${contribution.recipeUnit || selectedContext.unit} / sản phẩm`}
                             </small>
                           </div>
                           <span>
                             {quantity(
                               contribution.p50,
-                              contribution.unit || selected.unit,
+                              contribution.unit || selectedContext.unit,
                             )}
                           </span>
                         </li>
@@ -861,9 +995,9 @@ export function ProcurementPlanningWorkspace({
               </section>
               <section className="procurement-inspector-section">
                 <h3>Nhà cung cấp phù hợp</h3>
-                {supplierTerms(data, selected.ingredientId).length ? (
+                {supplierTerms(data, selectedContext.ingredientId).length ? (
                   <div className="procurement-supplier-list">
-                    {supplierTerms(data, selected.ingredientId).map(
+                    {supplierTerms(data, selectedContext.ingredientId).map(
                       (supplier) => (
                         <article
                           key={
@@ -874,7 +1008,7 @@ export function ProcurementPlanningWorkspace({
                           <strong>{supplier.supplier}</strong>
                           <span>
                             {formatVnd(supplier.unitCost)} · Tối thiểu{" "}
-                            {formatQuantity(supplier.moq, selected.unit)} ·{" "}
+                            {formatQuantity(supplier.moq, selectedContext.unit)} ·{" "}
                             {supplier.leadTimeDays} ngày
                           </span>
                         </article>
@@ -890,6 +1024,8 @@ export function ProcurementPlanningWorkspace({
             </aside>
           ) : null}
         </div>
+        </> : null}
+        </section>
       </section>
       {explaining && selectedDemand[0] ? (
         <DemandExplanationDialog

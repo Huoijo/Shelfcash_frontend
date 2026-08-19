@@ -586,6 +586,165 @@ export interface DecisionPackage {
   request_id?: string | null;
 }
 
+export type DecisionBriefStrategy = "lean" | "balanced" | "protected";
+
+/**
+ * The Decision Brief is the customer-facing, canonical result of a Decision
+ * Run.  DecisionPackage remains useful for lifecycle polling only.
+ */
+export interface ProcurementRow {
+  ingredient_id: string;
+  ingredient_name: string | null;
+  supplier_id: string | null;
+  supplier_name: string | null;
+  quantity: number;
+  unit: string | null;
+  pack_count: number | null;
+  pack_size: number | null;
+  order_date: string | null;
+  arrival_date: string | null;
+  purchase_cost: number | null;
+  reason_codes: string[];
+}
+
+export interface IngredientDemandRow {
+  ingredient_id: string;
+  ingredient_name: string | null;
+  unit: string | null;
+  p25: number | null;
+  p50: number | null;
+  p75: number | null;
+  contributions: Array<Record<string, unknown>>;
+}
+
+export interface RiskSummary {
+  stockout_probability: number | null;
+  expected_fill_rate: number | null;
+  shortage_quantity: number | null;
+  waste_quantity: number | null;
+}
+
+export interface EvidenceReference {
+  evidence_id: string;
+  label: string;
+  source_type: string;
+  entities: Record<string, string>;
+}
+
+export interface DecisionBriefFacts {
+  decision_run_id: string;
+  store_id: string;
+  status: string;
+  forecast: {
+    forecast_run_id: string | null;
+    model_version: string | null;
+    horizon_days: number | null;
+    cutoff_date: string | null;
+  };
+  recommendation: {
+    available: boolean;
+    strategy: DecisionBriefStrategy | null;
+    summary: string | null;
+    total_purchase_cost: number | null;
+    expected_fill_rate: number | null;
+  };
+  procurement_rows: ProcurementRow[];
+  ingredient_demand: IngredientDemandRow[];
+  risk: RiskSummary;
+  critic: {
+    hard_violations: string[];
+    warnings: string[];
+  };
+  evidence: EvidenceReference[];
+  data_availability: Record<string, string>;
+  generated_at: string;
+}
+
+export interface ExplanationRequest {
+  language?: "vi" | "en";
+  detail_level?: "simple" | "manager" | "technical";
+  question?: string | null;
+}
+
+export interface DecisionExplanationResponse {
+  source: string;
+  language: "vi" | "en";
+  detail_level: "simple" | "manager" | "technical";
+  summary: string;
+  why_this_plan: string[];
+  main_risks: string[];
+  tradeoffs: string[];
+  important_assumptions: string[];
+  decision_run_id: string;
+  answer: string;
+  intent: string;
+  entities: {
+    ingredient_ids: string[];
+    supplier_ids: string[];
+  };
+  claims: Array<{
+    type: string;
+    value: unknown;
+    unit: string | null;
+    evidence_ids: string[];
+  }>;
+  citations: Array<{
+    evidence_id: string;
+    label: string;
+    source_type: string;
+  }>;
+  grounded: boolean;
+  provider: "shelfcash_decision_intelligence" | "legacy_template_fallback";
+}
+
+export interface WhatIfRequest {
+  demand_multiplier?: number | null;
+  supplier_delay_days?: number | null;
+  budget_limit?: number | null;
+  strategy?: DecisionBriefStrategy | null;
+}
+
+export interface WhatIfOrderChange {
+  ingredient_id: string;
+  baseline_quantity: number | null;
+  hypothetical_quantity: number | null;
+  quantity_delta: number | null;
+  baseline_supplier_id: string | null;
+  hypothetical_supplier_id: string | null;
+  baseline_arrival_date: string | null;
+  hypothetical_arrival_date: string | null;
+}
+
+export interface WhatIfResponse {
+  decision_run_id: string;
+  baseline: DecisionBriefFacts;
+  hypothetical: DecisionBriefFacts;
+  mutations: WhatIfRequest;
+  comparison: {
+    recommendation_changed: boolean;
+    baseline_strategy: DecisionBriefStrategy | null;
+    hypothetical_strategy: DecisionBriefStrategy | null;
+    purchase_cost_delta: number | null;
+    expected_fill_rate_delta: number | null;
+    stockout_probability_delta: number | null;
+    shortage_quantity_delta: number | null;
+    waste_quantity_delta: number | null;
+    order_changes: WhatIfOrderChange[];
+    warnings_added: string[];
+    warnings_removed: string[];
+    hard_violations_added: string[];
+    hard_violations_removed: string[];
+  };
+  grounded_explanation: {
+    answer: string;
+    citations: Array<{ evidence_id: string; label: string; source_type: string }>;
+    grounded: boolean;
+    authority: "HYPOTHETICAL";
+  } | null;
+  generated_at: string;
+}
+
+/** @deprecated Use DecisionExplanationResponse for new Decision Brief UI. */
 export interface DecisionExplanation {
   summary?: string;
   why_this_plan?: string[];

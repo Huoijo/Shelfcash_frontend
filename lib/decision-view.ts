@@ -377,7 +377,7 @@ export function adaptDecisionRunView(
       key,
       label: strategyLabels[key] || key,
       feasible:
-        boolean(source, ["is_feasible", "feasible"]) ??
+        boolean(source, ["is_feasible", "feasible", "valid"]) ??
         boolean(plan, ["valid"]),
       itemCount: items.length,
       purchaseCost:

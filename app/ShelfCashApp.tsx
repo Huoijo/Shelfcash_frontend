@@ -23,7 +23,7 @@ import {
   strategyFromApi,
 } from "../lib/contract-adapters";
 import { dateInTimeZone } from "../lib/data";
-import { shouldPollDecisionRun } from "../lib/decision-run";
+import { DECISION_CUTOFF_DATE, shouldPollDecisionRun } from "../lib/decision-run";
 import { runSimulationAttempt } from "../lib/simulation-orchestration";
 import {
   createIdempotencyKey,
@@ -32,7 +32,10 @@ import {
   confirmPurchaseOrder,
   getBootstrap,
   getConnectionHealth,
+  getDecisionBrief,
   getDecisionRun,
+  explainDecision,
+  runDecisionWhatIf,
   getMenu,
   getInventory,
   getInventoryConstraints,
@@ -79,6 +82,11 @@ import type {
   InventoryConstraint,
   PlanResponse,
   DecisionPackage,
+  DecisionBriefFacts,
+  DecisionExplanationResponse,
+  ExplanationRequest,
+  WhatIfRequest,
+  WhatIfResponse,
   Product,
   MenuComponentDraft,
   MenuItem,
@@ -309,6 +317,20 @@ export function ShelfCashApp({
   const [data, setData] = useState(initialData);
   const [plan, setPlan] = useState(initialPlan);
   const [decision, setDecision] = useState<DecisionPackage | null>(null);
+  const [decisionBrief, setDecisionBrief] = useState<DecisionBriefFacts | null>(null);
+  const [decisionExplanation, setDecisionExplanation] = useState<DecisionExplanationResponse | null>(null);
+  const [decisionWhatIf, setDecisionWhatIf] = useState<WhatIfResponse | null>(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [explanationLoading, setExplanationLoading] = useState(false);
+  const [whatIfLoading, setWhatIfLoading] = useState(false);
+  const [briefError, setBriefError] = useState<string | null>(null);
+  const [explanationError, setExplanationError] = useState<string | null>(null);
+  const [whatIfError, setWhatIfError] = useState<string | null>(null);
+  const briefLoadRef = useRef<{
+    decisionRunId: string;
+    promise: Promise<DecisionBriefFacts | null>;
+  } | null>(null);
+  const briefRequestSequence = useRef(0);
   const [decisionIngredient, setDecisionIngredient] = useState("");
   const [decisionCenterIngredient, setDecisionCenterIngredient] = useState(initialDecisionIngredient);
 
@@ -325,6 +347,75 @@ export function ShelfCashApp({
     else url.searchParams.delete("ingredient");
     window.history.pushState({}, "", url);
   }
+
+  async function loadDecisionBrief(decisionRunId: string, signal?: AbortSignal) {
+    const active = briefLoadRef.current;
+    if (active?.decisionRunId === decisionRunId) return active.promise;
+    const requestSequence = ++briefRequestSequence.current;
+    setBriefLoading(true);
+    setBriefError(null);
+    setDecisionBrief(null);
+    setDecisionExplanation(null);
+    setDecisionWhatIf(null);
+    setExplanationError(null);
+    setWhatIfError(null);
+    const promise = getDecisionBrief(decisionRunId)
+      .then((brief) => {
+      if (requestSequence === briefRequestSequence.current) {
+        setDecisionBrief(brief);
+        setBriefError(null);
+      }
+      return brief;
+    })
+    .catch((caught) => {
+      if (requestSequence === briefRequestSequence.current) {
+        setBriefError(errorMessage(caught, "Không thể tải kế hoạch nhập hàng."));
+      }
+      return null;
+    })
+    .finally(() => {
+      if (requestSequence === briefRequestSequence.current) {
+        setBriefLoading(false);
+        briefLoadRef.current = null;
+      }
+    });
+    briefLoadRef.current = { decisionRunId, promise };
+    // Do not attach a caller AbortSignal: a development-effect cleanup or a
+    // second consumer must not cancel the shared request for this same run.
+    void signal;
+    return promise;
+  }
+
+  async function requestDecisionExplanation(request: ExplanationRequest) {
+    if (!decision?.decision_run_id) return;
+    setExplanationLoading(true);
+    setExplanationError(null);
+    try {
+      const response = await explainDecision(decision.decision_run_id, request);
+      setDecisionExplanation(response);
+      setExplanationError(null);
+    } catch (caught) {
+      setExplanationError(errorMessage(caught, "Không thể tải giải thích cho kế hoạch này."));
+    } finally {
+      setExplanationLoading(false);
+    }
+  }
+
+  async function requestDecisionWhatIf(mutation: WhatIfRequest) {
+    if (!decision?.decision_run_id) return;
+    setWhatIfLoading(true);
+    setWhatIfError(null);
+    try {
+      const result = await runDecisionWhatIf(decision.decision_run_id, mutation);
+      setDecisionWhatIf(result);
+      setWhatIfError(null);
+    } catch (caught) {
+      setWhatIfError(errorMessage(caught, "Không thể chạy giả lập thay đổi."));
+    } finally {
+      setWhatIfLoading(false);
+    }
+  }
+
   useEffect(() => {
     const storeId = data.settings.storeId;
     if (!storeId) return;
@@ -341,7 +432,12 @@ export function ShelfCashApp({
               signal: abortController.signal,
             })
           : result;
-        if (!abortController.signal.aborted) setDecision(resolved);
+        if (!abortController.signal.aborted) {
+          setDecision(resolved);
+          if (resolved.status === "completed" || resolved.status === "completed_with_no_feasible_recommendation") {
+            await loadDecisionBrief(resolved.decision_run_id, abortController.signal);
+          }
+        }
       } catch {
         // The persisted package is a convenience; a failed reload must not block the app.
       }
@@ -1067,12 +1163,18 @@ export function ShelfCashApp({
     decisionRunAbort.current?.abort();
     const abortController = new AbortController();
     decisionRunAbort.current = abortController;
+    setDecisionBrief(null);
+    setDecisionExplanation(null);
+    setDecisionWhatIf(null);
+    setBriefError(null);
+    setExplanationError(null);
+    setWhatIfError(null);
     setRefreshing(true);
     try {
       const resolved = await runSimulationAttempt({
         attemptId: operation,
         storeId: data.settings.storeId,
-        cutoffDate: data.today,
+        cutoffDate: DECISION_CUTOFF_DATE,
         horizonDays,
         includeOpenPurchaseOrders,
         budgetOverride,
@@ -1081,7 +1183,13 @@ export function ShelfCashApp({
         onProgress,
       });
       if (operation === operationSequence.current) {
-        setDecision(resolved.decision);
+        // The POST only creates the run. Read the canonical resource before
+        // rendering its brief, even when the create response is already terminal.
+        const decisionRun = await getDecisionRun(resolved.decision.decision_run_id, {
+          signal: abortController.signal,
+        });
+        setDecision(decisionRun);
+        await loadDecisionBrief(decisionRun.decision_run_id, abortController.signal);
         setPlan((current) => ({
           ...current,
           status: "completed",
@@ -1578,6 +1686,20 @@ export function ShelfCashApp({
             data={data}
             plan={plan}
             decision={decision}
+            decisionBrief={decisionBrief}
+            briefLoading={briefLoading}
+            briefError={briefError}
+            onRetryBrief={() => {
+              if (decision?.decision_run_id) void loadDecisionBrief(decision.decision_run_id);
+            }}
+            decisionExplanation={decisionExplanation}
+            explanationLoading={explanationLoading}
+            explanationError={explanationError}
+            onExplainDecision={(request) => void requestDecisionExplanation(request)}
+            decisionWhatIf={decisionWhatIf}
+            whatIfLoading={whatIfLoading}
+            whatIfError={whatIfError}
+            onRunWhatIf={(mutation) => void requestDecisionWhatIf(mutation)}
             strategy={strategy}
             initialIngredient={planIngredient}
             draftOrders={draftOrders}

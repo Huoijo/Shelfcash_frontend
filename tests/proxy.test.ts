@@ -16,6 +16,10 @@ test("proxy only accepts the ShelfCash API contract", () => {
     "/api/v1/decision-runs/decision-1",
   );
   assert.equal(
+    resolveBackendPath(["api", "v1", "decision-runs", "decision-1", "brief"], "GET"),
+    "/api/v1/decision-runs/decision-1/brief",
+  );
+  assert.equal(
     resolveBackendPath(["api", "v1", "decision-runs", "decision-1", "explanation"], "POST"),
     "/api/v1/decision-runs/decision-1/explanation",
   );

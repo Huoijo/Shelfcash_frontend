@@ -22,6 +22,11 @@ import type {
   IngredientDemandResult,
   PlanResponse,
   DecisionPackage,
+  DecisionBriefFacts,
+  DecisionExplanationResponse,
+  ExplanationRequest,
+  WhatIfRequest,
+  WhatIfResponse,
   PlanningScenario,
   PurchaseOrder,
   Recommendation,
@@ -33,6 +38,7 @@ import {
   noFeasibleDecision,
 } from "../components/ProcurementDecisionWorkspace";
 import { ProcurementPlanningWorkspace } from "../components/ProcurementPlanningWorkspace";
+import { DecisionBriefWorkspace } from "../components/DecisionBriefWorkspace";
 import { SimulationResultPanel } from "../components/SimulationResultPanel";
 import {
   Button,
@@ -283,6 +289,18 @@ export function PlanView({
   data,
   plan,
   decision,
+  decisionBrief,
+  briefLoading,
+  briefError,
+  onRetryBrief,
+  decisionExplanation,
+  explanationLoading,
+  explanationError,
+  onExplainDecision,
+  decisionWhatIf,
+  whatIfLoading,
+  whatIfError,
+  onRunWhatIf,
   strategy,
   initialIngredient,
   draftOrders,
@@ -298,6 +316,18 @@ export function PlanView({
   data: BootstrapData;
   plan: PlanResponse;
   decision: DecisionPackage | null;
+  decisionBrief?: DecisionBriefFacts | null;
+  briefLoading?: boolean;
+  briefError?: string | null;
+  onRetryBrief?: () => void;
+  decisionExplanation?: DecisionExplanationResponse | null;
+  explanationLoading?: boolean;
+  explanationError?: string | null;
+  onExplainDecision?: (request: ExplanationRequest) => void;
+  decisionWhatIf?: WhatIfResponse | null;
+  whatIfLoading?: boolean;
+  whatIfError?: string | null;
+  onRunWhatIf?: (mutation: WhatIfRequest) => void;
   strategy: Strategy;
   initialIngredient?: string;
   draftOrders: PurchaseOrder[];
@@ -726,6 +756,32 @@ export function PlanView({
     decision &&
     (noFeasibleDecision(decision) || decision.status === "completed")
   ) {
+    if (
+      decisionBrief !== undefined ||
+      briefLoading ||
+      briefError ||
+      onRetryBrief ||
+      onExplainDecision
+    ) {
+      return (
+        <DecisionBriefWorkspace
+          brief={decisionBrief ?? null}
+          error={briefError ?? null}
+          explanation={decisionExplanation ?? null}
+          explanationError={explanationError ?? null}
+          explanationLoading={explanationLoading ?? false}
+          loading={briefLoading ?? false}
+          onExplain={onExplainDecision ?? (() => undefined)}
+          onRunAgain={() => void runPlanning()}
+          onRunWhatIf={onRunWhatIf ?? (() => undefined)}
+          onRetry={onRetryBrief ?? (() => undefined)}
+          decision={decision}
+          whatIf={decisionWhatIf ?? null}
+          whatIfError={whatIfError ?? null}
+          whatIfLoading={whatIfLoading ?? false}
+        />
+      );
+    }
     return (
       <ProcurementPlanningWorkspace
         busy={runBusy}

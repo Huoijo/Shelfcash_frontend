@@ -12,7 +12,12 @@ import type {
   MappingSuggestion,
   PlanRunResponse,
   PlanRunResultResponse,
+  DecisionBriefFacts,
   DecisionExplanation,
+  DecisionExplanationResponse,
+  ExplanationRequest,
+  WhatIfRequest,
+  WhatIfResponse,
   DecisionPackage,
   CreateDecisionRunRequest,
   SheetProfile,
@@ -260,6 +265,24 @@ export async function getDecisionRun(
   return request<DecisionPackage>(decisionPath(decisionRunId), options);
 }
 
+export async function getDecisionBrief(
+  decisionRunId: string,
+  options: ShelfCashRequestOptions = {},
+): Promise<DecisionBriefFacts> {
+  return request<DecisionBriefFacts>(`${decisionPath(decisionRunId)}/brief`, options);
+}
+
+export async function explainDecision(
+  decisionRunId: string,
+  explanation: ExplanationRequest,
+  options: MutationOptions = {},
+): Promise<DecisionExplanationResponse> {
+  return request<DecisionExplanationResponse>(
+    `${decisionPath(decisionRunId)}/explanation`,
+    jsonRequest("POST", explanation, options),
+  );
+}
+
 export async function getDecisionExplanation(
   decisionRunId: string,
 ): Promise<DecisionExplanation> {
@@ -269,11 +292,20 @@ export async function getDecisionExplanation(
   );
 }
 
-export async function getDecisionWhatIf(decisionRunId: string): Promise<DecisionPackage> {
-  return request<DecisionPackage>(
+export async function runDecisionWhatIf(
+  decisionRunId: string,
+  mutation: WhatIfRequest,
+  options: MutationOptions = {},
+): Promise<WhatIfResponse> {
+  return request<WhatIfResponse>(
     `${decisionPath(decisionRunId)}/what-if`,
-    jsonRequest("POST", {}),
+    jsonRequest("POST", mutation, options),
   );
+}
+
+/** @deprecated Use runDecisionWhatIf with an explicit WhatIfRequest. */
+export async function getDecisionWhatIf(decisionRunId: string): Promise<WhatIfResponse> {
+  return runDecisionWhatIf(decisionRunId, {});
 }
 
 export async function waitForDecisionRun(

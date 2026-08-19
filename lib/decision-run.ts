@@ -2,6 +2,8 @@ import type { CreateDecisionRunRequest, DecisionRunStatus } from "./types";
 
 export const DECISION_SCENARIO_COUNT = 100;
 export const DECISION_RANDOM_SEED = 42;
+/** Business cutoff selected for the current Decision simulation period. */
+export const DECISION_CUTOFF_DATE = "2026-08-20";
 
 export function buildDecisionRunRequest(input: {
   forecastRunId: string;

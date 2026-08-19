@@ -15,6 +15,7 @@ import {
   createProcurementPlans,
   createPurchaseOrders,
   getBootstrap,
+  getDecisionBrief,
   getDecisionRun,
   getDecisionExplanation,
   getIngredientDemand,
@@ -68,6 +69,7 @@ test("decision runs use the canonical store-scoped create and global result endp
       },
     });
     await getDecisionRun("decision-1");
+    await getDecisionBrief("decision-1");
     await getDecisionExplanation("decision-1");
   } finally {
     globalThis.fetch = originalFetch;
@@ -75,6 +77,7 @@ test("decision runs use the canonical store-scoped create and global result endp
   assert.deepEqual(calls.map(({ url, method }) => ({ url, method })), [
     { url: "/api/shelfcash/api/v1/stores/STORE_001/decision-runs", method: "POST" },
     { url: "/api/shelfcash/api/v1/decision-runs/decision-1", method: "GET" },
+    { url: "/api/shelfcash/api/v1/decision-runs/decision-1/brief", method: "GET" },
     { url: "/api/shelfcash/api/v1/decision-runs/decision-1/explanation", method: "POST" },
   ]);
   assert.deepEqual(calls[0]?.body, {
@@ -87,7 +90,7 @@ test("decision runs use the canonical store-scoped create and global result endp
     scenario_count: 100,
     random_seed: 42,
   });
-  assert.deepEqual(calls[2]?.body, { language: "vi", detail_level: "simple" });
+  assert.deepEqual(calls[3]?.body, { language: "vi", detail_level: "simple" });
 });
 
 test("a completed decision response is terminal and does not trigger polling", async () => {
