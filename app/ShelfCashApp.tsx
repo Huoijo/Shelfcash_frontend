@@ -1191,7 +1191,10 @@ export function ShelfCashApp({
         horizonDays,
         includeOpenPurchaseOrders,
         budgetOverride,
-        monthlyBudget: data.settings.monthlyBudget,
+        monthlyBudget:
+          data.settings.remainingBudget > 0
+            ? data.settings.remainingBudget
+            : data.settings.monthlyBudget,
         signal: abortController.signal,
         onProgress,
       });

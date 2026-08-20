@@ -642,9 +642,11 @@ export function adaptBootstrap(
     StoreBootstrapResponse;
   const today = text(safeResponse, ["today"], base.today);
   const store = isRecord(safeResponse.store) ? safeResponse.store : {};
-  const settings = isRecord(safeResponse.settings)
-    ? safeResponse.settings
-    : {};
+  const settings = {
+    ...(isRecord(safeResponse.budget) ? safeResponse.budget : {}),
+    ...(isRecord(safeResponse.store_settings) ? safeResponse.store_settings : {}),
+    ...(isRecord(safeResponse.settings) ? safeResponse.settings : {}),
+  };
   const latestRuns = isRecord(safeResponse.latest_runs)
     ? safeResponse.latest_runs
     : {};
@@ -713,22 +715,36 @@ export function adaptBootstrap(
     settings: {
       monthlyBudget: number(
         settings,
-        ["monthly_budget"],
+        [
+          "monthly_budget",
+          "monthlyBudget",
+          "budget",
+          "monthly_budget_amount",
+          "budget_limit",
+          "limit",
+          "budget_override",
+        ],
         base.settings.monthlyBudget,
       ),
       reservedBudget: number(
         settings,
-        ["reserved_budget"],
+        ["reserved_budget", "reservedBudget"],
         base.settings.reservedBudget,
       ),
       spentBudget: number(
         settings,
-        ["spent_budget"],
+        ["spent_budget", "spentBudget", "budget_spent", "spent"],
         base.settings.spentBudget,
       ),
       remainingBudget: number(
         settings,
-        ["remaining_budget"],
+        [
+          "remaining_budget",
+          "remainingBudget",
+          "available_budget",
+          "remaining_budget_amount",
+          "remaining_after_plan",
+        ],
         base.settings.remainingBudget,
       ),
       forecastHorizon: Math.min(

@@ -826,7 +826,7 @@ export function PlanView({
         />
         <div className="plan-controls">
           <label className="field"><span>Số ngày mô phỏng (1–7)</span><input type="number" min="1" max="7" step="1" disabled={isRunning} value={horizonDays} onChange={(event) => { setHorizonDays(clampHorizon(Number(event.target.value))); setControlsDirty(true); }} /></label>
-          <label className="field"><span>Ngân sách tối đa</span><input type="number" min="0" step="1000" inputMode="decimal" disabled={isRunning} value={budgetOverride} placeholder={formatVnd(data.settings.monthlyBudget)} onChange={(event) => { setBudgetOverride(event.target.value); setControlsDirty(true); }} /></label>
+          <label className="field"><span>Ngân sách tối đa</span><input type="number" min="0" step="1000" inputMode="decimal" disabled={isRunning} value={budgetOverride} placeholder={formatVnd(data.settings.remainingBudget > 0 ? data.settings.remainingBudget : data.settings.monthlyBudget)} onChange={(event) => { setBudgetOverride(event.target.value); setControlsDirty(true); }} /></label>
           <label className="check plan-open-orders"><input type="checkbox" disabled={isRunning} checked={includeOpenPurchaseOrders} onChange={(event) => { setIncludeOpenPurchaseOrders(event.target.checked); setControlsDirty(true); }} /><span>Tính đơn mua hàng đang mở</span></label>
           <div className="plan-status"><span>Trạng thái</span><strong>{isRunning ? "Đang lập kế hoạch..." : decision.status === "completed" ? "Hoàn tất" : "Cần kiểm tra"}</strong></div>
         </div>
@@ -834,7 +834,7 @@ export function PlanView({
         {controlsDirty && !isRunning ? <Notice tone="warning">Kết quả dưới đây được tạo trước khi bạn thay đổi điều kiện. Hãy chạy lại mô phỏng.</Notice> : null}
         <Details summary="Ràng buộc đang áp dụng">
           <ul className="warning-list">
-            <li>Ngân sách còn: {formatVnd(data.settings.remainingBudget)}</li>
+            <li>Ngân sách còn: {formatVnd(data.settings.remainingBudget > 0 ? data.settings.remainingBudget : data.settings.monthlyBudget)}</li>
             <li>{data.inventory.filter((item) => item.moq != null).length} nguyên liệu có số lượng đặt tối thiểu</li>
             <li>{data.inventory.filter((item) => item.packSize != null).length} nguyên liệu có quy cách đóng gói</li>
             <li>{data.inventory.filter((item) => item.leadTimeDays != null).length} nguyên liệu có thời gian giao hàng</li>
@@ -905,7 +905,7 @@ export function PlanView({
             inputMode="decimal"
             disabled={runBusy}
             value={budgetOverride}
-            placeholder={formatVnd(data.settings.monthlyBudget)}
+            placeholder={formatVnd(data.settings.remainingBudget > 0 ? data.settings.remainingBudget : data.settings.monthlyBudget)}
             onChange={(event) => {
               setBudgetOverride(event.target.value);
               setControlsDirty(true);
