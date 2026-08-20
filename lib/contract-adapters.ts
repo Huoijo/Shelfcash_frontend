@@ -171,7 +171,7 @@ function constraintFor(
           text(item, ["ingredient_id"]) === ingredientId) ||
         (ingredient &&
           normalized(text(item, ["ingredient", "ingredient_name"])) ===
-            normalized(ingredient)),
+          normalized(ingredient)),
     ) ?? {}
   );
 }
@@ -228,8 +228,18 @@ function normalizeInventory(
       0,
     );
     const normalizedLots = lots.map((lot) => ({
-      lotId: text(lot, ["lot_id", "batch_id", "BATCH_ID"]),
-      batchId: text(lot, ["batch_id", "BATCH_ID", "batchId", "lot_id", "LOT_ID"]) || undefined,
+      lotId: text(lot, ["lot_id", "batch_code", "batch_id", "BATCH_CODE", "BATCH_ID"]),
+      batchId:
+        text(lot, [
+          "batch_code",
+          "batch_id",
+          "BATCH_CODE",
+          "BATCH_ID",
+          "batchCode",
+          "batchId",
+          "lot_id",
+          "LOT_ID",
+        ]) || undefined,
       ingredientId: text(lot, ["ingredient_id"]) || undefined,
       supplierId: text(lot, ["supplier_id"]) || undefined,
       ingredient:
@@ -250,8 +260,18 @@ function normalizeInventory(
     }));
 
     return {
-      lotId: text(first, ["lot_id", "batch_id", "BATCH_ID"]) || undefined,
-      batchId: text(first, ["batch_id", "BATCH_ID", "batchId", "lot_id", "LOT_ID"]) || undefined,
+      lotId: text(first, ["lot_id", "batch_code", "batch_id", "BATCH_CODE", "BATCH_ID"]) || undefined,
+      batchId:
+        text(first, [
+          "batch_code",
+          "batch_id",
+          "BATCH_CODE",
+          "BATCH_ID",
+          "batchCode",
+          "batchId",
+          "lot_id",
+          "LOT_ID",
+        ]) || undefined,
       ingredientId: text(first, ["ingredient_id"]) || undefined,
       supplierId:
         text(constraint, ["supplier_id"]) ||
@@ -416,19 +436,19 @@ function recipeLinesFrom(
         existing.productId && line.productId
           ? existing.productId === line.productId
           : stableEntityName(existing.product) ===
-            stableEntityName(line.product);
+          stableEntityName(line.product);
       const sameIngredient =
         existing.ingredientId && line.ingredientId
           ? existing.ingredientId === line.ingredientId
           : stableEntityName(existing.ingredient) ===
-            stableEntityName(line.ingredient);
+          stableEntityName(line.ingredient);
       const sameRecipeLine =
         sameProduct &&
         sameIngredient &&
         recipeVersionKey(existing.recipeVersion) ===
-          recipeVersionKey(line.recipeVersion) &&
+        recipeVersionKey(line.recipeVersion) &&
         (existing.effectiveDate?.slice(0, 10) ?? "") ===
-          (line.effectiveDate?.slice(0, 10) ?? "");
+        (line.effectiveDate?.slice(0, 10) ?? "");
       if (sameRecipeLine) {
         duplicateKey = existingKey;
         break;
@@ -487,7 +507,7 @@ function menuRowForProduct(
     (menuItem) =>
       Boolean(productName) &&
       normalized(text(menuItem, ["product", "product_name", "name"])) ===
-        normalized(productName),
+      normalized(productName),
   );
 }
 
@@ -527,12 +547,12 @@ function normalizeProducts(
       rawRecipeMatchesProduct(recipe, row),
     );
     const matchingRecipeLines = recipes.filter((line) => {
-        if (productId && line.productId) return line.productId === productId;
-        return (
-          Boolean(product && line.product) &&
-          normalized(line.product) === normalized(product)
-        );
-      });
+      if (productId && line.productId) return line.productId === productId;
+      return (
+        Boolean(product && line.product) &&
+        normalized(line.product) === normalized(product)
+      );
+    });
     const hasRecipe = matchingRecipeLines.length > 0;
     const recipeVersionLabel =
       firstScalar(matchingRecipeRows, ["recipe_version", "version"]) ??
@@ -757,7 +777,7 @@ export function adaptBootstrap(
       ),
       defaultStrategy:
         text(settings, ["default_strategy"]) === "economy" ||
-        text(settings, ["default_strategy"]) === "safe"
+          text(settings, ["default_strategy"]) === "safe"
           ? (text(settings, ["default_strategy"]) as ApiStrategy)
           : "balanced",
       version: number(settings, ["version"], base.settings.version),
@@ -815,12 +835,12 @@ function forecastPoint(row: ApiRecord): ForecastPoint {
 function warningMessages(value: unknown): string[] {
   return Array.isArray(value)
     ? value
-        .map((warning) =>
-          isRecord(warning)
-            ? text(warning, ["message", "code"])
-            : String(warning ?? ""),
-        )
-        .filter(Boolean)
+      .map((warning) =>
+        isRecord(warning)
+          ? text(warning, ["message", "code"])
+          : String(warning ?? ""),
+      )
+      .filter(Boolean)
     : [];
 }
 
@@ -847,9 +867,9 @@ export function adaptForecasts(
       const points = Array.from(
         new Map(
           rows
-        .map(forecastPoint)
-        .filter((point) => point.date)
-        .map((point) => [point.date, point] as const),
+            .map(forecastPoint)
+            .filter((point) => point.date)
+            .map((point) => [point.date, point] as const),
         ).values(),
       ).sort((left, right) => left.date.localeCompare(right.date));
       const total = (key: "p25" | "p50" | "p75") =>
@@ -1123,10 +1143,10 @@ export function adaptPlanningWorkflow(
       text(planningResult, ["procurement_plan_run_id"]) || undefined,
     budget: selected
       ? {
-          limit: data.settings.remainingBudget,
-          plannedCost: selected.cost,
-          remainingAfterPlan: data.settings.remainingBudget - selected.cost,
-        }
+        limit: data.settings.remainingBudget,
+        plannedCost: selected.cost,
+        remainingAfterPlan: data.settings.remainingBudget - selected.cost,
+      }
       : undefined,
     warnings,
   };
@@ -1341,13 +1361,13 @@ export function adaptPlan(
     },
     warnings: Array.isArray(planResponse.warnings)
       ? planResponse.warnings.map((warning) => {
-          const code = isRecord(warning) ? text(warning, ["code"]) : String(warning);
-          if (code === "SAFETY_STOCK_NOT_CONFIGURED") return "Chưa cấu hình tồn kho an toàn cho nguyên liệu này.";
-          if (code === "BUSINESS_CONSTRAINT_NOT_FOUND") return "Không tìm thấy cấu hình tồn kho phù hợp.";
-          if (code === "BUSINESS_CONSTRAINT_AMBIGUOUS") return "Có nhiều cấu hình cùng hiệu lực.";
-          if (code === "BUSINESS_CONSTRAINT_UNIT_INVALID" || code === "SAFETY_STOCK_UNIT_CONVERSION_FAILED") return "Đơn vị safety stock không thể quy đổi.";
-          return isRecord(warning) ? text(warning, ["message"], code) : code;
-        })
+        const code = isRecord(warning) ? text(warning, ["code"]) : String(warning);
+        if (code === "SAFETY_STOCK_NOT_CONFIGURED") return "Chưa cấu hình tồn kho an toàn cho nguyên liệu này.";
+        if (code === "BUSINESS_CONSTRAINT_NOT_FOUND") return "Không tìm thấy cấu hình tồn kho phù hợp.";
+        if (code === "BUSINESS_CONSTRAINT_AMBIGUOUS") return "Có nhiều cấu hình cùng hiệu lực.";
+        if (code === "BUSINESS_CONSTRAINT_UNIT_INVALID" || code === "SAFETY_STOCK_UNIT_CONVERSION_FAILED") return "Đơn vị safety stock không thể quy đổi.";
+        return isRecord(warning) ? text(warning, ["message"], code) : code;
+      })
       : [],
   };
 }

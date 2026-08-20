@@ -239,6 +239,9 @@ const fieldAliases: Partial<
   inventory: {
     ingredient: "ingredient_name",
     lot_id: "batch_id",
+    batch_code: "batch_id",
+    batchcode: "batch_id",
+    batch_id: "batch_id",
     last_counted: "snapshot_date",
   },
   sales_history: {
@@ -263,6 +266,10 @@ const fieldAliases: Partial<
     quantity: "quantity_received",
     unit_cost: "unit_price",
     supplier: "supplier_name",
+    batch_code: "batch_id",
+    batchcode: "batch_id",
+    lot_id: "batch_id",
+    batch_id: "batch_id",
   },
   supplier_constraints: {
     ingredient: "ingredient_name",

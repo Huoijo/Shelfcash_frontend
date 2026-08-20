@@ -202,8 +202,8 @@ function suggestionFor(
     return (
       candidates.find(
         (candidate) =>
-          (sheetName &&
-            stringValue(candidate, ["sheet_name", "name"]) === sheetName),
+        (sheetName &&
+          stringValue(candidate, ["sheet_name", "name"]) === sheetName),
       ) ??
       candidates[index] ??
       {}
@@ -269,12 +269,12 @@ export function buildEditableMappings(
     };
     const sheetType = normalizeSheetType(
       stringValue(suggestion, ["sheet_type", "type"]) ||
-        stringValue(profile, [
-          "sheet_type",
-          "detected_sheet_type",
-          "detected_type",
-          "type",
-        ]),
+      stringValue(profile, [
+        "sheet_type",
+        "detected_sheet_type",
+        "detected_type",
+        "type",
+      ]),
     );
     const columns =
       stringArray(profile.columns).length > 0
@@ -319,7 +319,7 @@ export function applyMappingSuggestion(
   if (!isProcessableSheet(current)) return current;
   const sheetType = normalizeSheetType(
     stringValue(suggestion, ["sheet_type", "type"], current.sheetType) ||
-      current.sheetType,
+    current.sheetType,
   );
   const nextMapping = mappingFrom(suggestion);
   const proposedMapping = Object.keys(nextMapping).length
@@ -501,9 +501,9 @@ export function toConfirmMappings(
       skip
         ? []
         : item.columns.map((source) => [
-            source,
-            normalizeCanonicalField(sheetType, item.mapping[source]),
-          ]),
+          source,
+          normalizeCanonicalField(sheetType, item.mapping[source]),
+        ]),
     );
     const payload: ConfirmImportMapping = {
       profile_id: profileId,
@@ -835,8 +835,16 @@ function normalizedInventory(
     const packSize = constraint?.packSize || existing?.packSize || moq || 1;
     const safetyStock = existing?.safetyStock ?? null;
     const batchId =
-      stringValue(first, ["batch_id", "BATCH_ID", "batchId", "lot_id"]) ||
-      existing?.batchId;
+      stringValue(first, [
+        "batch_code",
+        "batch_id",
+        "BATCH_CODE",
+        "BATCH_ID",
+        "batchCode",
+        "batchId",
+        "lot_id",
+        "LOT_ID",
+      ]) || existing?.batchId;
     return {
       batchId,
       ingredient,
@@ -942,29 +950,29 @@ export function mergeIngestionResult(
   );
   const products = menu.length
     ? menu.map((item) => ({
-        productId: item.productId || undefined,
-        product: item.product,
-        sku: item.sku,
-        price: item.price,
-        itemType: item.itemType,
-        status: item.status,
-        sellingUnit: item.sellingUnit,
-        recipeStatus:
-          item.itemType === "single" &&
+      productId: item.productId || undefined,
+      product: item.product,
+      sku: item.sku,
+      price: item.price,
+      itemType: item.itemType,
+      status: item.status,
+      sellingUnit: item.sellingUnit,
+      recipeStatus:
+        item.itemType === "single" &&
           (recipes.length ? recipes : base.recipes).some(
             (line) =>
               normalizeText(line.product) === normalizeText(item.product),
           )
-            ? ("Hoàn chỉnh" as const)
-            : ("Thiếu định lượng" as const),
-        effectiveDate:
-          base.products.find(
-            (product) =>
-              normalizeText(product.product) === normalizeText(item.product),
-          )?.effectiveDate ??
-          result.forecast_date ??
-          base.today,
-      }))
+          ? ("Hoàn chỉnh" as const)
+          : ("Thiếu định lượng" as const),
+      effectiveDate:
+        base.products.find(
+          (product) =>
+            normalizeText(product.product) === normalizeText(item.product),
+        )?.effectiveDate ??
+        result.forecast_date ??
+        base.today,
+    }))
     : derivedProducts;
 
   return {
@@ -991,7 +999,7 @@ export function mergeIngestionResult(
       storeId: result.store_id || base.settings.storeId,
       forecastHorizon:
         Number.isFinite(result.forecast_horizon) &&
-        result.forecast_horizon > 0
+          result.forecast_horizon > 0
           ? result.forecast_horizon
           : base.settings.forecastHorizon,
       monthlyBudget: numberValue(
