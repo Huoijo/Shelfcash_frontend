@@ -27,6 +27,7 @@ export type DataType =
 
 export interface InventoryItem {
   lotId?: string;
+  batchId?: string;
   ingredientId?: string;
   supplierId?: string;
   constraintId?: string;

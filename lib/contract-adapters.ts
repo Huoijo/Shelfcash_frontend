@@ -229,7 +229,7 @@ function normalizeInventory(
     );
     const normalizedLots = lots.map((lot) => ({
       lotId: text(lot, ["lot_id", "batch_id", "BATCH_ID"]),
-      batchId: text(lot, ["batch_id", "BATCH_ID", "lot_id"]) || undefined,
+      batchId: text(lot, ["batch_id", "BATCH_ID", "batchId", "lot_id", "LOT_ID"]) || undefined,
       ingredientId: text(lot, ["ingredient_id"]) || undefined,
       supplierId: text(lot, ["supplier_id"]) || undefined,
       ingredient:
@@ -251,6 +251,7 @@ function normalizeInventory(
 
     return {
       lotId: text(first, ["lot_id", "batch_id", "BATCH_ID"]) || undefined,
+      batchId: text(first, ["batch_id", "BATCH_ID", "batchId", "lot_id", "LOT_ID"]) || undefined,
       ingredientId: text(first, ["ingredient_id"]) || undefined,
       supplierId:
         text(constraint, ["supplier_id"]) ||

@@ -834,7 +834,11 @@ function normalizedInventory(
     const moq = constraint?.moq || existing?.moq || 1;
     const packSize = constraint?.packSize || existing?.packSize || moq || 1;
     const safetyStock = existing?.safetyStock ?? null;
+    const batchId =
+      stringValue(first, ["batch_id", "BATCH_ID", "batchId", "lot_id"]) ||
+      existing?.batchId;
     return {
+      batchId,
       ingredient,
       sku:
         stringValue(first, ["sku", "ingredient_id"]) ||

@@ -354,6 +354,7 @@ test("inventory retains lot_id for mutations and uses batch_id as the display co
 
   assert.equal(data.inventory[0]?.lots?.[0]?.lotId, "lot-internal-1");
   assert.equal(data.inventory[0]?.lots?.[0]?.batchId, "BATCH-2026-08-A");
+  assert.equal(data.inventory[0]?.batchId, "BATCH-2026-08-A");
 });
 
 test("product forecasts retain persisted calibrated intervals and warnings", () => {
