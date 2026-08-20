@@ -768,9 +768,9 @@ export function ImportView({
               <span>
                 <strong>Tệp mẫu</strong>
               </span>
-              <a href="/api/sample" download>
+              <a href="/shelfcash_sample_dataset.zip" download="shelfcash_sample_dataset.zip">
                 <Download size={16} />
-                Tải Excel mẫu
+                Tải file excel mẫu
               </a>
             </div>
           </div>
