@@ -289,6 +289,7 @@ export interface SupplierConstraintRow {
   moq: number;
   packSize: number;
   leadTimeDays: number;
+  shelfLifeDays?: number;
   orderUnit?: string;
   baseUnit?: string;
   version?: number;

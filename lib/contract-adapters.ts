@@ -719,6 +719,7 @@ export function adaptBootstrap(
         moq: number(row, ["moq"]),
         packSize: number(row, ["pack_size"]),
         leadTimeDays: number(row, ["lead_time_days"]),
+        shelfLifeDays: optionalNumber(row, ["shelf_life_days", "shelf_life"]) ?? undefined,
         orderUnit: text(row, ["order_unit"]) || undefined,
         baseUnit: text(row, ["base_unit"]) || undefined,
         version: optionalNumber(row, ["version"]) ?? undefined,

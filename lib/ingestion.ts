@@ -710,6 +710,10 @@ function normalizedSupplierConstraints(
         "lead_time",
         "delivery_days",
       ]),
+      shelfLifeDays:
+        firstValue(row, ["shelf_life_days", "shelf_life"]) !== undefined
+          ? numberValue(row, ["shelf_life_days", "shelf_life"])
+          : undefined,
     }))
     .filter((row) => Boolean(row.ingredient));
 }

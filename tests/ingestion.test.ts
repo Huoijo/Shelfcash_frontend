@@ -505,6 +505,11 @@ test("frontend exposes every backend canonical sheet type and field", () => {
       "available_delivery_days",
     ),
   );
+  assert.ok(
+    CANONICAL_SCHEMAS.supplier_constraints.fields.includes(
+      "shelf_life_days",
+    ),
+  );
 });
 
 test("06_Menu headers map to the Menu canonical schema", () => {
