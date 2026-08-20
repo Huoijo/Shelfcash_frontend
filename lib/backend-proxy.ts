@@ -1,4 +1,5 @@
 import type { ShelfCashApiErrorBody } from "./types";
+import { isMockModeActive, handleMockApiRequest } from "./mock-service";
 
 type RouteRule = {
   pattern: RegExp;
@@ -20,6 +21,10 @@ const routeRules: RouteRule[] = [
   {
     pattern: /^\/api\/v1\/imports\/[^/]+\/result$/,
     methods: methods("GET"),
+  },
+  {
+    pattern: /^\/api\/v1\/mock\/(?:reset|seed|state)$/,
+    methods: methods("GET", "POST"),
   },
   {
     pattern:
@@ -257,6 +262,26 @@ export async function forwardShelfCashRequest(
       requestId,
     );
   }
+
+  // If Mock API Mode is active, handle mock response directly
+  if (isMockModeActive()) {
+    let bodyText: string | undefined;
+    if (method !== "GET" && method !== "HEAD") {
+      try {
+        const cloned = request.clone();
+        bodyText = await cloned.text();
+      } catch {}
+    }
+    const mockResponse = await handleMockApiRequest(path, method, bodyText);
+    const headers = new Headers(mockResponse.headers);
+    if (!headers.has("X-Request-ID")) headers.set("X-Request-ID", requestId);
+    headers.set("X-ShelfCash-Mock", "true");
+    return new Response(await mockResponse.arrayBuffer(), {
+      status: mockResponse.status,
+      headers,
+    });
+  }
+
   const baseUrl = backendBaseUrl();
   if (!baseUrl) {
     return errorResponse(

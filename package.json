@@ -14,7 +14,10 @@
     "test:logic": "node --import tsx --test tests/*.test.ts tests/*.test.tsx",
     "validate:artifact": "node scripts/sites.mjs validate",
     "lint": "node scripts/sites.mjs run eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "node scripts/sites.mjs run drizzle-kit generate"
+    "db:generate": "node scripts/sites.mjs run drizzle-kit generate",
+    "reset-data": "node scripts/reset-data.mjs",
+    "clear-data": "node scripts/reset-data.mjs",
+    "seed-data": "node scripts/seed-data.mjs"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",

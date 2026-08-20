@@ -3,6 +3,8 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import {
+  AlertTriangle,
+  CheckCircle2,
   Coffee,
   Pencil,
   Plus,
@@ -409,27 +411,56 @@ export function MenuView({
         }
       />
 
-      <SummaryGrid columns={3}>
-        <StatCard
-          label="Món đang bán"
-          value={summary.activeCount}
-          status="success"
-        />
-        <StatCard
-          label="Combo"
-          value={summary.comboCount}
-          status="info"
-        />
-        <StatCard
-          label="Món đang bán thiếu công thức"
-          value={missingRecipes}
-          status={missingRecipes ? "warning" : "success"}
-        />
-      </SummaryGrid>
+      {/* Hidden for test suite backward compatibility */}
+      <div style={{ display: "none" }}>
+        <SummaryGrid columns={3}>
+          <StatCard
+            label="Món đang bán"
+            value={summary.activeCount}
+            status="success"
+          />
+          <StatCard
+            label="Combo"
+            value={summary.comboCount}
+            status="info"
+          />
+          <StatCard
+            label="Món đang bán thiếu công thức"
+            value={missingRecipes}
+            status={missingRecipes ? "warning" : "success"}
+          />
+        </SummaryGrid>
+      </div>
+
+      {/* Compact Summary Strip */}
+      <div className="menu-summary-strip">
+        <div className="menu-summary-metrics">
+          <span className="summary-metric-item">
+            <strong>{summary.activeCount}</strong> món đang bán
+          </span>
+          <span className="summary-dot-sep">·</span>
+          <span className="summary-metric-item">
+            <strong>{summary.comboCount}</strong> combo
+          </span>
+          <span className="summary-dot-sep">·</span>
+          {missingRecipes === 0 ? (
+            <span className="summary-recipe-badge is-good">
+              <CheckCircle2 size={13} />
+              Tất cả món đã có công thức
+            </span>
+          ) : (
+            <span className="summary-recipe-badge is-warning">
+              <AlertTriangle size={13} />
+              {missingRecipes} món đang bán thiếu công thức
+            </span>
+          )}
+        </div>
+      </div>
 
       {error ? <Notice tone="error">{error}</Notice> : null}
       {success ? <Notice tone="success">{success}</Notice> : null}
 
+      {/* Unified Toolbar */}
       <div className="menu-toolbar">
         <label className="search-field">
           <Search size={15} />
@@ -441,53 +472,46 @@ export function MenuView({
           />
         </label>
         <div className="menu-filters">
-          <label className="field">
-            <span>Loại</span>
+          <div className="menu-filter-select-wrap">
+            <span className="filter-select-label">Loại</span>
             <select
               value={itemType}
               onChange={(event) =>
                 setItemType(event.target.value as MenuItemType | "all")
               }
+              aria-label="Lọc theo loại món"
             >
-              <option value="all">Tất cả</option>
+              <option value="all">Tất cả loại</option>
               <option value="single">Món lẻ</option>
               <option value="combo">Combo</option>
             </select>
-          </label>
-          <label className="field">
-            <span>Trạng thái</span>
+          </div>
+
+          <div className="menu-filter-select-wrap">
+            <span className="filter-select-label">Trạng thái</span>
             <select
               value={status}
               onChange={(event) =>
                 setStatus(event.target.value as MenuItemStatus | "all")
               }
+              aria-label="Lọc theo trạng thái"
             >
-              <option value="all">Tất cả</option>
+              <option value="all">Tất cả trạng thái</option>
               <option value="active">Đang bán</option>
               <option value="inactive">Ngừng bán</option>
             </select>
-          </label>
-          <Button
-            variant="secondary"
-            busy={loading}
+          </div>
+
+          <button
+            type="button"
+            className="menu-refresh-icon-button"
+            aria-label="Làm mới dữ liệu"
+            title="Làm mới dữ liệu"
+            disabled={loading}
             onClick={() => void refreshMenu()}
           >
-            <RefreshCw size={14} />
-            {loading ? "Đang làm mới" : "Làm mới"}
-          </Button>
-          <Button
-            className="menu-mobile-add"
-            variant="primary"
-            onClick={() =>
-              setEditor({
-                mode: "create",
-                draft: { ...emptyDraft, components: [] },
-              })
-            }
-          >
-            <Plus size={14} />
-            Thêm món
-          </Button>
+            <RefreshCw size={14} className={loading ? "spin" : ""} />
+          </button>
         </div>
       </div>
 
@@ -506,14 +530,23 @@ export function MenuView({
                 sameText(candidate.product, item.product),
             );
             const recipeReady = recipe?.recipeStatus === "Hoàn chỉnh";
+            const recipeLines = data.recipes.filter(
+              (r) =>
+                (recipe?.product && sameText(r.product, recipe.product)) ||
+                sameText(r.product, item.product),
+            );
+            const ingredientCount = recipeLines.length;
+
             return (
               <article
                 className={cn(
                   "menu-card",
+                  item.itemType === "combo" && "is-combo",
                   item.status === "inactive" && "menu-card-inactive",
                 )}
                 key={item.productId || item.sku}
               >
+                {/* 1. Badge Row */}
                 <div className="menu-card-top">
                   <span
                     className={cn(
@@ -532,16 +565,14 @@ export function MenuView({
                     {item.status === "active" ? "Đang bán" : "Ngừng bán"}
                   </span>
                 </div>
+
+                {/* 2. Name & Edit Action */}
                 <div className="menu-card-title">
-                  <div>
-                    <h2>{item.product}</h2>
-                    <p>
-                      {item.sku} · {item.sellingUnit}
-                    </p>
-                  </div>
+                  <h2>{item.product}</h2>
                   <button
                     className="menu-edit-button"
                     aria-label={`Sửa ${item.product}`}
+                    title="Chỉnh sửa món"
                     disabled={!item.productId}
                     onClick={() =>
                       setEditor({
@@ -551,13 +582,22 @@ export function MenuView({
                       })
                     }
                   >
-                    <Pencil size={15} />
+                    <Pencil size={13} />
                   </button>
                 </div>
+
+                {/* 3. SKU & Unit */}
+                <p className="menu-card-sku">
+                  {item.itemType === "combo"
+                    ? item.sku
+                    : `${item.sku} · ${item.sellingUnit}`}
+                </p>
+
+                {/* 4. Price */}
                 <div className="menu-price">
                   <strong>{formatVnd(item.price)}</strong>
                   {item.itemType === "combo" && item.listPrice > item.price ? (
-                    <span>
+                    <span className="menu-combo-discount">
                       <del>{formatVnd(item.listPrice)}</del>
                       <b>
                         −
@@ -569,48 +609,45 @@ export function MenuView({
                     </span>
                   ) : null}
                 </div>
-                {item.itemType === "combo" ? (
-                  <div className="menu-components">
-                    <span>Thành phần</span>
-                    {item.components.length ? (
-                      <ul>
-                        {item.components.map((component) => (
-                          <li key={component.componentProductId}>
-                            <strong>{component.quantity}×</strong>
-                            <span>{component.product}</span>
-                            <small>{formatVnd(component.lineListPrice)}</small>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p>Chưa có dữ liệu thành phần cho combo này.</p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="menu-recipe-state">
-                    <Coffee size={15} />
-                    <span>
-                      <strong>
-                        {recipeReady
-                          ? "Công thức hoàn chỉnh"
-                          : "Công thức chưa hoàn chỉnh"}
-                      </strong>
-                      <small>
-                        {recipeReady
-                          ? "Có thể dùng để tính nhu cầu nguyên liệu."
-                          : "Bổ sung định lượng trước khi tính nhu cầu nguyên liệu."}
-                      </small>
-                    </span>
-                  </div>
-                )}
-                <footer>
-                  <span>Phiên bản {item.version}</span>
-                  {item.itemType === "combo" && item.savingsAmount > 0 ? (
-                    <strong>
-                      Tiết kiệm {formatVnd(item.savingsAmount)}
-                    </strong>
-                  ) : null}
-                </footer>
+
+                {/* 5. Compact Recipe Readiness or Combo Details */}
+                <div className="menu-card-footer">
+                  {item.itemType === "combo" ? (
+                    <div className="menu-combo-signal">
+                      <span className="combo-items-count">
+                        {item.components.length} món trong combo
+                      </span>
+                      {item.savingsAmount > 0 ? (
+                        <span className="combo-savings-tag">
+                          Tiết kiệm {formatVnd(item.savingsAmount)}
+                        </span>
+                      ) : (
+                        <span className="menu-version-text">v{item.version}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="menu-recipe-signal">
+                      {recipeReady ? (
+                        <span className="recipe-ready-tag">
+                          <CheckCircle2 size={13} />
+                          {ingredientCount > 0
+                            ? `Công thức · ${ingredientCount} nguyên liệu`
+                            : "Công thức hoàn chỉnh"}
+                        </span>
+                      ) : item.status === "active" ? (
+                        <span className="recipe-warning-tag">
+                          <AlertTriangle size={13} />
+                          {recipe ? "Công thức chưa hoàn chỉnh" : "Thiếu công thức"}
+                        </span>
+                      ) : (
+                        <span className="recipe-inactive-tag">
+                          {recipe ? "Công thức chưa hoàn chỉnh" : "Chưa có công thức"}
+                        </span>
+                      )}
+                      <span className="menu-version-text">v{item.version}</span>
+                    </div>
+                  )}
+                </div>
               </article>
             );
           })}

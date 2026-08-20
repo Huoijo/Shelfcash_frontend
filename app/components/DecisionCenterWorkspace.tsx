@@ -45,6 +45,18 @@ function dateWindowLabel(dates: string[], asOfDate?: string | null, horizon?: nu
   return "";
 }
 
+function formatBackendDate(value?: string): string {
+  return value ? formatDate(value) : "chưa ghi nhận";
+}
+
+function parseDaysRemaining(expiryDate?: string, todayDate?: string): number | null {
+  if (!expiryDate) return null;
+  const target = new Date(`${expiryDate}T00:00:00Z`).getTime();
+  const base = new Date(`${todayDate || "2026-08-20"}T00:00:00Z`).getTime();
+  if (isNaN(target) || isNaN(base)) return null;
+  return Math.round((target - base) / (1000 * 60 * 60 * 24));
+}
+
 function DemandRows({
   rows,
   onExplain,
@@ -54,12 +66,24 @@ function DemandRows({
   onExplain: (row: DecisionDemandView) => void;
   riskIds: Set<string>;
 }) {
-  return <div className="decision-demand-rows">
-    {rows.map((row) => <article className="decision-demand-row" key={`${row.ingredientId}-${row.targetDate}`}>
-      <div><h3 title={row.ingredientName}>{row.ingredientName}</h3><p>{quantity(row.p50, row.unit)} dự kiến</p><small>Khoảng {quantity(row.p25, row.unit)} – {quantity(row.p75, row.unit)}</small></div>
-      <div className="decision-demand-row-meta"><span>{riskIds.has(row.ingredientId) ? "Có nguy cơ thiếu" : "Chưa có cảnh báo rủi ro"}</span><small>Đến từ {row.contributions.length} món</small><Button onClick={() => onExplain(row)} variant="secondary">Giải thích nhu cầu</Button></div>
-    </article>)}
-  </div>;
+  return (
+    <div className="decision-demand-rows">
+      {rows.map((row) => (
+        <article className="decision-demand-row" key={`${row.ingredientId}-${row.targetDate}`}>
+          <div>
+            <h3 title={row.ingredientName}>{row.ingredientName}</h3>
+            <p>{quantity(row.p50, row.unit)} dự kiến</p>
+            <small>Khoảng {quantity(row.p25, row.unit)} – {quantity(row.p75, row.unit)}</small>
+          </div>
+          <div className="decision-demand-row-meta">
+            <span>{riskIds.has(row.ingredientId) ? "Có nguy cơ thiếu" : "Chưa có cảnh báo rủi ro"}</span>
+            <small>Đến từ {row.contributions.length} món</small>
+            <Button onClick={() => onExplain(row)} variant="secondary">Giải thích nhu cầu</Button>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
 }
 
 function TodayOperationalView({
@@ -71,50 +95,323 @@ function TodayOperationalView({
   data: BootstrapData;
   plan: PlanResponse;
   decision: DecisionPackage | null;
-  onNavigate: (target: "inventory" | "future", ingredientId?: string) => void;
+  onNavigate: (target: "inventory" | "plan") => void;
 }) {
   const view = useMemo(() => adaptDecisionRunView(decision, data), [data, decision]);
-  const expiringLots = plan.enrichedInventory.flatMap((item) => (item.lots ?? []).filter((lot) => lot.status === "expiring" || lot.status === "expired").map((lot) => ({ ingredient: item.ingredient, lot })));
-  const actions: TodayAction[] = [
-    ...view.risks.map((risk) => ({
-      key: `risk-${risk.ingredientId}`,
-      urgency: risk.stockoutDate && risk.stockoutDate <= data.today ? "Cần xử lý ngay" : "Cần theo dõi" as TodayAction["urgency"],
-      title: risk.ingredientName,
-      body: `${risk.stockoutDate ? `Có thể thiếu từ ${formatDate(risk.stockoutDate)}. ` : ""}${risk.shortageQuantity == null ? "Có tín hiệu rủi ro tồn kho." : `Thiếu dự kiến ${quantity(risk.shortageQuantity, risk.unit)}.`}`,
-      cta: "Xem nhu cầu & ràng buộc",
-      target: "future" as const,
-      ingredientId: risk.ingredientId,
-    })),
-    ...expiringLots.map(({ ingredient, lot }) => ({
-      key: `expiry-${lot.lotId}`,
-      urgency: "Sắp đến hạn" as const,
-      title: ingredient,
-      body: `Lô cần chú ý · hạn dùng ${lot.expiryDate ? formatDate(lot.expiryDate) : "chưa ghi nhận"}.`,
-      cta: "Xem lô tồn",
-      target: "inventory" as const,
-    })),
-    ...(noFeasibleDecision(decision) ? [{
-      key: "plan-review",
-      urgency: "Chưa đủ dữ liệu để xác nhận" as const,
-      title: "Kế hoạch nhập hàng",
-      body: "Dự báo và nhu cầu đã tính, nhưng chưa có phương án mua đáp ứng toàn bộ ràng buộc.",
-      cta: "Xem nhu cầu & ràng buộc",
-      target: "future" as const,
-    }] : []),
-  ].slice(0, 8);
-  const hasLotData = plan.enrichedInventory.some((item) => (item.lots ?? []).length > 0);
 
-  return <>
-    <section className="decision-view-intro"><span className="eyebrow">Vận hành trong ngày</span><h2>Hôm nay</h2></section>
-    <SummaryGrid className="decision-today-cards" columns={4}>
-      {view.risks.length ? <StatCard icon={<CircleAlert aria-hidden="true" />} label="Có nguy cơ thiếu hàng" status="warning" value={view.risks.length} /> : null}
-      {hasLotData ? <StatCard icon={<Clock3 aria-hidden="true" />} label="Lô sắp hết hạn" status={expiringLots.length ? "warning" : "success"} value={expiringLots.length} /> : null}
-      {noFeasibleDecision(decision) ? <StatCard icon={<ScanSearch aria-hidden="true" />} label="Cần rà soát kế hoạch" status="warning" value="1" /> : null}
-      {decision?.status === "completed" && decision.recommended_plan?.items?.length ? <StatCard icon={<PackageSearch aria-hidden="true" />} label="Dòng mua cần xử lý" status="success" value={decision.recommended_plan.items.length} /> : null}
-    </SummaryGrid>
-    <section className="decision-priority" aria-labelledby="decision-priority-title"><SectionHeading title="Ưu tiên hôm nay" />{actions.length ? <div className="decision-priority-list">{actions.map((action) => <article key={action.key}><span className={`decision-urgency ${action.urgency === "Cần xử lý ngay" ? "critical" : ""}`}>{action.urgency}</span><div><h3>{action.title}</h3><p>{action.body}</p></div><Button onClick={() => onNavigate(action.target, action.ingredientId)} variant="secondary">{action.cta} <ArrowRight aria-hidden="true" size={16} /></Button></article>)}</div> : <Notice tone="success">Chưa có việc khẩn cần xử lý hôm nay.</Notice>}</section>
-    {view.risks.length || expiringLots.length ? <section className="decision-attention" aria-labelledby="decision-attention-title"><SectionHeading title="Tồn kho cần chú ý" />{view.risks.length ? <div className="decision-attention-list">{view.risks.map((risk) => <article key={risk.ingredientId}><div><h3>{risk.ingredientName}</h3><p>{risk.stockoutDate ? `Có thể thiếu từ ${formatDate(risk.stockoutDate)}` : "Có tín hiệu rủi ro tồn kho"}</p></div><span>{risk.shortageQuantity == null ? "—" : `Thiếu ${quantity(risk.shortageQuantity, risk.unit)}`}</span><Button onClick={() => onNavigate("future", risk.ingredientId)} variant="secondary">Xem chi tiết</Button></article>)}</div> : <div className="decision-attention-list">{expiringLots.map(({ ingredient, lot }) => <article key={lot.lotId}><div><h3>{ingredient}</h3><p>Hạn dùng {lot.expiryDate ? formatDate(lot.expiryDate) : "chưa ghi nhận"}</p></div><span>Lô cần chú ý</span><Button onClick={() => onNavigate("inventory")} variant="secondary">Xem lô tồn</Button></article>)}</div>}</section> : null}
-  </>;
+  // Extract and sort inventory items with expiring lots by daysRemaining ascending (Cam 4d -> Chuối 6d)
+  const inventoryItemsWithExpiringLots = useMemo(() => {
+    const map = new Map<string, {
+      key: string;
+      ingredientId: string;
+      ingredient: string;
+      unit: string;
+      affectedQty: number;
+      earliestExpiry?: string;
+      daysRemaining: number | null;
+      lotCount: number;
+    }>();
+
+    for (const item of plan.enrichedInventory) {
+      const expiringOrExpiredLots = (item.lots ?? []).filter(
+        (l) => l.status === "expiring" || l.status === "expired"
+      );
+      if (expiringOrExpiredLots.length > 0) {
+        const totalAffected = expiringOrExpiredLots.reduce((sum, l) => sum + (l.onHand || 0), 0);
+        const earliestExpiry = expiringOrExpiredLots
+          .map((l) => l.expiryDate)
+          .filter(Boolean)
+          .sort()[0];
+        const days = parseDaysRemaining(earliestExpiry, data.today);
+        map.set(item.ingredientId || item.sku, {
+          key: item.ingredientId || item.sku,
+          ingredientId: item.ingredientId || item.sku,
+          ingredient: item.ingredient,
+          unit: item.unit,
+          affectedQty: totalAffected || item.onHand,
+          earliestExpiry,
+          daysRemaining: days,
+          lotCount: expiringOrExpiredLots.length,
+        });
+      } else if (item.statusKey === "expiring" || item.statusKey === "expired") {
+        const days = parseDaysRemaining(item.expiryDate, data.today);
+        map.set(item.ingredientId || item.sku, {
+          key: item.ingredientId || item.sku,
+          ingredientId: item.ingredientId || item.sku,
+          ingredient: item.ingredient,
+          unit: item.unit,
+          affectedQty: item.onHand,
+          earliestExpiry: item.expiryDate,
+          daysRemaining: days,
+          lotCount: 1,
+        });
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      const daysA = a.daysRemaining ?? 999;
+      const daysB = b.daysRemaining ?? 999;
+      return daysA - daysB;
+    });
+  }, [plan.enrichedInventory, data.today]);
+
+  const purchasePlanItems = decision?.recommended_plan?.items ?? [];
+  const purchaseItemCount = purchasePlanItems.length;
+  const totalPlannedCost =
+    decision?.budget?.plannedCost ??
+    purchasePlanItems.reduce((sum, line) => sum + (line.estimated_cost ?? 0), 0);
+  const hasFeasiblePlan =
+    decision?.status === "completed" &&
+    Boolean(decision.recommended_strategy) &&
+    purchaseItemCount > 0;
+  const isNoFeasible = noFeasibleDecision(decision);
+
+  const hasDemand = view.demand.length > 0;
+  const hasForecast = Object.keys(plan.forecasts).length > 0 || hasDemand;
+  const isRunning = decision?.status === "queued" || decision?.status === "running";
+
+  const forecastStatusText = hasForecast ? "Sẵn sàng" : isRunning ? "Đang chạy" : "Chưa chạy";
+  const demandStatusText = hasDemand ? "Đã tính" : isRunning ? "Đang tính" : "Chờ dự báo";
+  const planStatusText = hasFeasiblePlan
+    ? "Sẵn sàng"
+    : isNoFeasible
+      ? "Chưa khả thi"
+      : isRunning
+        ? "Đang xử lý"
+        : "Chờ dữ liệu";
+
+  const expiringLotsCount = plan.enrichedInventory.flatMap((item) =>
+    (item.lots ?? []).filter((lot) => lot.status === "expiring" || lot.status === "expired")
+  ).length || inventoryItemsWithExpiringLots.length;
+
+  const operationalAlerts = useMemo(() => {
+    const alerts: Array<{
+      key: string;
+      ingredientId?: string;
+      title: string;
+      context: string;
+      daysRemaining?: number | null;
+      severity: "critical" | "warning";
+      statusLabel?: string;
+      cta: string;
+      target: "inventory" | "plan";
+    }> = [];
+
+    // Decision run stockout risks
+    for (const risk of view.risks) {
+      alerts.push({
+        key: `risk-${risk.ingredientId}`,
+        ingredientId: risk.ingredientId,
+        title: risk.ingredientName,
+        context: `${risk.stockoutDate ? `Có thể thiếu từ ${formatDate(risk.stockoutDate)}. ` : ""}${risk.shortageQuantity == null ? "Có tín hiệu rủi ro tồn kho." : `Thiếu dự kiến ${quantity(risk.shortageQuantity, risk.unit)}.`}`,
+        daysRemaining: risk.stockoutDate ? parseDaysRemaining(risk.stockoutDate, data.today) : null,
+        severity: risk.stockoutDate && risk.stockoutDate <= data.today ? "critical" : "warning",
+        statusLabel: "Nguy cơ thiếu",
+        cta: "Xem nhu cầu & ràng buộc",
+        target: "plan",
+      });
+    }
+
+    // Expiring lots
+    for (const item of inventoryItemsWithExpiringLots) {
+      const isCritical = item.daysRemaining != null && item.daysRemaining <= 4;
+      alerts.push({
+        key: `lot-${item.key}`,
+        ingredientId: item.ingredientId,
+        title: item.ingredient,
+        context: `${formatQuantity(item.affectedQty, item.unit)} thuộc lô gần hạn${item.lotCount > 1 ? ` · ${item.lotCount} lô` : ""}`,
+        daysRemaining: item.daysRemaining,
+        severity: isCritical ? "critical" : "warning",
+        statusLabel: item.earliestExpiry ? `Hạn ${formatBackendDate(item.earliestExpiry)}` : "Gần hạn",
+        cta: "Xem kho →",
+        target: "inventory",
+      });
+    }
+
+    return alerts.sort((a, b) => {
+      const daysA = a.daysRemaining ?? 999;
+      const daysB = b.daysRemaining ?? 999;
+      return daysA - daysB;
+    });
+  }, [view.risks, inventoryItemsWithExpiringLots, data.today]);
+
+  return (
+    <div className="today-briefing-wrap">
+      {/* ── 1. TRẠNG THÁI QUYẾT ĐỊNH (Pipeline Strip) ── */}
+      <section className="today-pipeline-section" aria-labelledby="today-pipeline-title">
+        <span id="today-pipeline-title" className="today-section-eyebrow">Trạng thái quyết định</span>
+        <div className="today-pipeline-strip">
+          <div className="pipeline-stage">
+            <span className={`pipeline-dot ${hasForecast ? "is-ready" : isRunning ? "is-running" : "is-pending"}`} />
+            <div className="pipeline-stage-info">
+              <span className="pipeline-stage-label">Dự báo</span>
+              <strong className="pipeline-stage-status">{forecastStatusText}</strong>
+            </div>
+          </div>
+
+          <span className="pipeline-connector" aria-hidden="true">→</span>
+
+          <div className="pipeline-stage">
+            <span className={`pipeline-dot ${hasDemand ? "is-ready" : isRunning ? "is-running" : "is-pending"}`} />
+            <div className="pipeline-stage-info">
+              <span className="pipeline-stage-label">Nhu cầu</span>
+              <strong className="pipeline-stage-status">{demandStatusText}</strong>
+            </div>
+          </div>
+
+          <span className="pipeline-connector" aria-hidden="true">→</span>
+
+          <div className="pipeline-stage">
+            <span className={`pipeline-dot ${hasFeasiblePlan ? "is-ready" : isRunning ? "is-running" : "is-pending"}`} />
+            <div className="pipeline-stage-info">
+              <span className="pipeline-stage-label">Kế hoạch</span>
+              <strong className="pipeline-stage-status">{planStatusText}</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── 2. HÔM NAY CẦN CHÚ Ý (Attention Summary Strip) ── */}
+      <section className="today-attention-section">
+        <span className="today-section-eyebrow">Hôm nay cần chú ý</span>
+        <div className="today-attention-summary-bar">
+          <div className="attention-kpi-item">
+            <span className="attention-kpi-num is-warning">{expiringLotsCount}</span>
+            <span className="attention-kpi-label">lô gần hạn</span>
+          </div>
+          <div className="attention-kpi-divider" aria-hidden="true" />
+          <div className="attention-kpi-item">
+            <span className="attention-kpi-num is-primary">{purchaseItemCount}</span>
+            <span className="attention-kpi-label">dòng mua cần xử lý</span>
+          </div>
+        </div>
+      </section>
+
+      {/* ── 3. TWO SEMANTIC LANES (Desktop 2-columns / Mobile Stack) ── */}
+      <div className="today-lanes-grid">
+        {/* Lane A: RỦI RO VẬN HÀNH / ƯU TIÊN HÔM NAY */}
+        <section className="today-lane lane-operational-risks">
+          <div className="lane-header">
+            <h3 className="lane-title">Rủi ro vận hành (Ưu tiên hôm nay)</h3>
+            {operationalAlerts.length > 0 ? (
+              <span className="lane-badge is-warning">{operationalAlerts.length} việc cần chú ý</span>
+            ) : null}
+          </div>
+
+          <div className="lane-content-rows">
+            {operationalAlerts.length > 0 ? (
+              operationalAlerts.map((alert) => (
+                <div className="operational-alert-row" key={alert.key}>
+                  <div className="alert-row-main">
+                    <strong className="alert-item-title">{alert.title}</strong>
+                    <span className="alert-item-context">{alert.context}</span>
+                  </div>
+                  <div className="alert-row-aside">
+                    <span
+                      className={`alert-days-badge ${
+                        alert.daysRemaining != null && alert.daysRemaining <= 4 ? "is-critical" : ""
+                      }`}
+                    >
+                      {alert.daysRemaining != null
+                        ? alert.daysRemaining <= 0
+                          ? "Đã hết hạn"
+                          : `Còn ${alert.daysRemaining} ngày`
+                        : alert.statusLabel}
+                    </span>
+                    <button
+                      type="button"
+                      className="lane-action-cta"
+                      onClick={() => onNavigate(alert.target)}
+                    >
+                      {alert.cta}
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="lane-empty-state">
+                Kho an toàn, không có lô nào gần hạn hoặc bất thường.
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Lane B: QUYẾT ĐỊNH ĐANG CHỜ */}
+        <section className="today-lane lane-pending-decisions">
+          <div className="lane-header">
+            <h3 className="lane-title">Quyết định đang chờ</h3>
+            {purchaseItemCount > 0 ? (
+              <span className="lane-badge is-primary">{purchaseItemCount} dòng mua</span>
+            ) : null}
+          </div>
+
+          <div className="lane-content-rows">
+            {hasFeasiblePlan ? (
+              <div className="pending-plan-card">
+                <div className="plan-summary-top">
+                  <strong className="plan-strategy-title">
+                    Kế hoạch {decision?.recommended_strategy || "Khả thi"}
+                  </strong>
+                  <span className="plan-ready-pill">Sẵn sàng</span>
+                </div>
+
+                <div className="plan-figures-row">
+                  <div className="plan-figure-col">
+                    <span className="plan-figure-label">Chi phí dự kiến</span>
+                    <strong className="plan-figure-val">{formatVnd(totalPlannedCost)}</strong>
+                  </div>
+                  <div className="plan-figure-col">
+                    <span className="plan-figure-label">Quy mô</span>
+                    <strong className="plan-figure-val">{purchaseItemCount} nguyên liệu</strong>
+                  </div>
+                </div>
+
+                <div className="plan-card-action">
+                  <button
+                    type="button"
+                    className="lane-action-cta is-primary"
+                    onClick={() => onNavigate("plan")}
+                  >
+                    Xem kế hoạch →
+                  </button>
+                </div>
+              </div>
+            ) : isNoFeasible ? (
+              <div className="pending-plan-card is-warning">
+                <strong className="plan-strategy-title">Chưa có phương án khả thi</strong>
+                <p className="plan-unfeasible-note">
+                  Dự báo và nhu cầu đã tính nhưng chưa tìm được phương án đáp ứng toàn bộ ràng buộc NCC.
+                </p>
+                <div className="plan-card-action">
+                  <button
+                    type="button"
+                    className="lane-action-cta"
+                    onClick={() => onNavigate("plan")}
+                  >
+                    Kiểm tra ràng buộc →
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="pending-plan-card is-idle">
+                <strong className="plan-strategy-title">Chưa có kế hoạch mua hàng</strong>
+                <p className="plan-idle-note">Mở Kế hoạch nhập để bắt đầu dự báo và tạo kế hoạch nhập tối ưu.</p>
+                <div className="plan-card-action">
+                  <button
+                    type="button"
+                    className="lane-action-cta is-primary"
+                    onClick={() => onNavigate("plan")}
+                  >
+                    Xem kế hoạch →
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
 }
 
 function FuturePlanningView({ data, plan, decision, initialIngredient }: { data: BootstrapData; plan: PlanResponse; decision: DecisionPackage | null; initialIngredient?: string }) {
@@ -169,7 +466,54 @@ export function DecisionCenterWorkspace({
   plan: PlanResponse;
 }) {
   const view = useMemo(() => adaptDecisionRunView(decision, data), [data, decision]);
-  const hasDemand = view.demand.length > 0;
   const period = dateWindowLabel(view.dates, decision?.as_of_date, decision?.horizon_days);
-  return <div className="decision-center-workspace"><header className="decision-center-header"><div><h1>Trung tâm quyết định</h1>{period ? <span className="page-header-context">{period}</span> : null}</div><div aria-label="Chuyển chế độ xem" className="decision-view-switcher" role="tablist"><button aria-selected={activeView === "today"} className={activeView === "today" ? "active" : ""} onClick={() => onViewChange("today")} role="tab" type="button">Hôm nay</button><button aria-selected={activeView === "future"} className={activeView === "future" ? "active" : ""} onClick={() => onViewChange("future")} role="tab" type="button">7 ngày tới</button></div></header><ol aria-label="Trạng thái dữ liệu" className="decision-status-rail"><li><strong>Dự báo bán hàng</strong><span>{decision?.status === "queued" || decision?.status === "running" ? "Đang xử lý" : hasDemand || Object.keys(plan.forecasts).length ? "Hoàn tất" : "Chưa có dữ liệu"}</span></li><li><strong>Nhu cầu nguyên liệu</strong><span>{hasDemand ? "Đã tính" : decision?.status === "queued" || decision?.status === "running" ? "Đang xử lý" : "Chưa có dữ liệu"}</span></li><li><strong>Kế hoạch nhập</strong><span>{procurementStatus(decision, hasDemand)}</span></li></ol>{activeView === "today" ? <TodayOperationalView data={data} decision={decision} onNavigate={(target, ingredientId) => target === "inventory" ? onNavigate("inventory") : onViewChange("future", ingredientId)} plan={plan} /> : <FuturePlanningView data={data} decision={decision} initialIngredient={initialIngredient} plan={plan} />}</div>;
+
+  return (
+    <div className="decision-center-workspace">
+      <header className="decision-center-header">
+        <div>
+          <h1>Trung tâm quyết định</h1>
+          <span className="page-header-context">
+            {data.today ? `${data.today.split("-").reverse().join("/")} · Hôm nay` : period || ""}
+          </span>
+        </div>
+        <div aria-label="Chuyển chế độ xem" className="decision-view-switcher" role="tablist">
+          <button
+            aria-selected={activeView === "today"}
+            className={activeView === "today" ? "active" : ""}
+            onClick={() => onViewChange("today")}
+            role="tab"
+            type="button"
+          >
+            Hôm nay
+          </button>
+          <button
+            aria-selected={activeView === "future"}
+            className={activeView === "future" ? "active" : ""}
+            onClick={() => onViewChange("future")}
+            role="tab"
+            type="button"
+          >
+            7 ngày tới
+          </button>
+        </div>
+      </header>
+
+      {activeView === "today" ? (
+        <TodayOperationalView
+          data={data}
+          decision={decision}
+          onNavigate={(target) => onNavigate(target)}
+          plan={plan}
+        />
+      ) : (
+        <FuturePlanningView
+          data={data}
+          decision={decision}
+          initialIngredient={initialIngredient}
+          plan={plan}
+        />
+      )}
+    </div>
+  );
 }

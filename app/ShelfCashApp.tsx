@@ -3,8 +3,10 @@
 import {
   BookOpen,
   CalendarClock,
+  ChevronRight,
   Coffee,
   Home,
+  LogOut,
   Menu as MenuIcon,
   Package,
   Settings,
@@ -104,12 +106,17 @@ import { ImportView } from "./views/ImportView";
 import { InventoryView } from "./views/InventoryView";
 import { MenuView } from "./views/MenuView";
 import { PlanView, type SimulationRunInput } from "./views/PlanView";
-import {
-  RecipesView,
-  type ComboComponentsSaveResult,
-  type RecipeSaveOptions,
-} from "./views/RecipesView";
+import { RecipesView, type ComboComponentsSaveResult, type RecipeSaveOptions } from "./views/RecipesView";
 import { SettingsView } from "./views/SettingsView";
+import { LoginView } from "./views/LoginView";
+import { SubscriptionModal } from "./components/SubscriptionModal";
+import {
+  type PlanId,
+  getStoredPlan,
+  saveStoredPlan,
+  SUBSCRIPTION_PLANS,
+} from "../lib/subscriptions";
+import { getStoredSession, saveSession, clearSession, type UserSession } from "../lib/auth";
 
 type PageKey =
   | "today"
@@ -134,10 +141,7 @@ const navigationGroups: Array<{
   {
     items: [
       { key: "today", label: "Hôm nay", icon: Home },
-      { key: "future", label: "Tương lai 7 ngày", icon: CalendarClock },
-      { key: "simulator", label: "Mô phỏng", icon: ShoppingCart },
       { key: "plan", label: "Kế hoạch nhập", icon: ShoppingCart },
-      { key: "orders", label: "Đơn mua hàng", icon: Package },
     ],
   },
   {
@@ -147,7 +151,6 @@ const navigationGroups: Array<{
       { key: "inventory", label: "Kho", icon: Package },
       { key: "menu", label: "Menu", icon: Coffee },
       { key: "recipes", label: "Công thức", icon: BookOpen },
-      { key: "plan", label: "Kế hoạch nhập hàng", icon: ShoppingCart },
     ],
   },
   {
@@ -312,7 +315,17 @@ export function ShelfCashApp({
   initialDecisionView?: "today" | "future";
   initialPlan: PlanResponse;
 }) {
+  const [isMounted, setIsMounted] = useState(false);
+  const [session, setSession] = useState<UserSession | null>(() =>
+    getStoredSession(),
+  );
   const [page, setPage] = useState<PageKey>(initialDecisionView);
+  const [currentPlan, setCurrentPlan] = useState<PlanId>(() => getStoredPlan());
+  const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [data, setData] = useState(initialData);
   const [plan, setPlan] = useState(initialPlan);
@@ -1736,6 +1749,27 @@ export function ShelfCashApp({
     }
   })();
 
+  if (isMounted && !session) {
+    return (
+      <LoginView
+        onLogin={(userSession) => {
+          saveSession(userSession);
+          setSession(userSession);
+          if (userSession.storeId) {
+            setData((prev) => ({
+              ...prev,
+              settings: {
+                ...prev.settings,
+                storeId: userSession.storeId,
+                storeName: userSession.storeName,
+              },
+            }));
+          }
+        }}
+      />
+    );
+  }
+
   const currentNavigation =
     navigation.find((item) => item.key === page) ?? navigation[0];
   const CurrentPageIcon = currentNavigation.icon;
@@ -1790,6 +1824,60 @@ export function ShelfCashApp({
             Hôm nay · {data.today.split("-").reverse().join("/")}
           </small>
         </div>
+        {session ? (
+          <div className="user-profile-badge-card">
+            <div className="user-profile-main-row">
+              <div
+                className="user-profile-avatar"
+                style={{
+                  background: "linear-gradient(135deg, #147a62 0%, #0f5c4a 100%)",
+                }}
+              >
+                {session.name.slice(0, 2).toUpperCase()}
+              </div>
+              <div className="user-profile-info">
+                <div className="user-profile-name">{session.name}</div>
+                <div className="user-profile-role">
+                  {session.roleLabel || "Quản lý cửa hàng"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="user-logout-btn"
+                title="Đăng xuất"
+                onClick={() => {
+                  clearSession();
+                  setSession(null);
+                }}
+              >
+                <LogOut size={16} />
+              </button>
+            </div>
+
+            <div
+              className="user-subscription-entry"
+              onClick={() => setSubscriptionModalOpen(true)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  setSubscriptionModalOpen(true);
+                }
+              }}
+            >
+              <div className="subscription-plan-pill-group">
+                <span className={cn("sidebar-plan-pill", `plan-${currentPlan}`)}>
+                  {SUBSCRIPTION_PLANS[currentPlan].name}
+                </span>
+                <span className="sidebar-plan-label">Gói dịch vụ</span>
+              </div>
+              <span className="sidebar-upgrade-link">
+                <span>{currentPlan === "decision" ? "Chi tiết" : "Nâng cấp"}</span>
+                <ChevronRight size={13} />
+              </span>
+            </div>
+          </div>
+        ) : null}
       </aside>
 
       <div className="app-workspace">
@@ -1812,34 +1900,16 @@ export function ShelfCashApp({
                 <span>{currentNavigation.label}</span>
               </div>
             </div>
-            <div className="top-header-meta">
-              <div className="top-header-store" title={data.settings.storeName}>
-                <Store aria-hidden="true" size={17} strokeWidth={1.8} />
-                <span>
-                  <small>Cửa hàng</small>
-                  <strong>{data.settings.storeName}</strong>
-                </span>
-              </div>
-              {connectionLabel ? (
-                <div
-                  className={cn(
-                    "connection-chip",
-                    (refreshing || !connection) && "is-syncing",
-                    connection?.service === "offline" && "is-offline",
-                  )}
-                >
-                  <span aria-hidden="true" />
-                  <strong>{connectionLabel}</strong>
-                </div>
-              ) : null}
-              <time className="top-header-date" dateTime={data.today}>
-                {data.today.split("-").reverse().join("/")}
-              </time>
+            <div className="top-header-trailing">
+              <span className="store-pill" title={data.settings.storeName}>
+                <Store aria-hidden="true" size={15} />
+                <strong>{data.settings.storeName}</strong>
+              </span>
             </div>
           </div>
         </header>
 
-        <main className="main-content">
+        <main className="main-content" tabIndex={-1}>
           {hasStore && connection?.service === "offline" ? (
             <Notice tone="warning">
               Không thể kết nối dịch vụ. Dữ liệu đang hiển thị có thể chưa phải bản mới nhất.
@@ -1883,19 +1953,18 @@ export function ShelfCashApp({
       ) : null}
 
       {mobileNavigationOpen ? (
-        <div className="mobile-drawer-layer">
-          <button
-            aria-label="Đóng điều hướng"
-            className="mobile-drawer-backdrop"
-            onClick={closeMobileNavigation}
-            type="button"
-          />
+        <div
+          className="mobile-drawer-overlay"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeMobileNavigation();
+            }
+          }}
+        >
           <aside
-            aria-label="Điều hướng ShelfCash"
-            aria-modal="true"
+            aria-label="Điều hướng di động"
             className="mobile-drawer"
             id="mobile-navigation"
-            role="dialog"
           >
             <div className="mobile-drawer-header">
               <div className="brand">
@@ -1949,6 +2018,64 @@ export function ShelfCashApp({
                 Hôm nay · {data.today.split("-").reverse().join("/")}
               </small>
             </div>
+            {session ? (
+              <div className="user-profile-badge-card">
+                <div className="user-profile-main-row">
+                  <div
+                    className="user-profile-avatar"
+                    style={{
+                      background: "linear-gradient(135deg, #147a62 0%, #0f5c4a 100%)",
+                    }}
+                  >
+                    {session.name.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="user-profile-info">
+                    <div className="user-profile-name">{session.name}</div>
+                    <div className="user-profile-role">
+                      {session.roleLabel || "Quản lý cửa hàng"}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="user-logout-btn"
+                    title="Đăng xuất"
+                    onClick={() => {
+                      clearSession();
+                      setSession(null);
+                    }}
+                  >
+                    <LogOut size={16} />
+                  </button>
+                </div>
+
+                <div
+                  className="user-subscription-entry"
+                  onClick={() => {
+                    closeMobileNavigation();
+                    setSubscriptionModalOpen(true);
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      closeMobileNavigation();
+                      setSubscriptionModalOpen(true);
+                    }
+                  }}
+                >
+                  <div className="subscription-plan-pill-group">
+                    <span className={cn("sidebar-plan-pill", `plan-${currentPlan}`)}>
+                      {SUBSCRIPTION_PLANS[currentPlan].name}
+                    </span>
+                    <span className="sidebar-plan-label">Gói dịch vụ</span>
+                  </div>
+                  <span className="sidebar-upgrade-link">
+                    <span>{currentPlan === "decision" ? "Chi tiết" : "Nâng cấp"}</span>
+                    <ChevronRight size={13} />
+                  </span>
+                </div>
+              </div>
+            ) : null}
           </aside>
         </div>
       ) : null}
@@ -1967,6 +2094,16 @@ export function ShelfCashApp({
           ))}
         </div>
       ) : null}
+
+      <SubscriptionModal
+        isOpen={subscriptionModalOpen}
+        onClose={() => setSubscriptionModalOpen(false)}
+        currentPlan={currentPlan}
+        onPlanChange={(newPlan) => {
+          setCurrentPlan(newPlan);
+          saveStoredPlan(newPlan);
+        }}
+      />
     </div>
   );
 }

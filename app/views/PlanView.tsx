@@ -11,6 +11,7 @@ import {
   Plus,
   Save,
   ShieldCheck,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -372,6 +373,9 @@ export function PlanView({
   const [receiveLots, setReceiveLots] = useState<
     Record<string, ReceiveLotDraft[]>
   >({});
+  const [hasTriggeredForecast, setHasTriggeredForecast] = useState(
+    plan.status !== "idle",
+  );
 
   const selectedCoreStrategy = strategyOption(strategy).core;
   const selectedScenario = plan.scenarios.find(
@@ -515,6 +519,7 @@ export function PlanView({
   }, [selectedOrder]);
 
   async function runPlanning() {
+    setHasTriggeredForecast(true);
     const attemptId = actionAttempts.begin(planningAction);
     try {
       const parsedBudget = budgetOverride.trim() === "" ? undefined : Number(budgetOverride);
@@ -752,6 +757,7 @@ export function PlanView({
 
   if (
     focus === "plan" &&
+    hasTriggeredForecast &&
     !runBusy &&
     decision &&
     (noFeasibleDecision(decision) || decision.status === "completed")
@@ -857,14 +863,20 @@ export function PlanView({
         }
         context={`${data.settings.storeName} · ${data.today}`}
         action={
-          <Button
-            variant="primary"
-            busy={runBusy || plan.status === "running"}
-            onClick={() => void runPlanning()}
-          >
-            <Play size={16} />
-            {runBusy ? "Đang chạy mô phỏng…" : "Chạy mô phỏng"}
-          </Button>
+          focus === "plan" && plan.status === "idle" && !hasTriggeredForecast ? null : (
+            <Button
+              variant="primary"
+              busy={runBusy || plan.status === "running"}
+              onClick={() => void runPlanning()}
+            >
+              <Play size={16} />
+              {runBusy
+                ? "Đang dự đoán…"
+                : focus === "plan"
+                  ? "Dự đoán & Lập kế hoạch"
+                  : "Chạy mô phỏng"}
+            </Button>
+          )
         }
       />
 
@@ -912,24 +924,53 @@ export function PlanView({
           />
           <span>Tính đơn mua hàng đang mở</span>
         </label>
-        <fieldset className="segmented">
-          <legend>Trạng thái lập kế hoạch</legend>
-          <div>
-            <button className={plan.status === "idle" ? "active" : ""}>
-              Chưa chạy
-            </button>
-            <button className={plan.status === "running" ? "active" : ""}>
-              Đang chạy
-            </button>
-            <button className={plan.status === "completed" ? "active" : ""}>
-              Hoàn tất
-            </button>
-          </div>
-        </fieldset>
       </div>
       <SimulationProgressPanel progress={simulationProgress} />
 
-      {plan.status === "idle" ? (
+      {plan.status === "idle" && !hasTriggeredForecast ? (
+        <div
+          className="plan-launchpad-card"
+          style={{
+            padding: "40px 24px",
+            textAlign: "center",
+            background: "linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)",
+            borderRadius: "14px",
+            border: "1px dashed #cbd5e1",
+            marginTop: "20px",
+          }}
+        >
+          <div
+            style={{
+              width: "52px",
+              height: "52px",
+              borderRadius: "50%",
+              background: "#eff6ff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              margin: "0 auto 16px",
+              boxShadow: "0 2px 8px rgba(37,99,235,0.12)",
+            }}
+          >
+            <Sparkles size={26} style={{ color: "#2563eb" }} />
+          </div>
+          <h3 style={{ fontSize: "1.15rem", fontWeight: "700", color: "#0f172a", marginBottom: "8px" }}>
+            Sẵn sàng tính toán dự báo & kế hoạch nhập hàng
+          </h3>
+          <p style={{ color: "#64748b", maxWidth: "540px", margin: "0 auto 20px", fontSize: "0.92rem", lineHeight: "1.6" }}>
+            Nhấn nút <strong>Dự đoán</strong> để hệ thống phân tích nhu cầu 7 ngày tới, đối chiếu tồn kho FEFO và đề xuất 3 phương án nhập hàng tối ưu.
+          </p>
+          <Button
+            variant="primary"
+            busy={runBusy || plan.status === "running"}
+            onClick={() => void runPlanning()}
+            style={{ padding: "10px 24px", fontSize: "0.95rem", fontWeight: "600" }}
+          >
+            <Play size={16} />
+            {runBusy ? "Đang chạy dự đoán..." : "Dự đoán & Lập kế hoạch"}
+          </Button>
+        </div>
+      ) : plan.status === "idle" ? (
         <Notice tone="info">
           Chọn số ngày dự báo rồi chạy kế hoạch để tạo kết quả.
         </Notice>
