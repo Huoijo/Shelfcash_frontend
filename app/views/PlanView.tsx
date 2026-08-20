@@ -962,7 +962,7 @@ export function PlanView({
           </p>
           <Button
             variant="primary"
-            busy={runBusy || plan.status === "running"}
+            busy={runBusy}
             onClick={() => void runPlanning()}
             style={{ padding: "10px 24px", fontSize: "0.95rem", fontWeight: "600" }}
           >

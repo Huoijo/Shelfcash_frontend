@@ -10,8 +10,8 @@ import type {
   DecisionStrategy,
 } from "../../lib/types";
 import { decisionRunLifecycle } from "../../lib/decision-run";
-import { getDecisionExplanation, getDecisionWhatIf } from "../../lib/shelfcash-client";
-import { Button, Details, Notice, SectionHeading, StatCard, SummaryGrid, formatDate, formatQuantity, formatVnd } from "./ui";
+import { getDecisionExplanation } from "../../lib/shelfcash-client";
+import { Details, Notice, SectionHeading, StatCard, SummaryGrid, formatDate, formatQuantity, formatVnd } from "./ui";
 
 const strategyLabels: Record<string, string> = {
   lean: "Tiết kiệm",
@@ -106,8 +106,7 @@ export function DecisionCenter({ decision, running }: { decision: DecisionPackag
   const [selected, setSelected] = useState<string | null>(decision?.recommended_strategy ?? strategies[0]?.strategy ?? null);
   const [explanation, setExplanation] = useState<DecisionExplanation | null>(null);
   const [explanationState, setExplanationState] = useState<"idle" | "loading" | "success" | "error">("loading");
-  const [stress, setStress] = useState(decision?.stress_results ?? null);
-  const [stressBusy, setStressBusy] = useState(false);
+  const stress = decision?.stress_results ?? null;
 
   useEffect(() => {
     if (!decision?.decision_run_id || decision.status !== "completed") return;
@@ -163,7 +162,26 @@ export function DecisionCenter({ decision, running }: { decision: DecisionPackag
     <SectionHeading title="Rủi ro tồn kho" />
     {decision.inventory_risk?.length ? <div className="table-wrap"><table><thead><tr><th>Nguyên liệu</th><th>Nguy cơ thiếu</th><th>Số ngày tồn đủ</th><th>Hao hụt dự kiến</th><th>Thiếu hụt dự kiến</th></tr></thead><tbody>{decision.inventory_risk.map((risk, index) => <tr key={`${risk.ingredient_id ?? risk.ingredient_name}-${index}`}><td><strong>{risk.ingredient_name || risk.ingredient || risk.ingredient_id || "—"}</strong><small>{risk.risk_date ? `Rủi ro từ ${formatDate(risk.risk_date)}` : riskLabel(risk.stockout_probability, risk.risk_category)}</small></td><td>{percentage(risk.stockout_probability)} · {riskLabel(risk.stockout_probability, risk.risk_category)}</td><td>{risk.days_of_supply == null ? "—" : `${risk.days_of_supply.toLocaleString("vi-VN")} ngày`}</td><td>{risk.expected_waste == null ? "—" : formatQuantity(risk.expected_waste, risk.unit)}</td><td>{risk.expected_shortage == null ? "—" : formatQuantity(risk.expected_shortage, risk.unit)}</td></tr>)}</tbody></table></div> : <Notice tone="info">Chưa có dữ liệu rủi ro tồn kho cho kế hoạch này.</Notice>}
 
-    {(stress?.length || decision.decision_run_id) ? <><SectionHeading title="Các tình huống đã được hệ thống kiểm tra" /><div>{stress?.length ? stress.map((item, index) => <Notice tone="info" key={`${item.name ?? item.label}-${index}`}><strong>{item.label || item.name || "Tình huống rủi ro"}</strong>{item.description ? <><br />{item.description}</> : null}<br />Nguy cơ thiếu: {percentage(item.business_metrics?.stockout_probability)}</Notice>) : <Button busy={stressBusy} onClick={() => { setStressBusy(true); void getDecisionWhatIf(decision.decision_run_id).then((value) => setStress(value.stress_results ?? null)).finally(() => setStressBusy(false)); }}>Xem tình huống rủi ro</Button>}</div></> : null}
+    {stress?.length ? (
+      <>
+        <SectionHeading title="Các tình huống đã được hệ thống kiểm tra" />
+        <div>
+          {stress.map((item, index) => (
+            <Notice tone="info" key={`${item.name ?? item.label}-${index}`}>
+              <strong>{item.label || item.name || "Tình huống rủi ro"}</strong>
+              {item.description ? (
+                <>
+                  <br />
+                  {item.description}
+                </>
+              ) : null}
+              <br />
+              Nguy cơ thiếu: {percentage(item.business_metrics?.stockout_probability)}
+            </Notice>
+          ))}
+        </div>
+      </>
+    ) : null}
 
     {decision.critic?.findings?.length ? <Details summary="Kiểm tra kế hoạch">{decision.critic.findings.map((finding, index) => <p key={`${finding.code}-${index}`}>{finding.status === "pass" ? <Check size={15} /> : <CircleAlert size={15} />} {finding.message || finding.code || "Kết quả kiểm tra"}</p>)}</Details> : null}
   </div>;

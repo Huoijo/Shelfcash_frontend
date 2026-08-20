@@ -3,6 +3,7 @@ import type {
   DecisionBriefFacts,
   DecisionExplanationResponse,
   DecisionPackage,
+  ExplanationRequest,
   IngredientDemandRow,
   MenuItem,
   ProcurementRow,
@@ -1222,6 +1223,27 @@ export function buildMockExplanation(
       "Lead time nhà cung cấp đúng cam kết (1-3 ngày)",
       "Không có biến động đột biến ngoài dự báo thời tiết",
     ],
+    entities: {
+      ingredient_ids: ["ing_01", "ing_02", "ing_04"],
+      supplier_ids: ["sup_01", "sup_02"],
+    },
+    claims: [
+      {
+        type: "cost",
+        value: 8338000,
+        unit: "VND",
+        evidence_ids: ["ev_plan_01"],
+      },
+    ],
+    citations: [
+      {
+        evidence_id: "ev_plan_01",
+        label: "Kế hoạch nhập hàng tối ưu",
+        source_type: "decision_plan",
+      },
+    ],
+    grounded: true,
+    provider: "shelfcash_decision_intelligence",
   };
 }
 
@@ -1257,37 +1279,58 @@ export function buildMockWhatIfResponse(
     };
   });
 
+  const hypotheticalBrief: DecisionBriefFacts = {
+    ...baseBrief,
+    recommendation: {
+      ...baseBrief.recommendation,
+      total_purchase_cost: hypotheticalCost,
+      expected_fill_rate: Math.min(1, Math.max(0, (baseBrief.recommendation.expected_fill_rate ?? 0.988) + fillRateDelta)),
+    },
+    risk: {
+      ...baseBrief.risk,
+      stockout_probability: Math.min(1, Math.max(0, (baseBrief.risk?.stockout_probability ?? 0.015) + stockoutRiskDelta)),
+      expected_fill_rate: Math.min(1, Math.max(0, (baseBrief.risk?.expected_fill_rate ?? 0.988) + fillRateDelta)),
+    },
+    procurement_rows: hypotheticalRows,
+    ingredient_demand: baseBrief.ingredient_demand.map((d) => ({
+      ...d,
+      p50: d.p50 ? Math.round(d.p50 * multiplier) : null,
+    })),
+  };
+
   return {
-    scenario_id: `what-if-${Date.now()}`,
+    decision_run_id: MOCK_DECISION_RUN_ID,
+    baseline: baseBrief,
+    hypothetical: hypotheticalBrief,
+    mutations: mutation,
     comparison: {
+      recommendation_changed: false,
+      baseline_strategy: "protected",
+      hypothetical_strategy: "protected",
       purchase_cost_delta: costDelta,
       expected_fill_rate_delta: fillRateDelta,
       stockout_probability_delta: stockoutRiskDelta,
-    },
-    baseline: {
-      procurement_rows: baseBrief.procurement_rows,
-      ingredient_demand: baseBrief.ingredient_demand,
-    },
-    hypothetical: {
-      procurement_rows: hypotheticalRows,
-      ingredient_demand: baseBrief.ingredient_demand.map((d) => ({
-        ...d,
-        p50: d.p50 ? Math.round(d.p50 * multiplier) : null,
-      })),
+      shortage_quantity_delta: 0,
+      waste_quantity_delta: 0,
+      order_changes: [],
+      warnings_added: [],
+      warnings_removed: [],
+      hard_violations_added: [],
+      hard_violations_removed: [],
     },
     grounded_explanation: {
-      source: "mock-simulator",
-      language: "vi",
-      detail_level: "simple",
-      intent: "what_if_analysis",
-      decision_run_id: MOCK_DECISION_RUN_ID,
-      summary: "Kết quả giả lập thay đổi",
       answer: `Khi nhu cầu tăng ${(multiplier * 100 - 100).toFixed(0)}% và trễ giao hàng ${delay} ngày, chi phí nhập hàng dự kiến tăng thêm ${costDelta.toLocaleString("vi-VN")} ₫ để bảo đảm không đứt gãy nguồn cung.`,
-      why_this_plan: [],
-      main_risks: [],
-      tradeoffs: [],
-      important_assumptions: [],
+      citations: [
+        {
+          evidence_id: "ev_whatif_01",
+          label: "Mô phỏng thay đổi tham số What-If",
+          source_type: "what_if_simulation",
+        },
+      ],
+      grounded: true,
+      authority: "HYPOTHETICAL",
     },
+    generated_at: new Date().toISOString(),
   };
 }
 
@@ -1383,7 +1426,7 @@ export function buildMockBootstrapResponse(today: string = "2026-08-20"): StoreB
       spent_budget: 3_200_000,
       remaining_budget: 11_800_000,
       forecast_horizon: 7,
-      default_strategy: "An toàn",
+      default_strategy: "safe",
     },
     latest_runs: {
       forecast_run_id: MOCK_FORECAST_RUN_ID,

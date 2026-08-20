@@ -348,7 +348,6 @@ export function ProcurementPlanningWorkspace({
     )
       return false;
     if (supplierFilter && row.supplierName !== supplierFilter) return false;
-    if (contextFilter === "buy") return row.recommendedQuantity != null;
     if (contextFilter === "risk")
       return Boolean(row.stockoutDate || (row.shortageQuantity ?? 0) > 0);
     if (contextFilter === "expiry") return false;

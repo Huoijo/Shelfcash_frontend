@@ -957,3 +957,5 @@ export interface PlanRunResultResponse extends ApiRecord {
 export interface PurchaseOrderApiResponse extends ApiRecord {
   orders: ApiRecord[];
 }
+
+export type { RecipeDetail } from "./api-contract";

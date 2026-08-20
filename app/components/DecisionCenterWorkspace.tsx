@@ -158,7 +158,7 @@ function TodayOperationalView({
   const purchasePlanItems = decision?.recommended_plan?.items ?? [];
   const purchaseItemCount = purchasePlanItems.length;
   const totalPlannedCost =
-    decision?.budget?.plannedCost ??
+    decision?.business_metrics?.projected_purchase_cost ??
     purchasePlanItems.reduce((sum, line) => sum + (line.estimated_cost ?? 0), 0);
   const hasFeasiblePlan =
     decision?.status === "completed" &&

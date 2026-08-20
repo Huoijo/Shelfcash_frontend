@@ -6,7 +6,7 @@ import {
   LoaderCircle,
   X,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { forwardRef, useEffect, useId, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import type { InventoryStatus } from "../../lib/types";
 
@@ -63,14 +63,17 @@ export function PageHeader({
 export function SectionHeading({
   title,
   subtitle,
+  description,
   guidance,
   action,
 }: {
   title: string;
   subtitle?: string;
+  description?: string;
   guidance?: ReactNode;
   action?: ReactNode;
 }) {
+  const text = subtitle ?? description;
   return (
     <div className="section-heading">
       <div>
@@ -78,7 +81,7 @@ export function SectionHeading({
           <span className="section-heading-title">{title}</span>
           {guidance}
         </h2>
-        {subtitle ? <p>{subtitle}</p> : null}
+        {text ? <p>{text}</p> : null}
       </div>
       {action}
     </div>
@@ -202,19 +205,26 @@ export function StatusPill({
   return <span className={`status-pill status-${status}`}>{label}</span>;
 }
 
-export function Button({
-  variant = "secondary",
-  busy = false,
-  children,
-  className,
-  disabled,
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "secondary" | "quiet" | "danger";
-  busy?: boolean;
-}) {
+export const Button = forwardRef<
+  HTMLButtonElement,
+  ButtonHTMLAttributes<HTMLButtonElement> & {
+    variant?: "primary" | "secondary" | "quiet" | "danger";
+    busy?: boolean;
+  }
+>(function Button(
+  {
+    variant = "secondary",
+    busy = false,
+    children,
+    className,
+    disabled,
+    ...props
+  },
+  ref,
+) {
   return (
     <button
+      ref={ref}
       className={cn("button", `button-${variant}`, className)}
       disabled={disabled || busy}
       {...props}
@@ -223,7 +233,7 @@ export function Button({
       {children}
     </button>
   );
-}
+});
 
 export function AlertRow({
   title,
@@ -352,12 +362,14 @@ export function Details({
 export function Notice({
   tone,
   children,
+  id,
 }: {
   tone: "success" | "warning" | "error" | "info";
   children: ReactNode;
+  id?: string;
 }) {
   return (
-    <div className={`notice notice-${tone}`}>
+    <div id={id} className={`notice notice-${tone}`}>
       {tone === "success" ? (
         <CheckCircle2 size={17} />
       ) : (
