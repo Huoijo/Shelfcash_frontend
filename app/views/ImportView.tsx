@@ -10,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   applyMappingSuggestion,
   buildEditableMappings,
@@ -260,11 +260,17 @@ export function ImportView({
     confirm?: { fingerprint: string; key: string };
     process?: { importId: string; key: string };
   }>({});
-  const [storeId, setStoreId] = useState(defaultStoreId);
+  const [storeId, setStoreId] = useState(() => defaultStoreId?.trim() || "STORE_001");
   const [forecastDate, setForecastDate] = useState(defaultForecastDate);
   const [forecastHorizon, setForecastHorizon] = useState(() =>
     clampForecastHorizon(defaultForecastHorizon),
   );
+
+  useEffect(() => {
+    if (defaultStoreId?.trim()) {
+      setStoreId(defaultStoreId.trim());
+    }
+  }, [defaultStoreId]);
   const [phase, setPhase] = useState<Phase>("select");
   const [created, setCreated] = useState<ImportCreateResponse | null>(null);
   const [mappings, setMappings] = useState<EditableSheetMapping[]>([]);
@@ -373,7 +379,8 @@ export function ImportView({
   }
 
   async function startImport() {
-    if (!files.length || !storeId.trim()) return;
+    if (!files.length) return;
+    const targetStoreId = storeId.trim() || defaultStoreId?.trim() || "STORE_001";
     const fileErrors = validateImportFiles(files);
     if (fileErrors.length) {
       const key = actionKey("upload");
@@ -386,7 +393,7 @@ export function ImportView({
     setWarnings([]);
     setErrors([]);
     const fingerprint = JSON.stringify({
-      storeId: storeId.trim(),
+      storeId: targetStoreId,
       forecastDate,
       forecastHorizon,
       files: files.map((file) => ({
@@ -404,7 +411,7 @@ export function ImportView({
     try {
       const response = await createImport({
         files,
-        storeId: storeId.trim(),
+        storeId: targetStoreId,
         forecastDate: forecastDate || undefined,
         forecastHorizon,
         idempotencyKey: idempotency.current.upload.key,
@@ -808,7 +815,6 @@ export function ImportView({
               disabled={
                 Boolean(busy) ||
                 !files.length ||
-                !storeId.trim() ||
                 connection?.service === "offline"
               }
               onClick={() => void startImport()}

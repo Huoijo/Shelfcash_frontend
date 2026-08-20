@@ -374,7 +374,7 @@ export function PlanView({
     Record<string, ReceiveLotDraft[]>
   >({});
   const [hasTriggeredForecast, setHasTriggeredForecast] = useState(
-    plan.status !== "idle",
+    plan.status === "running" || plan.status === "completed",
   );
 
   const selectedCoreStrategy = strategyOption(strategy).core;
