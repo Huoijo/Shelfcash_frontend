@@ -47,8 +47,20 @@ const draftOrder: PurchaseOrder = {
   ],
 };
 
-test("sample workbook remains a download aid and its sheets can be inferred locally", async () => {
+test("sample default endpoint downloads shelfcash_sample_dataset.zip", async () => {
   const response = await sampleWorkbook();
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "application/zip");
+  assert.match(
+    response.headers.get("content-disposition") || "",
+    /shelfcash_sample_dataset\.zip/,
+  );
+});
+
+test("sample workbook remains a download aid and its sheets can be inferred locally", async () => {
+  const response = await sampleWorkbook(
+    new Request("http://localhost/api/sample?format=xlsx"),
+  );
   assert.equal(response.status, 200);
   const bytes = await response.arrayBuffer();
   const workbook = XLSX.read(bytes, { type: "array" });
