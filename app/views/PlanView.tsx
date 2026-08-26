@@ -110,6 +110,7 @@ export interface ReceiveOrderInput {
 }
 
 export interface SimulationRunInput {
+  cutoffDate: string;
   horizonDays: number;
   includeOpenPurchaseOrders: boolean;
   budgetOverride?: number;
@@ -349,6 +350,7 @@ export function PlanView({
   const [horizonDays, setHorizonDays] = useState(
     clampHorizon(plan.horizonDays ?? data.settings.forecastHorizon),
   );
+  const [cutoffDate, setCutoffDate] = useState(plan.cutoffDate ?? data.today);
   const [budgetOverride, setBudgetOverride] = useState("");
   const [includeOpenPurchaseOrders, setIncludeOpenPurchaseOrders] = useState(true);
   const [controlsDirty, setControlsDirty] = useState(false);
@@ -395,6 +397,10 @@ export function PlanView({
   useEffect(() => {
     if (plan.horizonDays) setHorizonDays(clampHorizon(plan.horizonDays));
   }, [plan.horizonDays]);
+
+  useEffect(() => {
+    if (!controlsDirty && plan.cutoffDate) setCutoffDate(plan.cutoffDate);
+  }, [controlsDirty, plan.cutoffDate]);
 
   useEffect(() => {
     setAdjusted(selectedRecommendations.map((row) => ({ ...row })));
@@ -522,6 +528,14 @@ export function PlanView({
     setHasTriggeredForecast(true);
     const attemptId = actionAttempts.begin(planningAction);
     try {
+      if (!cutoffDate) {
+        actionAttempts.fail(
+          planningAction,
+          attemptId,
+          "Hãy chọn ngày chốt dữ liệu cho forecast.",
+        );
+        return;
+      }
       const parsedBudget = budgetOverride.trim() === "" ? undefined : Number(budgetOverride);
       if (parsedBudget !== undefined && (!Number.isFinite(parsedBudget) || parsedBudget < 0)) {
         actionAttempts.fail(
@@ -532,6 +546,7 @@ export function PlanView({
         return;
       }
       await onRunPlanning({
+        cutoffDate,
         horizonDays,
         includeOpenPurchaseOrders,
         ...(parsedBudget === undefined ? {} : { budgetOverride: parsedBudget }),
@@ -821,10 +836,11 @@ export function PlanView({
       <>
         <PageHeader
           title="Mô phỏng"
-          context={`${data.settings.storeName} · ${data.today} · ${horizonDays} ngày`}
+          context={`${data.settings.storeName} · ${cutoffDate} · ${horizonDays} ngày`}
           action={<Button variant="primary" busy={isRunning} onClick={() => void runPlanning()} aria-label="Chạy mô phỏng"><Play size={16} />{isRunning ? "Đang chạy mô phỏng…" : "Chạy mô phỏng"}</Button>}
         />
         <div className="plan-controls">
+          <label className="field"><span>Ngày chốt dữ liệu</span><input type="date" disabled={isRunning} value={cutoffDate} onChange={(event) => { setCutoffDate(event.target.value); setControlsDirty(true); }} /></label>
           <label className="field"><span>Số ngày mô phỏng (1–7)</span><input type="number" min="1" max="7" step="1" disabled={isRunning} value={horizonDays} onChange={(event) => { setHorizonDays(clampHorizon(Number(event.target.value))); setControlsDirty(true); }} /></label>
           <label className="field"><span>Ngân sách tối đa</span><input type="number" min="0" step="1000" inputMode="decimal" disabled={isRunning} value={budgetOverride} placeholder={formatVnd(data.settings.remainingBudget > 0 ? data.settings.remainingBudget : data.settings.monthlyBudget)} onChange={(event) => { setBudgetOverride(event.target.value); setControlsDirty(true); }} /></label>
           <label className="check plan-open-orders"><input type="checkbox" disabled={isRunning} checked={includeOpenPurchaseOrders} onChange={(event) => { setIncludeOpenPurchaseOrders(event.target.checked); setControlsDirty(true); }} /><span>Tính đơn mua hàng đang mở</span></label>
@@ -854,14 +870,14 @@ export function PlanView({
       <PageHeader
         title={
           focus === "future"
-            ? "Tương lai 7 ngày"
+            ? `Tương lai ${plan.horizonDays ?? horizonDays} ngày`
             : focus === "orders"
               ? "Đơn mua hàng"
               : focus === "plan"
                 ? "Kế hoạch nhập"
                 : "Mô phỏng"
         }
-        context={`${data.settings.storeName} · ${data.today}`}
+        context={`${data.settings.storeName} · ${plan.cutoffDate ?? cutoffDate}`}
         action={
           focus === "plan" && plan.status === "idle" && !hasTriggeredForecast ? null : (
             <Button
@@ -881,6 +897,18 @@ export function PlanView({
       />
 
       <div className="plan-controls" id="simulation-run">
+        <label className="field">
+          <span>Ngày chốt dữ liệu forecast</span>
+          <input
+            type="date"
+            disabled={runBusy}
+            value={cutoffDate}
+            onChange={(event) => {
+              setCutoffDate(event.target.value);
+              setControlsDirty(true);
+            }}
+          />
+        </label>
         <label className="field">
           <span>Số ngày mô phỏng (1–7)</span>
           <input
@@ -1132,7 +1160,12 @@ export function PlanView({
               ) : null}
               <Details summary="Biểu đồ và khoảng dự báo" open>
                 <div className="detail-grid">
-                  <ForecastChart forecast={forecast} compact />
+                  <ForecastChart
+                    forecast={forecast}
+                    compact
+                    cutoffDate={plan.cutoffDate}
+                    horizonDays={plan.horizonDays}
+                  />
                   <div className="table-wrap">
                     <table>
                       <thead>

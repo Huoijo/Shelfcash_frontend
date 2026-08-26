@@ -44,7 +44,7 @@ const bootstrapResponse: StoreBootstrapResponse = {
       expiry_date: "2026-08-03",
       status: "expired",
       version: 3,
-      last_counted_at: "2026-08-04T08:00:00+07:00",
+      snapshot_date: "2026-08-04T08:00:00+07:00",
     },
     {
       lot_id: "lot-healthy",
@@ -59,7 +59,7 @@ const bootstrapResponse: StoreBootstrapResponse = {
       expiry_date: "2026-08-12",
       status: "healthy",
       version: 4,
-      last_counted_at: "2026-08-04T09:00:00+07:00",
+      snapshot_date: "2026-08-04T09:00:00+07:00",
     },
   ],
   products: [
@@ -295,6 +295,7 @@ test("bootstrap preserves canonical lots, Decimal-like values, settings and vers
   assert.equal(milk.usableQuantity, 7.5);
   assert.equal(milk.expiredQty, 2.5);
   assert.equal(milk.version, 4);
+  assert.equal(milk.lastCounted, "2026-08-04T09:00:00+07:00");
   assert.deepEqual(milk.lots?.map((lot) => lot.status), ["expired", "healthy"]);
   assert.deepEqual(milk.lots?.map((lot) => lot.lotId), ["lot-expired", "lot-healthy"]);
   assert.equal(milk.constraintVersion, 5);

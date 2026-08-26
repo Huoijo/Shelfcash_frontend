@@ -579,7 +579,7 @@ Field chính:
 - received_date, expiry_date
 - supplier_id, supplier
 - status
-- last_counted_at
+- snapshot_date (ngày kiểm kho)
 - version
 
 Status hiện có:

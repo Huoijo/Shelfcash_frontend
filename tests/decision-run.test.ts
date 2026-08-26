@@ -2,15 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildDecisionRunRequest,
-  DECISION_CUTOFF_DATE,
   decisionRunLifecycle,
   isTerminalDecisionRunStatus,
   shouldPollDecisionRun,
 } from "../lib/decision-run.ts";
-
-test("Decision simulation uses the configured 20 August 2026 cutoff", () => {
-  assert.equal(DECISION_CUTOFF_DATE, "2026-08-20");
-});
 
 test("simulation request includes the complete deterministic decision contract", () => {
   assert.deepEqual(

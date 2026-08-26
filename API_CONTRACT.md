@@ -135,8 +135,7 @@ STORE_001
       "supplier_id": "sup-sua-viet",
       "storage_location": "Kho lạnh A",
       "status": "healthy",
-      "last_counted": "2026-08-19",
-      "last_counted_at": "2026-08-19",
+      "snapshot_date": "2026-08-19",
       "version": 1
     },
     {
@@ -159,8 +158,7 @@ STORE_001
       "supplier_id": "sup-sua-viet",
       "storage_location": "Kho lạnh A",
       "status": "healthy",
-      "last_counted": "2026-08-19",
-      "last_counted_at": "2026-08-19",
+      "snapshot_date": "2026-08-19",
       "version": 1
     },
     {
@@ -183,8 +181,7 @@ STORE_001
       "supplier_id": "sup-matcha-house",
       "storage_location": "Kho khô · Kệ A2",
       "status": "healthy",
-      "last_counted": "2026-08-19",
-      "last_counted_at": "2026-08-19",
+      "snapshot_date": "2026-08-19",
       "version": 1
     },
     {
@@ -207,8 +204,7 @@ STORE_001
       "supplier_id": "sup-minh-long",
       "storage_location": "Kho khô · Kệ B1",
       "status": "healthy",
-      "last_counted": "2026-08-19",
-      "last_counted_at": "2026-08-19",
+      "snapshot_date": "2026-08-19",
       "version": 1
     },
     {
@@ -231,8 +227,7 @@ STORE_001
       "supplier_id": "sup-viet-pack",
       "storage_location": "Kho bao bì · Kệ P1",
       "status": "healthy",
-      "last_counted": "2026-08-19",
-      "last_counted_at": "2026-08-19",
+      "snapshot_date": "2026-08-19",
       "version": 1
     },
     {
@@ -255,8 +250,7 @@ STORE_001
       "supplier_id": "sup-an-phu",
       "storage_location": "Kho mát · Kệ F1",
       "status": "expiring",
-      "last_counted": "2026-08-19",
-      "last_counted_at": "2026-08-19",
+      "snapshot_date": "2026-08-19",
       "version": 1
     },
     {
@@ -279,8 +273,7 @@ STORE_001
       "supplier_id": "sup-tra-viet",
       "storage_location": "Kho khô · Kệ B3",
       "status": "healthy",
-      "last_counted": "2026-08-19",
-      "last_counted_at": "2026-08-19",
+      "snapshot_date": "2026-08-19",
       "version": 1
     },
     {
@@ -303,8 +296,7 @@ STORE_001
       "supplier_id": "sup-tra-viet",
       "storage_location": "Kho khô · Kệ A4",
       "status": "healthy",
-      "last_counted": "2026-08-19",
-      "last_counted_at": "2026-08-19",
+      "snapshot_date": "2026-08-19",
       "version": 1
     },
     {
@@ -327,8 +319,7 @@ STORE_001
       "supplier_id": "sup-an-phu",
       "storage_location": "Kho mát · Kệ F2",
       "status": "expiring",
-      "last_counted": "2026-08-19",
-      "last_counted_at": "2026-08-19",
+      "snapshot_date": "2026-08-19",
       "version": 1
     },
     {
@@ -351,8 +342,7 @@ STORE_001
       "supplier_id": "sup-an-phu",
       "storage_location": "Kho mát · Kệ F2",
       "status": "healthy",
-      "last_counted": "2026-08-19",
-      "last_counted_at": "2026-08-19",
+      "snapshot_date": "2026-08-19",
       "version": 1
     },
     {
@@ -375,8 +365,7 @@ STORE_001
       "supplier_id": "sup-highland",
       "storage_location": "Kho khô · Kệ C1",
       "status": "healthy",
-      "last_counted": "2026-08-19",
-      "last_counted_at": "2026-08-19",
+      "snapshot_date": "2026-08-19",
       "version": 1
     }
   ],
@@ -456,7 +445,7 @@ STORE_001
 > - `inventory` phải trả đầy đủ 11 lô (Cam có 2 lô: lot-cam-01 expiring + lot-cam-02 healthy)
 > - `status` chỉ có 4 giá trị: `"healthy"`, `"expiring"`, `"expired"`, `"stockout"`
 > - `supplier` và `supplier_name` phải có cùng giá trị (FE dùng cả hai)
-> - `last_counted` và `last_counted_at` phải có cùng giá trị
+> - `snapshot_date` là ngày kiểm kho của lô hàng
 > - `on_hand` và `quantity` phải có cùng giá trị
 > - Combo (item_type: "combo") KHÔNG có recipe lines, chỉ có components
 

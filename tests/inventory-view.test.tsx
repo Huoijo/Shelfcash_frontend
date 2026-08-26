@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ForecastChart } from "../app/components/ForecastChart.tsx";
+import { ForecastChart, forecastPointsForRun } from "../app/components/ForecastChart.tsx";
 import { friendlyLotLabel, InventoryView } from "../app/views/InventoryView.tsx";
 import { TodayView } from "../app/views/TodayView.tsx";
 import { emptyBackendPlan } from "../lib/contract-adapters.ts";
@@ -234,6 +234,21 @@ test("ForecastChart identifies products and shades persisted interval bounds", (
   assert.match(source, /point\.intervalUpper/);
   assert.doesNotMatch(source, /dataKey="p25"/);
   assert.doesNotMatch(source, /dataKey="p75"/);
+});
+
+test("ForecastChart limits a planning chart to its persisted forecast-run window", () => {
+  const points = forecastPointsForRun(
+    [
+      { date: "2026-08-03", p50: 10 },
+      { date: "2026-08-04", p50: 11 },
+      { date: "2026-08-05", p50: 12 },
+      { date: "2026-08-06", p50: 13 },
+    ],
+    "2026-08-04",
+    1,
+  );
+
+  assert.deepEqual(points.map((point) => point.date), ["2026-08-04", "2026-08-05"]);
 });
 
 test("inventory surfaces contain no retired low, normal, or overstock states", () => {

@@ -51,6 +51,7 @@ export const CANONICAL_SCHEMAS = {
   purchase_history: {
     fields: [
       "purchase_date",
+      "received_date",
       "ingredient_name",
       "quantity_received",
       "unit",
@@ -61,7 +62,7 @@ export const CANONICAL_SCHEMAS = {
       "batch_id",
       "purchase_order_id",
     ],
-    core_fields: ["purchase_date", "ingredient_name", "quantity_received"],
+    core_fields: ["received_date", "ingredient_name", "quantity_received"],
   },
   supplier_constraints: {
     fields: [
@@ -174,7 +175,8 @@ const fieldLabels: Record<string, string> = {
   yield_unit: "Đơn vị sản lượng",
   recipe_version: "Phiên bản công thức",
   effective_date: "Ngày hiệu lực",
-  purchase_date: "Ngày nhập",
+  purchase_date: "Ngày đặt hàng",
+  received_date: "Ngày nhập hàng",
   quantity_received: "Số lượng nhận",
   unit_price: "Đơn giá",
   total_cost: "Tổng chi phí",
@@ -263,7 +265,8 @@ const fieldAliases: Partial<
     unit: "ingredient_unit",
   },
   purchase_history: {
-    date: "purchase_date",
+    date: "received_date",
+    received_at: "received_date",
     ingredient: "ingredient_name",
     quantity: "quantity_received",
     unit_cost: "unit_price",

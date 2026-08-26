@@ -15,6 +15,8 @@ import {
 import {
   CANONICAL_SCHEMAS,
   SHEET_TYPES,
+  canonicalFieldLabel,
+  normalizeCanonicalField,
   normalizeSheetType,
 } from "../lib/canonical-schemas.ts";
 import type {
@@ -77,6 +79,20 @@ function mixedUnknownAndSalesMappings(): EditableSheetMapping[] {
     ],
   });
 }
+
+test("purchase-history maps receipt dates separately from order dates", () => {
+  assert.deepEqual(CANONICAL_SCHEMAS.purchase_history.core_fields, [
+    "received_date",
+    "ingredient_name",
+    "quantity_received",
+  ]);
+  assert.equal(canonicalFieldLabel("received_date"), "Ngày nhập hàng");
+  assert.equal(canonicalFieldLabel("purchase_date"), "Ngày đặt hàng");
+  assert.equal(
+    normalizeCanonicalField("purchase_history", "date"),
+    "received_date",
+  );
+});
 
 test("optional source columns serialize as null while core fields still validate", () => {
   const response: ImportCreateResponse = {

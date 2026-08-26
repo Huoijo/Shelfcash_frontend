@@ -677,7 +677,10 @@ function normalizedPurchases(
 ): PurchaseHistoryRow[] {
   return rows(result.purchase_history)
     .map((row) => ({
-      date: isoDate(firstValue(row, ["date", "purchase_date"]), ""),
+      date: isoDate(
+        firstValue(row, ["received_date", "date", "purchase_date"]),
+        "",
+      ),
       ingredient: stringValue(row, [
         "ingredient",
         "ingredient_name",

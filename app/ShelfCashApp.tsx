@@ -25,7 +25,7 @@ import {
   strategyFromApi,
 } from "../lib/contract-adapters";
 import { dateInTimeZone } from "../lib/data";
-import { DECISION_CUTOFF_DATE, shouldPollDecisionRun } from "../lib/decision-run";
+import { shouldPollDecisionRun } from "../lib/decision-run";
 import { runSimulationAttempt } from "../lib/simulation-orchestration";
 import {
   createIdempotencyKey,
@@ -1164,6 +1164,7 @@ export function ShelfCashApp({
   }
 
   async function runPlanning({
+    cutoffDate,
     horizonDays,
     includeOpenPurchaseOrders,
     budgetOverride,
@@ -1187,7 +1188,7 @@ export function ShelfCashApp({
       const resolved = await runSimulationAttempt({
         attemptId: operation,
         storeId: data.settings.storeId,
-        cutoffDate: DECISION_CUTOFF_DATE,
+        cutoffDate,
         horizonDays,
         includeOpenPurchaseOrders,
         budgetOverride,

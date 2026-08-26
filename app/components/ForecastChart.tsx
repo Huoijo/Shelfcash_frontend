@@ -11,6 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import { useId } from "react";
+import { addDaysToDateOnly } from "../../lib/api-contract";
 import type { ForecastResult } from "../../lib/types";
 import { formatDate, formatQuantity } from "./ui";
 
@@ -40,25 +41,55 @@ function ForecastTooltip({ active, payload, unit }: ForecastTooltipProps) {
   );
 }
 
+export function forecastPointsForRun(
+  points: ForecastResult["forecast"],
+  cutoffDate?: string,
+  horizonDays?: number,
+): ForecastResult["forecast"] {
+  if (
+    !cutoffDate ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(cutoffDate) ||
+    !Number.isInteger(horizonDays) ||
+    horizonDays < 1
+  ) {
+    return points;
+  }
+
+  const lastDate = addDaysToDateOnly(cutoffDate, horizonDays);
+  return points.filter(
+    (point) => point.date >= cutoffDate && point.date <= lastDate,
+  );
+}
+
 export function ForecastChart({
   forecast,
   compact = false,
+  cutoffDate,
+  horizonDays,
 }: {
   forecast: ForecastResult;
   compact?: boolean;
+  cutoffDate?: string;
+  horizonDays?: number;
 }) {
   const chartId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const seriesName = forecast.product || forecast.ingredient || "sản phẩm";
   const seriesId =
     forecast.productId || forecast.ingredientId || seriesName;
   const gradientId = `forecast-confidence-${chartId}`;
+  const forecastPoints = forecastPointsForRun(
+    forecast.forecast,
+    cutoffDate,
+    horizonDays,
+  );
+  const hasRunWindow = forecastPoints !== forecast.forecast;
   const data = [
-    ...forecast.history.slice(compact ? -10 : -18).map((point) => ({
+    ...(hasRunWindow ? [] : forecast.history.slice(compact ? -10 : -18)).map((point) => ({
       ...point,
       label: formatDate(point.date).slice(0, 5),
       confidenceRange: undefined,
     })),
-    ...forecast.forecast.map((point) => {
+    ...forecastPoints.map((point) => {
       const quantilesValid = point.quantilesValid !== false;
       return {
         ...point,

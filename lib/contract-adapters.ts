@@ -206,7 +206,7 @@ function normalizeInventory(
       .filter((status): status is InventoryStatus => Boolean(status))
       .sort((left, right) => statusPriority[right] - statusPriority[left]);
     const latestCount = lots
-      .map((lot) => text(lot, ["last_counted_at", "last_counted"]))
+      .map((lot) => text(lot, ["snapshot_date"]))
       .filter(Boolean)
       .sort()
       .at(-1);
@@ -255,7 +255,7 @@ function normalizeInventory(
       expiryDate: text(lot, ["expiry_date"]),
       supplier: text(lot, ["supplier", "supplier_name"]),
       status: inventoryStatus(lot.status) ?? (text(lot, ["status"]) ? "missing" : "missing"),
-      lastCounted: text(lot, ["last_counted_at", "last_counted"]),
+      lastCounted: text(lot, ["snapshot_date"]),
       version: number(lot, ["version"]),
     }));
 

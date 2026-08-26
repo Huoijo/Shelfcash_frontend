@@ -1399,8 +1399,7 @@ export function buildMockBootstrapResponse(today: string = "2026-08-20"): StoreB
         supplier_id: lot.supplierId,
         storage_location: lot.storageLocation,
         status: lot.status,
-        last_counted: lot.lastCounted,
-        last_counted_at: lot.lastCounted,
+        snapshot_date: lot.lastCounted,
         version: lot.version ?? 1,
       }));
     }),
