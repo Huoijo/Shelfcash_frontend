@@ -114,6 +114,7 @@ export interface SimulationRunInput {
   horizonDays: number;
   includeOpenPurchaseOrders: boolean;
   budgetOverride?: number;
+  engineMode?: "deterministic" | "stochastic";
   onProgress?: (progress: SimulationProgress) => void;
 }
 
@@ -309,6 +310,7 @@ export function PlanView({
   onRunPlanning,
   onTrainModel,
   onStrategyChange,
+  onResetPlanning,
   onCreateOrders,
   onUpdateOrder,
   onConfirmOrder,
@@ -336,6 +338,7 @@ export function PlanView({
   onRunPlanning: (input: SimulationRunInput) => Promise<void>;
   onTrainModel?: (modelVersion: string, historyDays: number) => Promise<void>;
   onStrategyChange: (strategy: Strategy) => void;
+  onResetPlanning?: () => void;
   onCreateOrders: (
     recommendations: Recommendation[],
   ) => Promise<PurchaseOrder[]>;
@@ -352,6 +355,7 @@ export function PlanView({
   );
   const [cutoffDate, setCutoffDate] = useState(plan.cutoffDate ?? data.today);
   const [budgetOverride, setBudgetOverride] = useState("");
+  const [engineMode, setEngineMode] = useState<"deterministic" | "stochastic">("deterministic");
   const [includeOpenPurchaseOrders, setIncludeOpenPurchaseOrders] = useState(true);
   const [controlsDirty, setControlsDirty] = useState(false);
   const [simulationProgress, setSimulationProgress] = useState<SimulationProgress | null>(null);
@@ -380,17 +384,17 @@ export function PlanView({
   );
 
   const selectedCoreStrategy = strategyOption(strategy).core;
-  const selectedScenario = plan.scenarios.find(
+  const selectedScenario = (plan.scenarios ?? []).find(
     (scenario) => scenario.strategy === selectedCoreStrategy,
   );
   const selectedRecommendations =
-    selectedScenario?.recommendations ?? plan.recommendations;
+    selectedScenario?.recommendations ?? plan.recommendations ?? [];
   const forecastEntries = useMemo(
-    () => Object.entries(plan.forecasts),
+    () => Object.entries(plan.forecasts ?? {}),
     [plan.forecasts],
   );
   const demandEntries = useMemo(
-    () => Object.entries(plan.ingredientDemand),
+    () => Object.entries(plan.ingredientDemand ?? {}),
     [plan.ingredientDemand],
   );
 
@@ -549,6 +553,7 @@ export function PlanView({
         cutoffDate,
         horizonDays,
         includeOpenPurchaseOrders,
+        engineMode,
         ...(parsedBudget === undefined ? {} : { budgetOverride: parsedBudget }),
         onProgress: setSimulationProgress,
       });
@@ -770,13 +775,11 @@ export function PlanView({
     }
   }
 
-  if (
-    focus === "plan" &&
-    hasTriggeredForecast &&
-    !runBusy &&
-    decision &&
-    (noFeasibleDecision(decision) || decision.status === "completed")
-  ) {
+  const hasCompletedDecision = Boolean(
+    decision && (noFeasibleDecision(decision) || decision.status === "completed")
+  );
+
+  if (focus === "plan" && hasCompletedDecision && !runBusy) {
     if (
       decisionBrief !== undefined ||
       briefLoading ||
@@ -793,7 +796,7 @@ export function PlanView({
           explanationLoading={explanationLoading ?? false}
           loading={briefLoading ?? false}
           onExplain={onExplainDecision ?? (() => undefined)}
-          onRunAgain={() => void runPlanning()}
+          onRunAgain={onResetPlanning ?? (() => void runPlanning())}
           onRunWhatIf={onRunWhatIf ?? (() => undefined)}
           onRetry={onRetryBrief ?? (() => undefined)}
           decision={decision}
@@ -808,7 +811,7 @@ export function PlanView({
         busy={runBusy}
         data={data}
         decision={decision}
-        onRunAgain={() => void runPlanning()}
+        onRunAgain={onResetPlanning ?? (() => void runPlanning())}
         onCreateOrders={onCreateOrders}
         plan={plan}
       />
@@ -824,7 +827,7 @@ export function PlanView({
   ) {
     return (
       <>
-        <ProcurementLoadingWorkspace onRunAgain={() => void runPlanning()} />
+        <ProcurementLoadingWorkspace onRunAgain={onResetPlanning ?? (() => void runPlanning())} />
         <SimulationProgressPanel progress={simulationProgress} />
       </>
     );
@@ -843,6 +846,31 @@ export function PlanView({
           <label className="field"><span>Ngày chốt dữ liệu</span><input type="date" disabled={isRunning} value={cutoffDate} onChange={(event) => { setCutoffDate(event.target.value); setControlsDirty(true); }} /></label>
           <label className="field"><span>Số ngày mô phỏng (1–7)</span><input type="number" min="1" max="7" step="1" disabled={isRunning} value={horizonDays} onChange={(event) => { setHorizonDays(clampHorizon(Number(event.target.value))); setControlsDirty(true); }} /></label>
           <label className="field"><span>Ngân sách tối đa</span><input type="number" min="0" step="1000" inputMode="decimal" disabled={isRunning} value={budgetOverride} placeholder={formatVnd(data.settings.remainingBudget > 0 ? data.settings.remainingBudget : data.settings.monthlyBudget)} onChange={(event) => { setBudgetOverride(event.target.value); setControlsDirty(true); }} /></label>
+          <label className="field">
+            <span>Lựa chọn kế hoạch nhập</span>
+            <select
+              disabled={isRunning}
+              value={strategy}
+              onChange={(event) => onStrategyChange(event.target.value as Strategy)}
+            >
+              <option value="Cân bằng">Cân bằng (Khuyến nghị - P50)</option>
+              <option value="Tiết kiệm">Tiết kiệm (Tồn kho gọn - P25)</option>
+              <option value="An toàn">An toàn (Dự phòng cao - P75)</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Chế độ mô phỏng</span>
+            <select
+              disabled={isRunning}
+              value={engineMode}
+              onChange={(event) =>
+                setEngineMode(event.target.value as "deterministic" | "stochastic")
+              }
+            >
+              <option value="deterministic">Deterministic (Xác định)</option>
+              <option value="stochastic">Stochastic (Xác suất)</option>
+            </select>
+          </label>
           <label className="check plan-open-orders"><input type="checkbox" disabled={isRunning} checked={includeOpenPurchaseOrders} onChange={(event) => { setIncludeOpenPurchaseOrders(event.target.checked); setControlsDirty(true); }} /><span>Tính đơn mua hàng đang mở</span></label>
           <div className="plan-status"><span>Trạng thái</span><strong>{isRunning ? "Đang lập kế hoạch..." : decision.status === "completed" ? "Hoàn tất" : "Cần kiểm tra"}</strong></div>
         </div>
@@ -861,6 +889,159 @@ export function PlanView({
           decision={decision}
           running={isRunning}
         />
+      </>
+    );
+  }
+
+  if (focus === "plan") {
+    return (
+      <>
+        <PageHeader
+          title="Kế hoạch nhập"
+          context={`${data.settings.storeName} · ${cutoffDate}`}
+        />
+
+        <div className="plan-controls" id="simulation-run">
+          <label className="field">
+            <span>Ngày chốt dữ liệu forecast</span>
+            <input
+              type="date"
+              disabled={runBusy}
+              value={cutoffDate}
+              onChange={(event) => {
+                setCutoffDate(event.target.value);
+                setControlsDirty(true);
+              }}
+            />
+          </label>
+          <label className="field">
+            <span>Số ngày mô phỏng (1–7)</span>
+            <input
+              type="number"
+              min="1"
+              max="7"
+              step="1"
+              disabled={runBusy}
+              value={horizonDays}
+              onChange={(event) => {
+                setHorizonDays(clampHorizon(Number(event.target.value)));
+                setControlsDirty(true);
+              }}
+            />
+          </label>
+          <label className="field">
+            <span>Ngân sách tối đa</span>
+            <input
+              type="number"
+              min="0"
+              step="1000"
+              inputMode="decimal"
+              disabled={runBusy}
+              value={budgetOverride}
+              placeholder={formatVnd(data.settings.remainingBudget > 0 ? data.settings.remainingBudget : data.settings.monthlyBudget)}
+              onChange={(event) => {
+                setBudgetOverride(event.target.value);
+                setControlsDirty(true);
+              }}
+            />
+          </label>
+          <label className="field">
+            <span>Lựa chọn kế hoạch nhập</span>
+            <select
+              disabled={runBusy}
+              value={strategy}
+              onChange={(event) => onStrategyChange(event.target.value as Strategy)}
+            >
+              <option value="Cân bằng">Cân bằng (Khuyến nghị - P50)</option>
+              <option value="Tiết kiệm">Tiết kiệm (Tồn kho gọn - P25)</option>
+              <option value="An toàn">An toàn (Dự phòng cao - P75)</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Chế độ mô phỏng</span>
+            <select
+              disabled={runBusy}
+              value={engineMode}
+              onChange={(event) =>
+                setEngineMode(event.target.value as "deterministic" | "stochastic")
+              }
+            >
+              <option value="deterministic">Deterministic (Xác định)</option>
+              <option value="stochastic">Stochastic (Xác suất)</option>
+            </select>
+          </label>
+          <label className="check plan-open-orders">
+            <input
+              type="checkbox"
+              disabled={runBusy}
+              checked={includeOpenPurchaseOrders}
+              onChange={(event) => {
+                setIncludeOpenPurchaseOrders(event.target.checked);
+                setControlsDirty(true);
+              }}
+            />
+            <span>Tính đơn mua hàng đang mở</span>
+          </label>
+        </div>
+        <SimulationProgressPanel progress={simulationProgress} />
+
+        {feedback.map(([actionKey, state]) => (
+          <Notice
+            key={`${actionKey}:${state.attemptId}`}
+            tone={
+              state.status === "success"
+                ? "success"
+                : state.status === "unknown"
+                  ? "warning"
+                  : "error"
+            }
+          >
+            {state.message}
+          </Notice>
+        ))}
+
+        <div
+          className="plan-launchpad-card"
+          style={{
+            padding: "40px 24px",
+            textAlign: "center",
+            background: "linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)",
+            borderRadius: "14px",
+            border: "1px dashed #cbd5e1",
+            marginTop: "20px",
+          }}
+        >
+          <div
+            style={{
+              width: "52px",
+              height: "52px",
+              borderRadius: "50%",
+              background: "#eff6ff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              margin: "0 auto 16px",
+              boxShadow: "0 2px 8px rgba(37,99,235,0.12)",
+            }}
+          >
+            <Sparkles size={26} style={{ color: "#2563eb" }} />
+          </div>
+          <h3 style={{ fontSize: "1.15rem", fontWeight: "700", color: "#0f172a", marginBottom: "8px" }}>
+            Sẵn sàng tính toán dự báo & kế hoạch nhập hàng
+          </h3>
+          <p style={{ color: "#64748b", maxWidth: "540px", margin: "0 auto 20px", fontSize: "0.92rem", lineHeight: "1.6" }}>
+            Nhấn nút <strong>Dự đoán</strong> để hệ thống phân tích nhu cầu 7 ngày tới, đối chiếu tồn kho FEFO và đề xuất 3 phương án nhập hàng tối ưu.
+          </p>
+          <Button
+            variant="primary"
+            busy={runBusy}
+            onClick={() => void runPlanning()}
+            style={{ padding: "10px 24px", fontSize: "0.95rem", fontWeight: "600" }}
+          >
+            <Play size={16} />
+            {runBusy ? "Đang chạy dự đoán..." : "Dự đoán & Lập kế hoạch"}
+          </Button>
+        </div>
       </>
     );
   }

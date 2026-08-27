@@ -61,6 +61,7 @@ export async function runSimulationAttempt(
     includeOpenPurchaseOrders: boolean;
     budgetOverride?: number;
     monthlyBudget: number;
+    engineMode?: "legacy" | "deterministic" | "stochastic";
     modelVersion?: string;
     historyDays?: number;
     signal?: AbortSignal;
@@ -121,6 +122,7 @@ export async function runSimulationAttempt(
       includeOpenPurchaseOrders: input.includeOpenPurchaseOrders,
       budgetOverride: input.budgetOverride,
       monthlyBudget: input.monthlyBudget,
+      engineMode: input.engineMode,
     }),
     signal: input.signal,
   });

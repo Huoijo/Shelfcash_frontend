@@ -41,3 +41,11 @@ test("no-feasible Decision Brief is a business outcome, not an application error
   assert.match(markup, /Cần xem lại thời gian giao/);
   assert.doesNotMatch(markup, /Kế hoạch hoàn tất nhưng không có nguyên liệu cần nhập/);
 });
+
+test("DecisionBriefWorkspace renders full strategy analysis button", () => {
+  const markup = renderToStaticMarkup(
+    <DecisionBriefWorkspace brief={brief} error={null} explanation={null} explanationError={null} explanationLoading={false} loading={false} onExplain={() => undefined} onRetry={() => undefined} />,
+  );
+  assert.match(markup, /Xem các phương án khác &amp; lý do loại|Xem các phương án khác & lý do loại/);
+});
+

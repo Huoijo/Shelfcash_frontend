@@ -158,3 +158,69 @@ test("a feasible decision routes into the procurement planning workspace", () =>
   assert.match(markup, /Nguyên liệu/);
   assert.doesNotMatch(markup, /Chưa tìm được kế hoạch nhập đủ an toàn/);
 });
+
+test("PlanView idle screen renders clean launchpad with strategy selection option", () => {
+  const markup = renderToStaticMarkup(
+    <PlanView
+      data={data}
+      decision={null}
+      draftOrders={[]}
+      onConfirmOrder={async () => undefined}
+      onCreateOrders={async () => []}
+      onReceiveOrder={async () => undefined}
+      onRunPlanning={async () => undefined}
+      onStrategyChange={() => undefined}
+      onUpdateOrder={async () => undefined}
+      plan={{ ...plan, status: "idle" }}
+      strategy="Cân bằng"
+      focus="plan"
+    />,
+  );
+  assert.match(markup, /Lựa chọn kế hoạch nhập/);
+  assert.match(markup, /Sẵn sàng tính toán dự báo (?:&|&amp;) kế hoạch nhập hàng/);
+  assert.match(markup, /Dự đoán (?:&|&amp;) Lập kế hoạch/);
+  assert.doesNotMatch(markup, /Dòng đề xuất của kịch bản/);
+});
+
+test("DecisionBriefWorkspace renders button for viewing candidate strategies and failure reasons", async () => {
+  const { DecisionBriefWorkspace } = await import("../app/components/DecisionBriefWorkspace.tsx");
+  const brief = {
+    decision_run_id: "decision-123",
+    generated_at: "2026-08-27T10:00:00Z",
+    status: "completed",
+    recommendation: {
+      available: true,
+      strategy: "balanced" as const,
+      total_purchase_cost: 5625000,
+      expected_fill_rate: 0.965,
+    },
+    risk: {
+      stockout_probability: 0.038,
+      expected_fill_rate: 0.965,
+    },
+    procurement_rows: [],
+    ingredient_demand: [],
+    critic: {
+      hard_violations: [],
+      warnings: [],
+    },
+    evidence: [],
+    data_availability: {},
+  };
+
+  const markup = renderToStaticMarkup(
+    <DecisionBriefWorkspace
+      brief={brief}
+      decision={{
+        decision_run_id: "decision-123",
+        status: "completed",
+        recommended_strategy: "balanced",
+      }}
+      explanation={null}
+      whatIf={null}
+    />,
+  );
+
+  assert.match(markup, /Xem các phương án khác (?:&|&amp;) lý do loại/);
+  assert.match(markup, /Hỏi AI về kế hoạch/);
+});

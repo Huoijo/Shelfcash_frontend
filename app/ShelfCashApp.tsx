@@ -316,15 +316,15 @@ export function ShelfCashApp({
   initialPlan: PlanResponse;
 }) {
   const [isMounted, setIsMounted] = useState(false);
-  const [session, setSession] = useState<UserSession | null>(() =>
-    getStoredSession(),
-  );
+  const [session, setSession] = useState<UserSession | null>(null);
   const [page, setPage] = useState<PageKey>(initialDecisionView);
-  const [currentPlan, setCurrentPlan] = useState<PlanId>(() => getStoredPlan());
+  const [currentPlan, setCurrentPlan] = useState<PlanId>("free");
   const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
+    setSession(getStoredSession());
+    setCurrentPlan(getStoredPlan());
   }, []);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [data, setData] = useState(initialData);
@@ -429,6 +429,21 @@ export function ShelfCashApp({
     }
   }
 
+  const resetPlanning = useCallback(() => {
+    const storeId = data.settings.storeId;
+    if (storeId && typeof window !== "undefined") {
+      window.localStorage.removeItem(`shelfcash:decision-run:${storeId}`);
+    }
+    setDecision(null);
+    setDecisionBrief(null);
+    setDecisionExplanation(null);
+    setDecisionWhatIf(null);
+    setPlan((current) => ({
+      ...current,
+      status: "idle",
+    }));
+  }, [data.settings.storeId]);
+
   useEffect(() => {
     const storeId = data.settings.storeId;
     if (!storeId) return;
@@ -449,6 +464,12 @@ export function ShelfCashApp({
           setDecision(resolved);
           if (resolved.status === "completed" || resolved.status === "completed_with_no_feasible_recommendation") {
             await loadDecisionBrief(resolved.decision_run_id, abortController.signal);
+            setPlan((current) => ({
+              ...current,
+              status: "completed",
+              cutoffDate: resolved.as_of_date ?? current.cutoffDate,
+              horizonDays: resolved.horizon_days ?? current.horizonDays,
+            }));
           }
         }
       } catch {
@@ -1169,6 +1190,7 @@ export function ShelfCashApp({
     horizonDays,
     includeOpenPurchaseOrders,
     budgetOverride,
+    engineMode,
     onProgress,
   }: SimulationRunInput): Promise<void> {
     if (!data.settings.storeId.trim()) {
@@ -1193,6 +1215,7 @@ export function ShelfCashApp({
         horizonDays,
         includeOpenPurchaseOrders,
         budgetOverride,
+        engineMode,
         monthlyBudget:
           data.settings.remainingBudget > 0
             ? data.settings.remainingBudget
@@ -1724,6 +1747,7 @@ export function ShelfCashApp({
             onRunPlanning={runPlanning}
             onTrainModel={trainModel}
             onStrategyChange={changeStrategy}
+            onResetPlanning={resetPlanning}
             onCreateOrders={createOrdersFromPlan}
             onUpdateOrder={updateOrder}
             onConfirmOrder={confirmOrder}

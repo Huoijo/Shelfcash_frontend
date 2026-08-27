@@ -10,12 +10,13 @@ export function buildDecisionRunRequest(input: {
   includeOpenPurchaseOrders: boolean;
   budgetOverride?: number;
   monthlyBudget: number;
+  engineMode?: "legacy" | "deterministic" | "stochastic";
 }): CreateDecisionRunRequest {
   return {
     forecast_run_id: input.forecastRunId,
     as_of_date: input.asOfDate,
     horizon_days: input.horizonDays,
-    engine_mode: "deterministic",
+    engine_mode: input.engineMode ?? "deterministic",
     include_open_purchase_orders: input.includeOpenPurchaseOrders,
     budget_override: input.budgetOverride ?? input.monthlyBudget,
     scenario_count: DECISION_SCENARIO_COUNT,
