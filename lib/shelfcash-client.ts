@@ -811,6 +811,7 @@ export async function saveSupplierConstraint(input: {
     order_unit: source.order_unit,
     base_unit: source.base_unit,
     lead_time_days: source.lead_time_days,
+    shelf_life_days: source.shelf_life_days,
     effective_date: source.effective_date,
   };
   if (source.version !== undefined) payload.version = source.version;

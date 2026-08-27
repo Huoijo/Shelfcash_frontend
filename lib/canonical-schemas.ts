@@ -187,7 +187,7 @@ const fieldLabels: Record<string, string> = {
   package_size: "Quy cách đóng gói",
   package_base_unit: "Đơn vị cơ sở của gói",
   lead_time_days: "Thời gian giao (ngày)",
-  shelf_life_days: "Tuổi thọ nguyên liệu",
+  shelf_life_days: "Hạn dùng dự kiến (ngày)",
   available_delivery_days: "Ngày có thể giao",
   is_weekend: "Cuối tuần",
   is_holiday: "Ngày lễ",

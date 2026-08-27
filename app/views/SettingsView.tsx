@@ -150,6 +150,7 @@ export function SettingsView({
                   <th>Đơn giá</th>
                   <th>Nhà cung cấp</th>
                   <th>Thời gian giao (ngày)</th>
+                  <th>Hạn dùng dự kiến (ngày)</th>
                   <th>Đặt tối thiểu</th>
                   <th>Quy cách đóng gói</th>
                   <th>Đơn vị đặt</th>
@@ -192,6 +193,23 @@ export function SettingsView({
                         onChange={(event) =>
                           updateSupplierTerm(index, {
                             leadTimeDays: Number(event.target.value),
+                          })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        value={item.shelfLifeDays ?? ""}
+                        min="0"
+                        step="1"
+                        aria-label={`Hạn dùng dự kiến ${item.ingredient}`}
+                        onChange={(event) =>
+                          updateSupplierTerm(index, {
+                            shelfLifeDays:
+                              event.target.value === ""
+                                ? undefined
+                                : Number(event.target.value),
                           })
                         }
                       />

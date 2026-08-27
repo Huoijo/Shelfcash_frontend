@@ -1044,6 +1044,7 @@ export function ShelfCashApp({
               moq: item.moq,
               pack_size: item.packSize,
               lead_time_days: item.leadTimeDays,
+              shelf_life_days: item.shelfLifeDays,
               order_unit: item.orderUnit,
               base_unit: item.baseUnit,
               effective_date: item.effectiveDate,

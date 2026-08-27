@@ -21,8 +21,9 @@ test("supplier request payload is whitelisted", async () => {
   let body = "";
   globalThis.fetch = async (_input, init) => { body = String(init?.body); return Response.json({}); };
   try {
-    await saveSupplierConstraint({ storeId: "s1", payload: { supplier_id: "sup", ingredient_id: "ing", unit_cost: 1, moq: 2, pack_size: 3, lead_time_days: 4, safety_stock: 99, maximum_stock: 100, storage_capacity: 200 } });
+    await saveSupplierConstraint({ storeId: "s1", payload: { supplier_id: "sup", ingredient_id: "ing", unit_cost: 1, moq: 2, pack_size: 3, lead_time_days: 4, shelf_life_days: 7, safety_stock: 99, maximum_stock: 100, storage_capacity: 200 } });
     const payload = JSON.parse(body) as Record<string, unknown>;
+    assert.equal(payload.shelf_life_days, 7);
     assert.equal(payload.safety_stock, undefined);
     assert.equal(payload.maximum_stock, undefined);
     assert.equal(payload.storage_capacity, undefined);
