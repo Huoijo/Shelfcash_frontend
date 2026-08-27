@@ -1,9 +1,7 @@
 # SHELFCASH BACKEND API CONTRACT — ĐẶC TẢ CHI TIẾT CHO ĐỘI BACKEND
 
-**Phiên bản:** 2.1 · **Cập nhật:** 27/08/2026
+**Phiên bản:** 2.0 · **Ngày tạo:** 20/08/2026  
 **Mục đích:** Tài liệu này mô tả **chính xác** từng API endpoint mà Frontend ShelfCash đang gọi, **kèm example response đầy đủ** lấy trực tiếp từ mock-data hiện tại. Backend cần tái tạo chính xác các response này để Frontend hoạt động đúng.
-
-**Thay đổi 2.1:** Bổ sung `purchase_history.received_date`, các alias mã lô (`batch_code`/`batch_id`), `supplier_constraints.shelf_life_days`, cùng payload forecast/decision hiện hành.
 
 ---
 
@@ -450,7 +448,6 @@ STORE_001
 > - `snapshot_date` là ngày kiểm kho của lô hàng
 > - `on_hand` và `quantity` phải có cùng giá trị
 > - Combo (item_type: "combo") KHÔNG có recipe lines, chỉ có components
-> - Khi import, FE chấp nhận `batch_code`, `batch_id`, `batchId` hoặc `lot_id` làm mã lô; backend nên trả canonical `batch_id`. Với bootstrap, `lot_id` vẫn là định danh lô dùng cho mutation.
 
 ---
 
@@ -460,20 +457,17 @@ STORE_001
 
 **Trang FE:** Nhập dữ liệu → Chọn tệp → Tải lên  
 **FE gửi:** `multipart/form-data` với files Excel/CSV + `store_id` + `forecast_date` + `forecast_horizon`  
-**FE mong đợi:** Backend nhận diện 7 loại sheet, trả lại profiles + mapping gợi ý.
+**FE mong đợi:** Backend nhận diện 6 loại sheet, trả lại profiles + mapping gợi ý.
 
-#### 7 loại sheet canonical mà FE hiểu:
+#### 6 loại sheet canonical mà FE hiểu:
 | `sheet_type` | Mô tả | Trường bắt buộc (core fields) |
 |---|---|---|
 | `sales_history` | Doanh thu bán hàng | `date`, `product_name`, `quantity_sold` |
 | `inventory` | Tồn kho & lô hàng | `ingredient_name`, `on_hand`, `unit` |
 | `menu` | Danh mục menu | `product_name`, `selling_price` |
 | `recipes` | Công thức định lượng | `product_name`, `ingredient_name`, `ingredient_quantity` |
-| `purchase_history` | Lịch sử nhập hàng | `received_date`, `ingredient_name`, `quantity_received` |
 | `supplier_constraints` | Nhà cung cấp | `supplier_name`, `lead_time_days` |
 | `calendar_features` | Lịch & sự kiện | `event_date`, `event_name` |
-
-`purchase_history.received_date` là ngày hàng thực tế được nhận và là trường ngày canonical cho dữ liệu nhập hàng. FE cũng chấp nhận các alias import: `date` hoặc `received_at` → `received_date`; `batch_code`, `batchcode`, `batch_id` hoặc `lot_id` → `batch_id`.
 
 #### Expected Response `200`:
 ```json
@@ -850,32 +844,6 @@ STORE_001
 ]
 ```
 
-#### Trường bổ sung: `shelf_life_days`
-
-`shelf_life_days` là số ngày hạn dùng dự kiến của nguyên liệu sau khi nhận hàng. Trường này là số không âm và có thể không có (`optional`) nếu NCC chưa cấu hình. FE chấp nhận `shelf_life` là alias khi import/đọc bootstrap, nhưng backend cần dùng `shelf_life_days` trong API.
-
-### `POST /api/v1/stores/{store_id}/supplier-constraints`
-### `PUT /api/v1/stores/{store_id}/supplier-constraints/{constraint_id}`
-
-**FE gửi:**
-```json
-{
-  "supplier_id": "sup-sua-viet",
-  "ingredient_id": "milk-fresh",
-  "unit_cost": 34000,
-  "moq": 24,
-  "pack_size": 24,
-  "order_unit": "thùng",
-  "base_unit": "L",
-  "lead_time_days": 2,
-  "shelf_life_days": 14,
-  "effective_date": "2026-08-27",
-  "version": 1
-}
-```
-
-`version` chỉ được gửi khi cập nhật bản ghi đã có. Response nên trả lại constraint đã lưu, bao gồm `shelf_life_days` nếu có.
-
 ---
 
 ## 9. INVENTORY CONSTRAINTS
@@ -903,18 +871,7 @@ Response giống `settings` trong Bootstrap.
 ### `POST /api/v1/stores/{store_id}/forecast-runs`
 
 **Trang FE:** Kế hoạch nhập → Bước "Dự báo"  
-**FE gửi:**
-```json
-{
-  "cutoff_date": "2026-08-20",
-  "horizon_days": 7,
-  "quantiles": [0.25, 0.5, 0.75],
-  "scope": { "product_ids": [], "ingredient_ids": [] },
-  "use_latest_calendar": true
-}
-```
-
-`cutoff_date` là ngày chốt dữ liệu. Biểu đồ chỉ hiển thị các điểm từ `cutoff_date` đến `cutoff_date + horizon_days` (bao gồm cả hai mốc); backend phải trả các điểm forecast theo dải ngày này.
+**FE gửi:** `{ "horizon_days": 7, "as_of_date": "2026-08-20" }`
 
 **Expected Response `200`:**
 ```json
@@ -959,22 +916,6 @@ Response giống `settings` trong Bootstrap.
 
 **Trang FE:** Kế hoạch nhập → Bấm "Chạy phân tích"  
 **FE mong đợi:** Backend tạo Decision Run (forecast + demand + procurement).
-
-**FE gửi:**
-```json
-{
-  "forecast_run_id": "forecast-run-mock-happy-path",
-  "as_of_date": "2026-08-20",
-  "horizon_days": 7,
-  "engine_mode": "deterministic",
-  "include_open_purchase_orders": true,
-  "budget_override": 11800000,
-  "scenario_count": 100,
-  "random_seed": 42
-}
-```
-
-`budget_override` luôn có trong request: FE ưu tiên ngân sách còn lại (`remaining_budget`) nếu lớn hơn 0, nếu không thì dùng `monthly_budget`. Giá trị người dùng nhập sẽ ghi đè mức này.
 
 **Expected Response `200`:**
 ```json
