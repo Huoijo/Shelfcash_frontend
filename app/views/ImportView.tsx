@@ -786,10 +786,10 @@ export function ImportView({
             <>
               <div className="file-list">
                 {files.map((file) => (
-                  <div key={`${file.name}:${file.lastModified}`}>
+                  <div key={`${file.name}:${file.lastModified}`} title={file.name}>
                     <FileSpreadsheet size={15} />
-                    <span>
-                      <strong>{file.name}</strong>
+                    <span title={file.name}>
+                      <strong title={file.name}>{file.name}</strong>
                       <small>{(file.size / 1024).toFixed(0)} KB</small>
                     </span>
                     <button

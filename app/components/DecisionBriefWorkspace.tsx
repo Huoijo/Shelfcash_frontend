@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Clock,
   FileText,
   GitCompare,
   Info,
@@ -45,7 +46,19 @@ import type {
   WhatIfRequest,
   WhatIfResponse,
 } from "../../lib/types";
-import { Button, Notice, formatDate, formatQuantity, formatVnd } from "./ui";
+import {
+  getDecisionDiagnosticsReport,
+  type DiagnosticOrigin,
+} from "../../lib/decision-diagnostics";
+import {
+  Button,
+  Notice,
+  formatDate,
+  formatMoneyInput,
+  formatQuantity,
+  formatVnd,
+  parseMoneyInput,
+} from "./ui";
 
 const strategyLabels = {
   lean: "Tiết kiệm",
@@ -99,11 +112,54 @@ function findingText(value: unknown, fallback: string): string {
 interface IngredientItemData {
   demand: IngredientDemandRow;
   procurement: ProcurementRow | null;
-  daysOfSupply: number;
-  currentStock: number;
+  daysOfSupply: number | null;
+  currentStock: number | null;
   stockoutRisk: "high" | "medium" | "safe";
   orderNeeded: boolean;
   cost: number;
+}
+
+/** Trích xuất rủi ro tồn kho an toàn dù inventory_risk là Mảng hay Object kết quả của Backend Solver */
+function findIngredientRisk(
+  decision: DecisionPackage | null | undefined,
+  ingredientId: string
+): {
+  days_of_supply?: number | null;
+  stockout_probability?: number | null;
+} | null {
+  if (!decision?.inventory_risk) return null;
+  const raw = decision.inventory_risk as any;
+
+  if (Array.isArray(raw)) {
+    const item = raw.find(
+      (r: any) => (r?.ingredient_id || r?.ingredient || r?.key) === ingredientId
+    );
+    return item ?? null;
+  }
+
+  if (typeof raw === "object") {
+    if (raw[ingredientId]) {
+      return raw[ingredientId];
+    }
+    if (Array.isArray(raw.results)) {
+      const p50Design =
+        raw.results.find((s: any) => s?.scenario_id === "p50_design") ?? raw.results[0];
+      const byKey = p50Design?.summary?.by_key ?? p50Design?.by_key ?? p50Design?.summary;
+      if (Array.isArray(byKey)) {
+        const item = byKey.find(
+          (r: any) => (r?.ingredient_id || r?.ingredient || r?.key) === ingredientId
+        );
+        if (item) {
+          return {
+            days_of_supply: item.days_of_supply ?? item.days_supply ?? null,
+            stockout_probability: item.stockout_probability ?? item.stockout_prob ?? null,
+          };
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 /** Generate synthetic 7-day daily timeline with demand quantiles and projected inventory */
@@ -356,11 +412,13 @@ function IngredientDecisionChart({
   );
 }
 
-/** AI Decision Narrative & Procurement Specs Card */
+/** Tóm tắt nguyên liệu trực tiếp từ Backend Handoff Contract (IngredientSynthesis) */
 function IngredientDecisionNarrative({
   item,
+  synthesis,
 }: {
   item: IngredientItemData;
+  synthesis?: IngredientSynthesis | null;
 }) {
   const p = item.procurement;
   const d = item.demand;
@@ -373,63 +431,52 @@ function IngredientDecisionNarrative({
           p.pack_size == null ? "" : ` × ${formatQuantity(p.pack_size, p.unit ?? "")}`
         }`;
 
+  const importance =
+    synthesis?.importance ??
+    (item.orderNeeded ? (item.daysOfSupply != null && item.daysOfSupply <= 2 ? "critical" : "watch") : "normal");
+
   return (
     <div className="cockpit-decision-narrative">
       <div className="narrative-header">
-        <span className="narrative-tag">
-          <Bot size={14} /> AI Decision Synthesis
-        </span>
+        <div className="narrative-tag-group">
+          <span className="narrative-tag">
+            <Bot size={14} /> Tóm tắt nguyên liệu
+          </span>
+          <span className={`importance-pill ${importance}`}>
+            {importance === "critical" ? (
+              <>
+                <AlertTriangle size={12} /> Nguy cấp
+              </>
+            ) : importance === "watch" ? (
+              <>
+                <Clock size={12} /> Cần theo dõi
+              </>
+            ) : (
+              <>
+                <CheckCircle2 size={12} /> Bình thường
+              </>
+            )}
+          </span>
+        </div>
         {p?.purchase_cost != null ? (
           <span className="narrative-cost">{formatVnd(p.purchase_cost)}</span>
         ) : null}
       </div>
 
-      {/* Decision Logic Story Chain */}
-      <div className="decision-logic-chain">
-        <div className="logic-step">
-          <div className="logic-step-indicator">1</div>
-          <div className="logic-step-content">
-            <strong>Hiện trạng kho & Nhu cầu:</strong>
-            <span>
-              Nhu cầu 7 ngày tới ước tính <b>{metric(d.p50, unit)}</b> (P50).
-              {item.daysOfSupply < 3 ? (
-                <span className="text-danger"> Tồn kho chỉ còn đủ dùng ~{item.daysOfSupply.toFixed(1)} ngày.</span>
-              ) : (
-                <span> Tồn kho đủ dùng ~{item.daysOfSupply.toFixed(1)} ngày.</span>
-              )}
-            </span>
-          </div>
-        </div>
-
-        <div className="logic-step">
-          <div className="logic-step-indicator">2</div>
-          <div className="logic-step-content">
-            <strong>Ràng buộc nhà cung cấp:</strong>
-            <span>
-              {p?.supplier_name ? `NCC ${p.supplier_name}` : "Nhà cung cấp"}
-              {pack ? ` • Quy cách ${pack}` : ""}
-              {p?.order_date ? ` • Cần đặt trước ${formatDate(p.order_date)}` : ""}
-            </span>
-          </div>
-        </div>
-
-        <div className="logic-step">
-          <div className="logic-step-indicator active">3</div>
-          <div className="logic-step-content">
-            <strong>Quyết định đề xuất:</strong>
-            {p ? (
-              <span className="decision-callout">
-                Nhập <b>{formatQuantity(p.quantity, p.unit ?? "")}</b> vào ngày{" "}
-                <b>{p.order_date ? formatDate(p.order_date) : "hôm nay"}</b> để hàng giao vào{" "}
-                <b>{p.arrival_date ? formatDate(p.arrival_date) : "kịp tiến độ"}</b>.
-              </span>
-            ) : (
-              <span className="decision-callout-ok">
-                Lượng tồn kho hiện tại an toàn, chưa cần tạo đơn nhập mới trong chu kỳ này.
-              </span>
-            )}
-          </div>
-        </div>
+      {/* Synthesis Content from Backend */}
+      <div className="ingredient-synthesis-content">
+        <h4 className="synthesis-headline">
+          {synthesis?.headline ||
+            (p
+              ? `Cần nhập ${formatQuantity(p.quantity, p.unit ?? "")} để đảm bảo tồn kho an toàn`
+              : "Lượng tồn kho hiện tại an toàn, chưa cần tạo đơn")}
+        </h4>
+        <p className="synthesis-summary-text">
+          {synthesis?.summary ||
+            (p
+              ? `Nhu cầu 7 ngày tới ước tính ${metric(d.p50, unit)} (P50). Đề xuất đặt hàng để đảm bảo lượng tồn an toàn theo chu kỳ giao.`
+              : `Nhu cầu 7 ngày tới ước tính ${metric(d.p50, unit)} (P50). Lượng tồn kho sẵn có đáp ứng đủ chu kỳ kế hoạch.`)}
+        </p>
       </div>
 
       {/* Procurement specs metadata */}
@@ -457,6 +504,17 @@ function IngredientDecisionNarrative({
               <dd>{formatDate(p.arrival_date)}</dd>
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {/* Order action banner */}
+      {p ? (
+        <div className="synthesis-order-callout">
+          <span className="order-callout-action">
+            Đề xuất mua <b>{formatQuantity(p.quantity, p.unit ?? "")}</b>
+            {p.order_date ? ` vào ngày ${formatDate(p.order_date)}` : ""}
+            {p.arrival_date ? ` (giao ${formatDate(p.arrival_date)})` : ""}
+          </span>
         </div>
       ) : null}
 
@@ -626,14 +684,17 @@ function StrategyAnalysisDeepDive({
   brief,
   decision,
   data,
+  appliedBudget,
   onBack,
 }: {
   brief: DecisionBriefFacts;
   decision?: DecisionPackage | null;
   data?: BootstrapData;
+  appliedBudget?: number | null;
   onBack: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<"comparison" | "matrix" | "critic">("comparison");
+  const [diagnosticOrigin, setDiagnosticOrigin] = useState<DiagnosticOrigin | "auto">("auto");
 
   const rawStrategies = Array.isArray(decision?.strategies)
     ? decision.strategies
@@ -646,9 +707,26 @@ function StrategyAnalysisDeepDive({
 
   const chosenStrategy = brief.recommendation.strategy || "balanced";
   const remainingBudget =
-    data?.settings?.remainingBudget && data.settings.remainingBudget > 0
-      ? data.settings.remainingBudget
-      : data?.settings?.monthlyBudget ?? 15000000;
+    appliedBudget != null && appliedBudget > 0
+      ? appliedBudget
+      : data?.settings?.remainingBudget && data.settings.remainingBudget > 0
+        ? data.settings.remainingBudget
+        : data?.settings?.monthlyBudget && data.settings.monthlyBudget > 0
+          ? data.settings.monthlyBudget
+          : 15000000;
+
+  const diagnosticReport = useMemo(
+    () =>
+      getDecisionDiagnosticsReport(
+        brief,
+        decision,
+        remainingBudget,
+        diagnosticOrigin === "auto" ? undefined : diagnosticOrigin,
+      ),
+    [brief, decision, remainingBudget, diagnosticOrigin],
+  );
+
+  const criticChecks = diagnosticReport.checks;
 
   const strategyDefinitions = [
     {
@@ -700,8 +778,8 @@ function StrategyAnalysisDeepDive({
 
   const ingredientMatrix = uniqueDemand.map((d) => {
     const p = brief.procurement_rows.find((row) => row.ingredient_id === d.ingredient_id) ?? null;
-    const inv = data?.inventory.find((i) => i.ingredientId === d.ingredient_id);
-    const sup = data?.supplierConstraints.find((s) => s.ingredientId === d.ingredient_id);
+    const inv = data?.inventory?.find((i) => i.ingredientId === d.ingredient_id);
+    const sup = data?.supplierConstraints?.find((s) => s.ingredientId === d.ingredient_id);
 
     const baseQty = p?.quantity ?? 0;
     const baseCost = p?.purchase_cost ?? 0;
@@ -732,165 +810,6 @@ function StrategyAnalysisDeepDive({
 
   const [criticStrategyFilter, setCriticStrategyFilter] = useState<"all" | "balanced" | "lean" | "protected">("all");
   const [showTechSpecs, setShowTechSpecs] = useState(false);
-
-  const criticChecks = [
-    {
-      code: "HARD_BUDGET_CAP",
-      title: "Hạn mức ngân sách tối đa",
-      description: "Chi phí mua hàng của kịch bản không được vượt quá ngân sách khả dụng của cửa hàng.",
-      requirement: `Chi phí mua ≤ ${formatVnd(remainingBudget)}`,
-      results: {
-        lean: {
-          status: "pass" as const,
-          label: "ĐẠT (PASS)",
-          observed: `${formatVnd(Math.round((brief.recommendation.total_purchase_cost ?? 5625000) * 0.88))} (Chiếm 32% ngân sách)`,
-          note: "Tối ưu nhất về mặt chi phí vốn bỏ ra ban đầu.",
-        },
-        balanced: {
-          status: "pass" as const,
-          label: "ĐẠT TỐI ƯU",
-          observed: `${formatVnd(brief.recommendation.total_purchase_cost ?? 5625000)} (Chiếm 38% ngân sách)`,
-          note: "Cân đối tốt giữa chi phí vốn và mức tồn an toàn.",
-        },
-        protected: {
-          status: "warn" as const,
-          label: "CẢNH BÁO CHI PHÍ",
-          observed: `${formatVnd(Math.round((brief.recommendation.total_purchase_cost ?? 5625000) * 1.15))} (Chiếm 43% ngân sách)`,
-          note: "Chi phí tăng thêm ~15–20% so với phương án cân bằng.",
-        },
-      },
-    },
-    {
-      code: "SERVICE_LEVEL_FLOOR",
-      title: "Mức phục vụ mục tiêu (Target Service Level)",
-      description: "Tỉ lệ đáp ứng nhu cầu khách hàng phải đạt ít nhất 95.0% và xác suất đứt hàng không quá 5.0%.",
-      requirement: "Fill Rate ≥ 95.0% · Stockout Prob ≤ 5.0%",
-      results: {
-        lean: {
-          status: "fail" as const,
-          label: "KHÔNG ĐẠT (LÝ DO LOẠI)",
-          observed: "Fill Rate: 92.0% · Xác suất thiếu hàng: 8.2%",
-          note: "Rủi ro đứt hàng 8.2% vượt trần cho phép (5.0%), dễ gây mất doanh thu giờ cao điểm.",
-        },
-        balanced: {
-          status: "pass" as const,
-          label: "ĐẠT TỐI ƯU",
-          observed: "Fill Rate: 96.5% · Xác suất thiếu hàng: 3.8%",
-          note: "Đạt chuẩn an toàn cung ứng với chi phí tối thiểu.",
-        },
-        protected: {
-          status: "pass" as const,
-          label: "ĐẠT CAO",
-          observed: "Fill Rate: 98.8% · Xác suất thiếu hàng: 1.5%",
-          note: "Mức độ an toàn cao nhất nhưng đánh đổi bằng tồn kho lớn.",
-        },
-      },
-    },
-    {
-      code: "EXPIRY_SAFETY_FLOOR",
-      title: "Kiểm soát hạn sử dụng & Hao hụt (FEFO)",
-      description: "Hạn chế tích trữ quá chu kỳ sử dụng của nguyên liệu tươi sống (sữa tươi, trái cây) gây hủy hàng quá date.",
-      requirement: "Tồn kho dự trữ ≤ Chu kỳ date khả dụng (Tối đa 1% hao hụt)",
-      results: {
-        lean: {
-          status: "pass" as const,
-          label: "ĐẠT (PASS)",
-          observed: "Hao hụt dự kiến: 0% (Tồn kho mỏng)",
-          note: "Hầu như không có rủi ro hủy hàng do cận date.",
-        },
-        balanced: {
-          status: "pass" as const,
-          label: "ĐẠT TỐI ƯU",
-          observed: "Hao hụt dự kiến: < 0.5% (Tối ưu chu kỳ)",
-          note: "Số lượng nhập vừa đủ tiêu thụ trong vòng 5–7 ngày.",
-        },
-        protected: {
-          status: "fail" as const,
-          label: "CẢNH BÁO HAO HỤT (LÝ DO LOẠI)",
-          observed: "Nguy cơ hao hụt quá date: ~3.2%",
-          note: "Lượng nhập dư thừa cho các mặt hàng hạn ngắn (Sữa tươi, Cam, Chuối) làm tăng nguy cơ hết date.",
-        },
-      },
-    },
-    {
-      code: "LEAD_TIME_FEASIBILITY",
-      title: "Thời gian giao hàng khả thi (Lead Time Buffer)",
-      description: "Ngày hàng về phải trước hoặc đúng ngày dự kiến cạn kiệt tồn kho an toàn.",
-      requirement: "Lead time buffer ≥ 1 ngày đệm an toàn",
-      results: {
-        lean: {
-          status: "warn" as const,
-          label: "NGUY CƠ CAO (LÝ DO LOẠI)",
-          observed: "Điểm đặt hàng sát ngày, Buffer đệm = 0 ngày",
-          note: "Nếu nhà cung cấp giao trễ nửa ngày sẽ gây đứt hàng ngay lập tức.",
-        },
-        balanced: {
-          status: "pass" as const,
-          label: "ĐẠT TỐI ƯU",
-          observed: "Buffer an toàn: 1–2 ngày",
-          note: "Đủ thời gian xử lý khi nhà cung cấp chậm giao thông thường.",
-        },
-        protected: {
-          status: "pass" as const,
-          label: "ĐẠT (PASS)",
-          observed: "Buffer an toàn: 3–4 ngày",
-          note: "Đệm thời gian rất an toàn.",
-        },
-      },
-    },
-    {
-      code: "SUPPLIER_MOQ_CHECK",
-      title: "Số lượng đặt tối thiểu (MOQ)",
-      description: "Mọi dòng đặt hàng phải đáp ứng số lượng tối thiểu từ nhà cung cấp.",
-      requirement: "Order Qty ≥ MOQ quy định",
-      results: {
-        lean: {
-          status: "pass" as const,
-          label: "ĐẠT (PASS)",
-          observed: "100% dòng mua đạt MOQ",
-          note: "Phải làm tròn lên MOQ cho một số mặt hàng tiêu thụ ít.",
-        },
-        balanced: {
-          status: "pass" as const,
-          label: "ĐẠT (PASS)",
-          observed: "100% dòng mua đạt MOQ",
-          note: "Cân đối tối ưu giữa nhu cầu và MOQ.",
-        },
-        protected: {
-          status: "pass" as const,
-          label: "ĐẠT (PASS)",
-          observed: "100% dòng mua đạt MOQ",
-          note: "Dễ dàng vượt MOQ do lượng đặt hàng lớn.",
-        },
-      },
-    },
-    {
-      code: "PACK_SIZE_ROUNDING",
-      title: "Quy cách đóng gói (Pack Size Rounding)",
-      description: "Số lượng đặt phải được làm tròn theo lốc/thùng nguyên vẹn của từng mặt hàng.",
-      requirement: "Làm tròn chẵn nguyên thùng/gói",
-      results: {
-        lean: {
-          status: "pass" as const,
-          label: "ĐẠT (PASS)",
-          observed: "Đã làm tròn số thùng cho toàn bộ dòng mua",
-          note: "Làm tròn tối thiểu theo đơn vị đóng gói.",
-        },
-        balanced: {
-          status: "pass" as const,
-          label: "ĐẠT (PASS)",
-          observed: "Đã làm tròn số thùng cho toàn bộ dòng mua",
-          note: "Đảm bảo đúng quy cách giao hàng của NCC.",
-        },
-        protected: {
-          status: "pass" as const,
-          label: "ĐẠT (PASS)",
-          observed: "Đã làm tròn số thùng cho toàn bộ dòng mua",
-          note: "Làm tròn chẵn theo thùng nguyên.",
-        },
-      },
-    },
-  ];
 
   return (
     <div className="strategy-deepdive-root">
@@ -1009,7 +928,17 @@ function StrategyAnalysisDeepDive({
                           ? "✕ Lý do không khả thi (Vi phạm ràng buộc cứng):"
                           : "✕ Lý do bị loại bỏ:"}
                     </h4>
-                    <p>{violations.length > 0 ? violations.join(". ") : strat.defaultWhyRejected}</p>
+                    <p>
+                      {violations.length > 0
+                        ? violations.join(". ")
+                        : diagnosticReport.origin === "real"
+                          ? isChosen
+                            ? "Phương án thỏa mãn tối ưu mục tiêu bài toán chi phí & an toàn cung ứng."
+                            : isInfeasible
+                              ? "Phương án không khả thi theo kết quả tính toán từ Backend Solver."
+                              : "Không được chọn do không đạt điểm tối ưu toán học tốt nhất so với kịch bản khuyến nghị."
+                          : strat.defaultWhyRejected}
+                    </p>
                     {warnings.length > 0 ? (
                       <ul className="deepdive-sub-list">
                         {warnings.map((w, idx) => (
@@ -1117,37 +1046,56 @@ function StrategyAnalysisDeepDive({
       {/* TAB 3: CRITIC CHECKLIST & MULTI-STRATEGY REJECTION ANALYSIS */}
       {activeTab === "critic" ? (
         <div className="deepdive-tab-content">
+          {/* Diagnostic Data Source Bar */}
+          <div className="critic-filter-row">
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+              <span className="filter-label">Nguồn dữ liệu thẩm định:</span>
+              <span className={`diagnostic-source-badge ${diagnosticReport.origin}`}>
+                {diagnosticReport.origin === "real" ? <ShieldCheck size={13} /> : <Sparkles size={13} />}
+                {diagnosticReport.originLabel}
+              </span>
+            </div>
+
+            {diagnosticReport.isMockEnabled ? (
+              <div className="diagnostic-origin-toggle">
+                <button
+                  type="button"
+                  className={`diagnostic-origin-btn ${diagnosticReport.origin === "real" ? "active" : ""}`}
+                  onClick={() => setDiagnosticOrigin("real")}
+                  title="Xem dữ liệu thực tế từ Backend Solver"
+                >
+                  <ShieldCheck size={12} /> Dữ liệu thật
+                </button>
+                <button
+                  type="button"
+                  className={`diagnostic-origin-btn ${diagnosticReport.origin === "mock" ? "active" : ""}`}
+                  onClick={() => setDiagnosticOrigin("mock")}
+                  title="Xem dữ liệu mô phỏng minh họa (Mock)"
+                >
+                  <Sparkles size={12} /> Dữ liệu mẫu (Mock)
+                </button>
+              </div>
+            ) : null}
+          </div>
+
           {/* Summary Rejection Highlights across 3 Strategies */}
           <div className="critic-summary-banner-grid">
-            <div className="critic-summary-badge-card lean">
-              <div className="card-top">
-                <span className="badge-name">Tiết kiệm (P25)</span>
-                <span className="badge-tag fail">4/6 Đạt · ✕ 2 BỊ LOẠI</span>
-              </div>
-              <p>
-                <strong>Lý do loại:</strong> Tỉ lệ thiếu hàng 8.2% vượt trần 5.0% · Điểm đặt hàng sát ngày không có đệm an toàn lead time.
-              </p>
-            </div>
-
-            <div className="critic-summary-badge-card balanced selected">
-              <div className="card-top">
-                <span className="badge-name">Cân bằng (P50) ★</span>
-                <span className="badge-tag pass">6/6 ĐẠT · ✓ ĐÃ CHỌN</span>
-              </div>
-              <p>
-                <strong>Đánh giá:</strong> Thỏa mãn 100% các ràng buộc cứng & mềm. Chi phí vốn và mức tồn an toàn tối ưu nhất.
-              </p>
-            </div>
-
-            <div className="critic-summary-badge-card protected">
-              <div className="card-top">
-                <span className="badge-name">An toàn (P75)</span>
-                <span className="badge-tag warn">4/6 Đạt · ⚠ 2 BỊ LOẠI</span>
-              </div>
-              <p>
-                <strong>Lý do loại:</strong> Chi phí vốn tăng +16% · Tồn kho tươi sống dư thừa làm tăng nguy cơ hao hụt quá hạn FEFO (3.2%).
-              </p>
-            </div>
+            {(["lean", "balanced", "protected"] as const).map((sKey) => {
+              const sum = diagnosticReport.summaries[sKey];
+              const isChosen = chosenStrategy === sKey && brief.recommendation.available;
+              return (
+                <div
+                  key={sKey}
+                  className={`critic-summary-badge-card ${sKey} ${isChosen ? "selected" : ""}`}
+                >
+                  <div className="card-top">
+                    <span className="badge-name">{sum.label}</span>
+                    <span className={`badge-tag ${sum.statusTag}`}>{sum.statusLabel}</span>
+                  </div>
+                  <p>{sum.reason}</p>
+                </div>
+              );
+            })}
           </div>
 
           {/* Strategy Filter Pills */}
@@ -1166,21 +1114,21 @@ function StrategyAnalysisDeepDive({
                 onClick={() => setCriticStrategyFilter("balanced")}
                 type="button"
               >
-                ★ Cân bằng (P50) [6/6 Đạt]
+                ★ Cân bằng (P50) [{diagnosticReport.summaries.balanced.statusLabel}]
               </button>
               <button
                 className={`critic-filter-pill ${criticStrategyFilter === "lean" ? "active" : ""}`}
                 onClick={() => setCriticStrategyFilter("lean")}
                 type="button"
               >
-                ✕ Tiết kiệm (P25) [Bị loại]
+                ✕ Tiết kiệm (P25) [{diagnosticReport.summaries.lean.statusLabel}]
               </button>
               <button
                 className={`critic-filter-pill ${criticStrategyFilter === "protected" ? "active" : ""}`}
                 onClick={() => setCriticStrategyFilter("protected")}
                 type="button"
               >
-                ✕ An toàn (P75) [Bị loại]
+                ✕ An toàn (P75) [{diagnosticReport.summaries.protected.statusLabel}]
               </button>
             </div>
           </div>
@@ -1232,70 +1180,78 @@ function StrategyAnalysisDeepDive({
               </div>
             ) : null}
 
-            <div className="critic-items-list">
-              {criticChecks.map((chk) => {
-                const showLean = criticStrategyFilter === "all" || criticStrategyFilter === "lean";
-                const showBalanced = criticStrategyFilter === "all" || criticStrategyFilter === "balanced";
-                const showProtected = criticStrategyFilter === "all" || criticStrategyFilter === "protected";
+            {criticChecks.length === 0 ? (
+              <div className="critic-empty-notice">
+                <ShieldCheck size={28} className="text-accent" />
+                <strong>Chưa ghi nhận vi phạm ràng buộc từ Backend Solver</strong>
+                <p>Hệ thống không phát hiện lỗi hoặc kịch bản không vi phạm các ràng buộc cứng nào.</p>
+              </div>
+            ) : (
+              <div className="critic-items-list">
+                {criticChecks.map((chk) => {
+                  const showLean = criticStrategyFilter === "all" || criticStrategyFilter === "lean";
+                  const showBalanced = criticStrategyFilter === "all" || criticStrategyFilter === "balanced";
+                  const showProtected = criticStrategyFilter === "all" || criticStrategyFilter === "protected";
 
-                return (
-                  <div key={chk.code} className="critic-item-row-advanced">
-                    <div className="critic-item-main-header">
-                      <div className="critic-title-row">
-                        <strong>{chk.title}</strong>
-                        <span className="critic-req-tag">Yêu cầu: {chk.requirement}</span>
+                  return (
+                    <div key={chk.code} className="critic-item-row-advanced">
+                      <div className="critic-item-main-header">
+                        <div className="critic-title-row">
+                          <strong>{chk.title}</strong>
+                          <span className="critic-req-tag">Yêu cầu: {chk.requirement}</span>
+                        </div>
+                        <p>{chk.description}</p>
                       </div>
-                      <p>{chk.description}</p>
+
+                      {/* Multi-strategy evaluation comparison boxes */}
+                      <div className="critic-strategies-eval-grid">
+                        {showLean ? (
+                          <div className={`critic-strat-eval-box ${chk.results.lean.status}`}>
+                            <div className="box-header">
+                              <span className="strat-title">Tiết kiệm (P25)</span>
+                              <span className={`eval-badge ${chk.results.lean.status}`}>
+                                {chk.results.lean.status === "pass" ? <Check size={11} /> : <X size={11} />}
+                                {chk.results.lean.label}
+                              </span>
+                            </div>
+                            <div className="box-val"><strong>Quan sát:</strong> {chk.results.lean.observed}</div>
+                            <div className="box-note">{chk.results.lean.note}</div>
+                          </div>
+                        ) : null}
+
+                        {showBalanced ? (
+                          <div className={`critic-strat-eval-box ${chk.results.balanced.status} highlighted`}>
+                            <div className="box-header">
+                              <span className="strat-title">Cân bằng (P50) ★ (Đã chọn)</span>
+                              <span className="eval-badge pass">
+                                <Check size={11} />
+                                {chk.results.balanced.label}
+                              </span>
+                            </div>
+                            <div className="box-val"><strong>Quan sát:</strong> {chk.results.balanced.observed}</div>
+                            <div className="box-note">{chk.results.balanced.note}</div>
+                          </div>
+                        ) : null}
+
+                        {showProtected ? (
+                          <div className={`critic-strat-eval-box ${chk.results.protected.status}`}>
+                            <div className="box-header">
+                              <span className="strat-title">An toàn (P75)</span>
+                              <span className={`eval-badge ${chk.results.protected.status}`}>
+                                {chk.results.protected.status === "pass" ? <Check size={11} /> : <AlertTriangle size={11} />}
+                                {chk.results.protected.label}
+                              </span>
+                            </div>
+                            <div className="box-val"><strong>Quan sát:</strong> {chk.results.protected.observed}</div>
+                            <div className="box-note">{chk.results.protected.note}</div>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
-
-                    {/* Multi-strategy evaluation comparison boxes */}
-                    <div className="critic-strategies-eval-grid">
-                      {showLean ? (
-                        <div className={`critic-strat-eval-box ${chk.results.lean.status}`}>
-                          <div className="box-header">
-                            <span className="strat-title">Tiết kiệm (P25)</span>
-                            <span className={`eval-badge ${chk.results.lean.status}`}>
-                              {chk.results.lean.status === "pass" ? <Check size={11} /> : <X size={11} />}
-                              {chk.results.lean.label}
-                            </span>
-                          </div>
-                          <div className="box-val"><strong>Quan sát:</strong> {chk.results.lean.observed}</div>
-                          <div className="box-note">{chk.results.lean.note}</div>
-                        </div>
-                      ) : null}
-
-                      {showBalanced ? (
-                        <div className={`critic-strat-eval-box ${chk.results.balanced.status} highlighted`}>
-                          <div className="box-header">
-                            <span className="strat-title">Cân bằng (P50) ★ (Đã chọn)</span>
-                            <span className="eval-badge pass">
-                              <Check size={11} />
-                              {chk.results.balanced.label}
-                            </span>
-                          </div>
-                          <div className="box-val"><strong>Quan sát:</strong> {chk.results.balanced.observed}</div>
-                          <div className="box-note">{chk.results.balanced.note}</div>
-                        </div>
-                      ) : null}
-
-                      {showProtected ? (
-                        <div className={`critic-strat-eval-box ${chk.results.protected.status}`}>
-                          <div className="box-header">
-                            <span className="strat-title">An toàn (P75)</span>
-                            <span className={`eval-badge ${chk.results.protected.status}`}>
-                              {chk.results.protected.status === "pass" ? <Check size={11} /> : <AlertTriangle size={11} />}
-                              {chk.results.protected.label}
-                            </span>
-                          </div>
-                          <div className="box-val"><strong>Quan sát:</strong> {chk.results.protected.observed}</div>
-                          <div className="box-note">{chk.results.protected.note}</div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       ) : null}
@@ -1327,7 +1283,7 @@ function WhatIfLab({
     e.preventDefault();
     const demand = toNum(demandMultiplier);
     const delay = toNum(supplierDelayDays);
-    const budget = toNum(budgetLimit);
+    const budget = parseMoneyInput(budgetLimit);
     if (
       (demand !== undefined && (!Number.isFinite(demand) || demand <= 0)) ||
       (delay !== undefined && (!Number.isFinite(delay) || delay < 0)) ||
@@ -1395,11 +1351,10 @@ function WhatIfLab({
             <span>Ngân sách tối đa (₫)</span>
             <div className="input-with-hint">
               <input
-                min="0"
-                onChange={(e) => setBudgetLimit(e.target.value)}
+                type="text"
+                inputMode="numeric"
+                onChange={(e) => setBudgetLimit(formatMoneyInput(e.target.value))}
                 placeholder="Để trống = Không giới hạn"
-                step="1000000"
-                type="number"
                 value={budgetLimit}
               />
               <small>Hạn mức chi tiêu trần</small>
@@ -1514,6 +1469,7 @@ export function DecisionBriefWorkspace({
   onRunWhatIf,
   decision,
   data,
+  appliedBudget,
 }: {
   brief: DecisionBriefFacts | null;
   loading: boolean;
@@ -1530,6 +1486,7 @@ export function DecisionBriefWorkspace({
   onRunWhatIf: (mutation: WhatIfRequest) => void;
   decision?: DecisionPackage | null;
   data?: BootstrapData;
+  appliedBudget?: number | null;
 }) {
   const [selectedIngredientId, setSelectedIngredientId] = useState<string>("");
   const [filterMode, setFilterMode] = useState<"all" | "urgent" | "safe">("all");
@@ -1547,41 +1504,65 @@ export function DecisionBriefWorkspace({
     });
   }, [brief]);
 
-  // Calculate rich metrics for each ingredient item
+  // Calculate rich metrics for each ingredient item from real inventory & solver data
   const enrichedItems: IngredientItemData[] = useMemo(() => {
     if (!brief) return [];
     return uniqueDemand.map((d) => {
       const p = brief.procurement_rows.find((row) => row.ingredient_id === d.ingredient_id) ?? null;
+      const inv = data?.inventory?.find((i) => i.ingredientId === d.ingredient_id);
+      const risk = findIngredientRisk(decision, d.ingredient_id);
       const p50 = d.p50 ?? 0;
-      const dailyP50 = p50 / 7;
-      const daysOfSupply = p
-        ? Math.max(0.5, Number(((dailyP50 * 1.8) / (dailyP50 || 1)).toFixed(1)))
-        : Number(((dailyP50 * 9.5) / (dailyP50 || 1)).toFixed(1));
+      const dailyP50 = p50 > 0 ? p50 / 7 : 0;
 
-      const stockoutRisk: "high" | "medium" | "safe" = p
-        ? daysOfSupply <= 2
-          ? "high"
-          : "medium"
-        : "safe";
+      let daysOfSupply: number | null = null;
+      if (risk?.days_of_supply != null && Number.isFinite(risk.days_of_supply)) {
+        daysOfSupply = Number(risk.days_of_supply.toFixed(1));
+      } else if (inv?.onHand != null && dailyP50 > 0) {
+        daysOfSupply = Number((inv.onHand / dailyP50).toFixed(1));
+      }
+
+      const currentStock: number | null =
+        inv?.onHand != null
+          ? inv.onHand
+          : daysOfSupply != null && dailyP50 > 0
+            ? Math.round(dailyP50 * daysOfSupply)
+            : null;
+
+      const stockoutRisk: "high" | "medium" | "safe" =
+        risk?.stockout_probability != null
+          ? risk.stockout_probability > 0.05
+            ? "high"
+            : risk.stockout_probability > 0.01
+              ? "medium"
+              : "safe"
+          : daysOfSupply != null
+            ? daysOfSupply <= 2
+              ? "high"
+              : daysOfSupply <= 4
+                ? "medium"
+                : "safe"
+            : p != null && p.quantity > 0
+              ? "high"
+              : "safe";
 
       return {
         demand: d,
         procurement: p,
         daysOfSupply,
-        currentStock: Math.round(dailyP50 * daysOfSupply),
+        currentStock,
         stockoutRisk,
         orderNeeded: p != null && p.quantity > 0,
         cost: p?.purchase_cost ?? 0,
       };
     });
-  }, [uniqueDemand, brief]);
+  }, [uniqueDemand, brief, data, decision]);
 
   // Sort items: High risk / Urgent reorder first, then safe
   const sortedItems = useMemo(() => {
     return [...enrichedItems].sort((a, b) => {
       if (a.orderNeeded && !b.orderNeeded) return -1;
       if (!a.orderNeeded && b.orderNeeded) return 1;
-      return a.daysOfSupply - b.daysOfSupply;
+      return (a.daysOfSupply ?? 999) - (b.daysOfSupply ?? 999);
     });
   }, [enrichedItems]);
 
@@ -1618,6 +1599,7 @@ export function DecisionBriefWorkspace({
         brief={brief}
         decision={decision}
         data={data}
+        appliedBudget={appliedBudget}
         onBack={() => setViewMode("cockpit")}
       />
     );
@@ -1632,12 +1614,29 @@ export function DecisionBriefWorkspace({
     decision?.business_metrics?.projected_purchase_cost ??
     null;
 
+  const effectiveBudget =
+    appliedBudget != null && appliedBudget > 0
+      ? appliedBudget
+      : data?.settings?.remainingBudget != null && data.settings.remainingBudget > 0
+        ? data.settings.remainingBudget
+        : data?.settings?.monthlyBudget != null && data.settings.monthlyBudget > 0
+          ? data.settings.monthlyBudget
+          : null;
+
+  const budgetPercentage =
+    totalPurchaseCost != null && effectiveBudget != null && effectiveBudget > 0
+      ? Math.round((totalPurchaseCost / effectiveBudget) * 100)
+      : null;
+
   const fillRate = percentage(
     brief.recommendation.expected_fill_rate ??
       decision?.business_metrics?.expected_fill_rate ??
       brief.risk.expected_fill_rate
   );
-  const stockoutProb = percentage(brief.risk.stockout_probability);
+  const stockoutProb = percentage(
+    brief.risk?.stockout_probability ??
+      decision?.business_metrics?.stockout_probability
+  );
 
   // Selected item state (default to first urgent item or first item)
   const currentSelectedId =
@@ -1706,10 +1705,23 @@ export function DecisionBriefWorkspace({
               <strong className="kpi-value-mega">
                 {totalPurchaseCost == null ? "Chưa có dữ liệu" : formatVnd(totalPurchaseCost)}
               </strong>
-              <div className="budget-bar-track">
-                <div className="budget-bar-fill" style={{ width: "68%" }} />
-              </div>
-              <span className="kpi-subtext">Khoảng 68% ngân sách khả dụng</span>
+              {budgetPercentage != null && effectiveBudget != null ? (
+                <>
+                  <div className="budget-bar-track">
+                    <div
+                      className="budget-bar-fill"
+                      style={{ width: `${Math.min(100, Math.max(0, budgetPercentage))}%` }}
+                    />
+                  </div>
+                  <span className="kpi-subtext">
+                    Chiếm {budgetPercentage}% ngân sách khả dụng ({formatVnd(effectiveBudget)})
+                  </span>
+                </>
+              ) : effectiveBudget != null && effectiveBudget > 0 ? (
+                <span className="kpi-subtext">Hạn mức ngân sách: {formatVnd(effectiveBudget)}</span>
+              ) : (
+                <span className="kpi-subtext">Chưa thiết lập hạn mức ngân sách</span>
+              )}
             </div>
 
             <div className="hero-kpi-card">
@@ -1742,6 +1754,78 @@ export function DecisionBriefWorkspace({
           </div>
         </div>
       </section>
+
+      {/* ═══════════════════════════════════════════════════════════════
+          TẦNG 1.5: TỔNG QUAN & TÓM TẮT KẾ HOẠCH (EXECUTIVE & ASSISTANT SUMMARY)
+      ═══════════════════════════════════════════════════════════════ */}
+      {brief.recommendation.summary || brief.assistant_summary || brief.presented_warnings?.length ? (
+        <section className="cockpit-plan-summary-section" aria-labelledby="plan-summary-title">
+          <div className="plan-summary-card">
+            <div className="plan-summary-card-header">
+              <div className="plan-summary-header-left">
+                <FileText size={18} style={{ color: "#147a62" }} />
+                <h2 id="plan-summary-title" className="plan-summary-title">
+                  TỔNG QUAN & TÓM TẮT KẾ HOẠCH
+                </h2>
+              </div>
+              {brief.assistant_summary?.source ? (
+                <span className="summary-provenance-tag">
+                  {brief.assistant_summary.source === "llm" ? "AI Synthesis" : "Deterministic"}
+                </span>
+              ) : null}
+            </div>
+
+            {brief.recommendation.summary ? (
+              <div className="plan-decision-summary-box">
+                <strong className="summary-section-label">Tóm tắt quyết định:</strong>
+                <p className="summary-decision-text">{brief.recommendation.summary}</p>
+              </div>
+            ) : null}
+
+            {brief.assistant_summary ? (
+              <div className="plan-assistant-narrative-box">
+                {brief.assistant_summary.headline ? (
+                  <h3 className="assistant-narrative-headline">{brief.assistant_summary.headline}</h3>
+                ) : null}
+                {brief.assistant_summary.summary ? (
+                  <p className="assistant-narrative-body">{brief.assistant_summary.summary}</p>
+                ) : null}
+                {brief.assistant_summary.key_points?.length ? (
+                  <div className="assistant-key-points-wrap">
+                    <span className="key-points-label">Các điểm trọng tâm:</span>
+                    <ul className="assistant-key-points-list">
+                      {brief.assistant_summary.key_points.map((point, idx) => (
+                        <li key={idx}>{point}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {brief.assistant_summary.warning_summary ? (
+                  <div className="assistant-warning-callout">
+                    <AlertTriangle size={15} />
+                    <span>{brief.assistant_summary.warning_summary}</span>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {brief.presented_warnings?.length ? (
+              <div className="presented-warnings-list">
+                <span className="warnings-section-label">Lưu ý quản lý:</span>
+                {brief.presented_warnings.map((w, idx) => (
+                  <Notice
+                    key={`${w.code}-${idx}`}
+                    tone={w.severity === "critical" ? "error" : w.severity === "warning" ? "warning" : "info"}
+                  >
+                    <strong>{w.title}</strong>
+                    <p style={{ margin: "4px 0 0" }}>{w.message}</p>
+                  </Notice>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       {noFeasible ? (
         <section className="decision-brief-no-feasible">
@@ -1830,8 +1914,8 @@ export function DecisionBriefWorkspace({
                     </div>
                     <div className="card-metric">
                       <span>Tồn kho còn</span>
-                      <strong className={item.daysOfSupply <= 2 ? "text-danger" : ""}>
-                        ~{item.daysOfSupply.toFixed(1)} ngày
+                      <strong className={item.daysOfSupply != null && item.daysOfSupply <= 2 ? "text-danger" : ""}>
+                        {item.daysOfSupply != null ? `~${item.daysOfSupply.toFixed(1)} ngày` : "Chưa có dữ liệu tồn"}
                       </strong>
                     </div>
                   </div>
@@ -1866,7 +1950,14 @@ export function DecisionBriefWorkspace({
 
                 {/* Column 2: AI Narrative & Procurement Specs */}
                 <div className="decision-view-col-narrative">
-                  <IngredientDecisionNarrative item={selectedItem} />
+                  <IngredientDecisionNarrative
+                    item={selectedItem}
+                    synthesis={
+                      brief.ingredient_synthesis?.find(
+                        (s) => s.ingredient_id === selectedItem.demand.ingredient_id
+                      )
+                    }
+                  />
                 </div>
               </div>
             </div>

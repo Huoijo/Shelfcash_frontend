@@ -49,3 +49,67 @@ test("DecisionBriefWorkspace renders full strategy analysis button", () => {
   assert.match(markup, /Xem các phương án khác &amp; lý do loại|Xem các phương án khác & lý do loại/);
 });
 
+test("DecisionBriefWorkspace renders assistant_summary, ingredient_synthesis and presented_warnings directly", () => {
+  const enrichedBrief: DecisionBriefFacts = {
+    ...brief,
+    recommendation: {
+      ...brief.recommendation,
+      summary: "Persisted production recommendation.",
+    },
+    assistant_summary: {
+      headline: "Kế hoạch hiện tại cần theo dõi một rủi ro chính",
+      summary: "Kế hoạch đã được lưu cùng dữ liệu chạy.",
+      key_points: ["Điểm trọng tâm 1", "Điểm trọng tâm 2"],
+      warning_summary: "Cảnh báo tóm tắt quan trọng",
+      source: "llm",
+      grounded: true,
+    },
+    ingredient_synthesis: [
+      {
+        ingredient_id: "milk",
+        ingredient_name: "Sữa tươi",
+        unit: "L",
+        importance: "critical",
+        source: "llm",
+        headline: "Cần ưu tiên theo dõi rủi ro thiếu hàng",
+        summary: "Sữa tươi có thể thiếu từ 14/08 trong kỳ kế hoạch.",
+        evidence_ids: ["ev-1"],
+      },
+    ],
+    presented_warnings: [
+      {
+        code: "CAPACITY_NOT_EVALUATED",
+        severity: "warning",
+        audience: "user",
+        title: "Chưa thể đánh giá đầy đủ sức chứa kho",
+        message: "Hệ thống còn thiếu thông tin cần thiết để kiểm tra khả năng lưu trữ.",
+      },
+    ],
+  };
+
+  const markup = renderToStaticMarkup(
+    <DecisionBriefWorkspace
+      brief={enrichedBrief}
+      error={null}
+      explanation={null}
+      explanationError={null}
+      explanationLoading={false}
+      loading={false}
+      onExplain={() => undefined}
+      onRetry={() => undefined}
+    />,
+  );
+
+  assert.match(markup, /TỔNG QUAN &amp; TÓM TẮT KẾ HOẠCH|TỔNG QUAN & TÓM TẮT KẾ HOẠCH/);
+  assert.match(markup, /Persisted production recommendation\./);
+  assert.match(markup, /Kế hoạch hiện tại cần theo dõi một rủi ro chính/);
+  assert.match(markup, /Kế hoạch đã được lưu cùng dữ liệu chạy\./);
+  assert.match(markup, /Điểm trọng tâm 1/);
+  assert.match(markup, /Cảnh báo tóm tắt quan trọng/);
+  assert.match(markup, /Chưa thể đánh giá đầy đủ sức chứa kho/);
+  assert.match(markup, /Hệ thống còn thiếu thông tin cần thiết để kiểm tra khả năng lưu trữ\./);
+  assert.match(markup, /Cần ưu tiên theo dõi rủi ro thiếu hàng/);
+  assert.match(markup, /Sữa tươi có thể thiếu từ 14\/08 trong kỳ kế hoạch\./);
+  assert.match(markup, /Nguy cấp/);
+});
+

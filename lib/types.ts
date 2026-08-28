@@ -633,6 +633,36 @@ export interface EvidenceReference {
   entities: Record<string, string>;
 }
 
+export type AssistantSummary = {
+  headline: string;
+  summary: string;
+  key_points: string[];
+  warning_summary: string | null;
+  source: "llm" | "deterministic_fallback";
+  grounded: boolean;
+  raw_response?: Record<string, unknown> | string | null;
+  llm_diagnostics?: Record<string, unknown> | null;
+};
+
+export type IngredientSynthesis = {
+  ingredient_id: string;
+  ingredient_name: string | null;
+  unit: string | null;
+  importance: "normal" | "watch" | "critical";
+  source: "rule_based" | "llm" | "deterministic_fallback";
+  headline: string;
+  summary: string;
+  evidence_ids?: string[];
+};
+
+export type PresentedWarning = {
+  code: string;
+  severity: "info" | "warning" | "critical";
+  audience: "user" | "technical";
+  title: string;
+  message: string;
+};
+
 export interface DecisionBriefFacts {
   decision_run_id: string;
   store_id: string;
@@ -659,7 +689,10 @@ export interface DecisionBriefFacts {
   };
   evidence: EvidenceReference[];
   data_availability: Record<string, string>;
-  generated_at: string;
+  generated_at?: string;
+  assistant_summary?: AssistantSummary | null;
+  ingredient_synthesis?: IngredientSynthesis[];
+  presented_warnings?: PresentedWarning[];
 }
 
 export interface ExplanationRequest {

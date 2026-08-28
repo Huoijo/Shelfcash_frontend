@@ -9,6 +9,8 @@ import {
   SectionHeading,
   StatCard,
   SummaryGrid,
+  formatMoneyInput,
+  parseMoneyInput,
 } from "../app/components/ui.tsx";
 
 test("PageHeader renders cleanly with or without a description", () => {
@@ -122,4 +124,22 @@ test("SummaryGrid renders every dynamic card with the requested column layout", 
   assert.match(html, /class="summary-grid summary-grid-3"/);
   assert.equal(html.match(/class="stat-card stat-card-neutral"/g)?.length, 3);
   assert.match(html, /<strong>0<\/strong>/);
+});
+
+test("formatMoneyInput adds thousand commas and filters non-digits", () => {
+  assert.equal(formatMoneyInput(""), "");
+  assert.equal(formatMoneyInput("5000000"), "5,000,000");
+  assert.equal(formatMoneyInput("123456789"), "123,456,789");
+  assert.equal(formatMoneyInput("5,000,000"), "5,000,000");
+  assert.equal(formatMoneyInput("abc5000000xyz"), "5,000,000");
+  assert.equal(formatMoneyInput("0"), "0");
+});
+
+test("parseMoneyInput converts comma-separated string back to numeric value", () => {
+  assert.equal(parseMoneyInput(""), undefined);
+  assert.equal(parseMoneyInput("   "), undefined);
+  assert.equal(parseMoneyInput("5,000,000"), 5000000);
+  assert.equal(parseMoneyInput("123,456,789"), 123456789);
+  assert.equal(parseMoneyInput("5000000"), 5000000);
+  assert.equal(parseMoneyInput("0"), 0);
 });

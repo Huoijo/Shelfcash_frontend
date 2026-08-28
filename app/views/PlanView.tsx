@@ -52,8 +52,10 @@ import {
   StatusPill,
   SummaryGrid,
   formatDate,
+  formatMoneyInput,
   formatQuantity,
   formatVnd,
+  parseMoneyInput,
 } from "../components/ui";
 import { useActionAttempts } from "../hooks/useActionAttempts";
 import type { SimulationProgress } from "../../lib/simulation-orchestration";
@@ -540,7 +542,7 @@ export function PlanView({
         );
         return;
       }
-      const parsedBudget = budgetOverride.trim() === "" ? undefined : Number(budgetOverride);
+      const parsedBudget = parseMoneyInput(budgetOverride);
       if (parsedBudget !== undefined && (!Number.isFinite(parsedBudget) || parsedBudget < 0)) {
         actionAttempts.fail(
           planningAction,
@@ -800,6 +802,15 @@ export function PlanView({
           onRunWhatIf={onRunWhatIf ?? (() => undefined)}
           onRetry={onRetryBrief ?? (() => undefined)}
           decision={decision}
+          data={data}
+          appliedBudget={
+            parseMoneyInput(budgetOverride) ??
+            (data.settings.remainingBudget > 0
+              ? data.settings.remainingBudget
+              : data.settings.monthlyBudget > 0
+                ? data.settings.monthlyBudget
+                : undefined)
+          }
           whatIf={decisionWhatIf ?? null}
           whatIfError={whatIfError ?? null}
           whatIfLoading={whatIfLoading ?? false}
@@ -845,7 +856,20 @@ export function PlanView({
         <div className="plan-controls">
           <label className="field"><span>Ngày chốt dữ liệu</span><input type="date" disabled={isRunning} value={cutoffDate} onChange={(event) => { setCutoffDate(event.target.value); setControlsDirty(true); }} /></label>
           <label className="field"><span>Số ngày mô phỏng (1–7)</span><input type="number" min="1" max="7" step="1" disabled={isRunning} value={horizonDays} onChange={(event) => { setHorizonDays(clampHorizon(Number(event.target.value))); setControlsDirty(true); }} /></label>
-          <label className="field"><span>Ngân sách tối đa</span><input type="number" min="0" step="1000" inputMode="decimal" disabled={isRunning} value={budgetOverride} placeholder={formatVnd(data.settings.remainingBudget > 0 ? data.settings.remainingBudget : data.settings.monthlyBudget)} onChange={(event) => { setBudgetOverride(event.target.value); setControlsDirty(true); }} /></label>
+          <label className="field">
+            <span>Ngân sách tối đa</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              disabled={isRunning}
+              value={budgetOverride}
+              placeholder={formatVnd(data.settings.remainingBudget > 0 ? data.settings.remainingBudget : data.settings.monthlyBudget)}
+              onChange={(event) => {
+                setBudgetOverride(formatMoneyInput(event.target.value));
+                setControlsDirty(true);
+              }}
+            />
+          </label>
           <label className="field">
             <span>Lựa chọn kế hoạch nhập</span>
             <select
@@ -932,15 +956,13 @@ export function PlanView({
           <label className="field">
             <span>Ngân sách tối đa</span>
             <input
-              type="number"
-              min="0"
-              step="1000"
-              inputMode="decimal"
+              type="text"
+              inputMode="numeric"
               disabled={runBusy}
               value={budgetOverride}
               placeholder={formatVnd(data.settings.remainingBudget > 0 ? data.settings.remainingBudget : data.settings.monthlyBudget)}
               onChange={(event) => {
-                setBudgetOverride(event.target.value);
+                setBudgetOverride(formatMoneyInput(event.target.value));
                 setControlsDirty(true);
               }}
             />
@@ -1108,15 +1130,13 @@ export function PlanView({
         <label className="field">
           <span>Ngân sách tối đa</span>
           <input
-            type="number"
-            min="0"
-            step="1000"
-            inputMode="decimal"
+            type="text"
+            inputMode="numeric"
             disabled={runBusy}
             value={budgetOverride}
             placeholder={formatVnd(data.settings.remainingBudget > 0 ? data.settings.remainingBudget : data.settings.monthlyBudget)}
             onChange={(event) => {
-              setBudgetOverride(event.target.value);
+              setBudgetOverride(formatMoneyInput(event.target.value));
               setControlsDirty(true);
             }}
           />

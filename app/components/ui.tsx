@@ -20,6 +20,27 @@ export function formatVnd(value: number): string {
   return `${Math.round(value).toLocaleString("vi-VN")} ₫`;
 }
 
+/**
+ * Định dạng chuỗi nhập số tiền tự động thêm dấu phẩy phân tách hàng nghìn (ví dụ: 5000000 -> "5,000,000")
+ */
+export function formatMoneyInput(raw: string): string {
+  const digitsOnly = raw.replace(/\D/g, "");
+  if (!digitsOnly) return "";
+  const num = Number(digitsOnly);
+  if (!Number.isFinite(num)) return "";
+  return num.toLocaleString("en-US");
+}
+
+/**
+ * Chuyển chuỗi đã định dạng dấu phẩy trở lại thành số nguyên (ví dụ: "5,000,000" -> 5000000)
+ */
+export function parseMoneyInput(value: string): number | undefined {
+  const clean = value.replace(/,/g, "").trim();
+  if (clean === "") return undefined;
+  const num = Number(clean);
+  return Number.isFinite(num) ? num : undefined;
+}
+
 export function formatQuantity(value: number, unit = ""): string {
   const digits = Math.abs(value - Math.round(value)) < 0.001 ? 0 : 2;
   return `${value.toLocaleString("vi-VN", {

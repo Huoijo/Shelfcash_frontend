@@ -1104,6 +1104,47 @@ export function buildMockDecisionBrief(today: string = "2026-08-20"): DecisionBr
       recipes: "available",
     },
     generated_at: new Date().toISOString(),
+    assistant_summary: {
+      headline: "Kế hoạch nhập hàng tối ưu đã sẵn sàng thực thi",
+      summary:
+        "Hệ thống đã cân đối nhu cầu 7 ngày tới, lịch giao hàng của nhà cung cấp và tồn kho hiện tại để đề xuất số lượng đặt hàng phù hợp, giúp duy trì Fill Rate 98.8%.",
+      key_points: [
+        "Tổng chi phí mua hàng dự kiến khoảng " + totalCost.toLocaleString("vi-VN") + " ₫.",
+        "Ưu tiên gửi đơn đặt hàng sớm cho các nguyên liệu có thời gian giao từ 2-4 ngày.",
+      ],
+      warning_summary: null,
+      source: "llm",
+      grounded: true,
+      raw_response: null,
+      llm_diagnostics: null,
+    },
+    ingredient_synthesis: MOCK_INGREDIENTS.map((i) => {
+      const p = procurementRows.find((row) => row.ingredient_id === i.id);
+      return {
+        ingredient_id: i.id,
+        ingredient_name: i.name,
+        unit: i.unit,
+        importance: p ? (i.leadTimeDays >= 3 ? "critical" : "watch") : "normal",
+        source: "rule_based" as const,
+        headline: p
+          ? `Cần đặt ${p.quantity} ${p.unit ?? ""} để đảm bảo tồn kho an toàn`
+          : "Lượng tồn kho hiện tại an toàn, chưa cần tạo đơn",
+        summary: p
+          ? `Nhu cầu dự báo trong 7 ngày tới ước tính ${i.p50} ${i.unit}. Để tránh nguy cơ thiếu hàng trước khi nhà cung cấp ${i.supplier} giao (thời gian giao ${i.leadTimeDays} ngày), khuyến nghị đặt hàng theo quy cách đóng gói.`
+          : `Nhu cầu dự báo khoảng ${i.p50} ${i.unit}. Lượng tồn kho sẵn có đáp ứng đủ chu kỳ kế hoạch.`,
+        evidence_ids: [`ev-${i.id}`],
+      };
+    }),
+    presented_warnings: [
+      {
+        code: "SUPPLIER_LEAD_TIME_WINDOW",
+        severity: "warning",
+        audience: "user",
+        title: "Lưu ý thời gian giao hàng nhà cung cấp",
+        message:
+          "Một số nguyên liệu có thời gian giao từ 3-4 ngày, vui lòng xác nhận đơn sớm để tránh phát sinh gián đoạn.",
+      },
+    ],
   };
 }
 
