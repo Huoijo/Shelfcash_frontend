@@ -52,10 +52,12 @@ import {
   saveSettings,
   saveSupplierConstraint,
   ShelfCashApiError,
-  trainForecastModel,
-  updatePurchaseOrder,
+  updateInventoryPolicy,
+  updateSupplierConstraints,
   waitForDecisionRun,
 } from "../lib/shelfcash-client";
+import { requestManager } from "../lib/request-manager/request-manager";
+import { parseApiError } from "../lib/request-manager/error-policy";
 import {
   createDraftOrdersFromLegacyPlan,
   runLegacyPurchaseOrderBridge,
@@ -403,11 +405,20 @@ export function ShelfCashApp({
     if (!decision?.decision_run_id) return;
     setExplanationLoading(true);
     setExplanationError(null);
+    const managed = requestManager.createRequest({
+      kind: "explanation",
+      endpoint: `/api/v1/decision-runs/${decision.decision_run_id}/explanation`,
+      method: "POST",
+      displayLabel: "Giải thích AI cho kế hoạch",
+    });
     try {
       const response = await explainDecision(decision.decision_run_id, request);
       setDecisionExplanation(response);
       setExplanationError(null);
+      requestManager.updateRequest(managed.clientRequestId, { status: "completed" });
     } catch (caught) {
+      const apiErr = parseApiError(caught);
+      requestManager.updateRequest(managed.clientRequestId, { status: "failed", error: apiErr });
       setExplanationError(errorMessage(caught, "Không thể tải giải thích cho kế hoạch này."));
     } finally {
       setExplanationLoading(false);
@@ -418,11 +429,20 @@ export function ShelfCashApp({
     if (!decision?.decision_run_id) return;
     setWhatIfLoading(true);
     setWhatIfError(null);
+    const managed = requestManager.createRequest({
+      kind: "what_if",
+      endpoint: `/api/v1/decision-runs/${decision.decision_run_id}/what-if`,
+      method: "POST",
+      displayLabel: "Giả lập What-If kế hoạch",
+    });
     try {
       const result = await runDecisionWhatIf(decision.decision_run_id, mutation);
       setDecisionWhatIf(result);
       setWhatIfError(null);
+      requestManager.updateRequest(managed.clientRequestId, { status: "completed" });
     } catch (caught) {
+      const apiErr = parseApiError(caught);
+      requestManager.updateRequest(managed.clientRequestId, { status: "failed", error: apiErr });
       setWhatIfError(errorMessage(caught, "Không thể chạy giả lập thay đổi."));
     } finally {
       setWhatIfLoading(false);

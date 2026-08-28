@@ -45,6 +45,15 @@ import type {
   IngestionResult,
 } from "../../lib/types";
 import {
+  useRequestManager,
+} from "../../lib/request-manager/use-request-manager";
+import {
+  computeRequestFingerprint,
+  extractSafeFileMetadata,
+} from "../../lib/request-manager/persistence";
+import { parseApiError } from "../../lib/request-manager/error-policy";
+import { RecentRequestsPanel } from "../components/requests/RecentRequestsPanel";
+import {
   Button,
   Confidence,
   GuidanceHint,
@@ -272,7 +281,7 @@ export function ImportView({
     }
   }, [defaultStoreId]);
   const [phase, setPhase] = useState<Phase>("select");
-  const [created, setCreated] = useState<ImportCreateResponse | null>(null);
+const [created, setCreated] = useState<ImportCreateResponse | null>(null);
   const [mappings, setMappings] = useState<EditableSheetMapping[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [busy, setBusy] = useState("");
@@ -282,6 +291,8 @@ export function ImportView({
   const [errors, setErrors] = useState<string[]>([]);
   const [result, setResult] = useState<IngestionResult | null>(null);
   const actionAttempts = useActionAttempts();
+  const requestMgr = useRequestManager();
+  const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
 
   const selected =
     mappings.find((item) => item.id === selectedId) ?? mappings[0];
@@ -341,41 +352,47 @@ export function ImportView({
   }
 
   function finishAction(action: string) {
-    if (actionInFlight.current === action) actionInFlight.current = null;
-    setBusy("");
-  }
-
-  function addFiles(nextFiles: FileList | File[]) {
-    const selection = mergeImportFiles(files, nextFiles);
-    setFiles(selection.files);
-    const attemptId = actionAttempts.begin(actionKey("file-selection"));
-    if (selection.errors.length) {
-      actionAttempts.fail(
-        actionKey("file-selection"),
-        attemptId,
-        selection.errors.join(" "),
-      );
-    } else {
-      actionAttempts.clear(actionKey("file-selection"));
+    if (actionInFlight.current === action) {
+      actionInFlight.current = null;
+      setBusy("");
     }
-    setResult(null);
-    setPhase("select");
   }
 
   function resetImport() {
-    idempotency.current = {};
+    delete idempotency.current.upload;
+    delete idempotency.current.confirm;
+    delete idempotency.current.process;
     setCreated(null);
     setMappings([]);
     setSelectedId("");
     setPhase("select");
     setChecked(false);
+    setStatusText("");
     setWarnings([]);
     setErrors([]);
-    ["file-selection", "upload", "llm", "status", "confirm", "process", "synchronize"].forEach(
-      (action) => actionAttempts.clear(actionKey(action)),
-    );
     setResult(null);
-    setStatusText("");
+    setActiveRequestId(null);
+  }
+
+  function addFiles(incoming: FileList | File[]) {
+    const list = Array.from(incoming);
+    const next = mergeImportFiles(files, list);
+    const errors = validateImportFiles(next);
+    if (errors.length) {
+      const key = actionKey("upload");
+      const attemptId = actionAttempts.begin(key);
+      actionAttempts.fail(key, attemptId, errors.join(" "));
+      return;
+    }
+    setFiles(next);
+    resetImport();
+  }
+
+  function removeFile(targetIndex: number) {
+    setFiles((current) =>
+      current.filter((_, index) => index !== targetIndex),
+    );
+    resetImport();
   }
 
   async function startImport() {
@@ -392,20 +409,30 @@ export function ImportView({
     if (!action) return;
     setWarnings([]);
     setErrors([]);
-    const fingerprint = JSON.stringify({
-      storeId: targetStoreId,
-      forecastDate,
-      forecastHorizon,
-      files: files.map((file) => ({
+    const fingerprint = computeRequestFingerprint(
+      "import",
+      targetStoreId,
+      files.map((file) => ({
         name: file.name,
         size: file.size,
         lastModified: file.lastModified,
       })),
+    );
+
+    const managed = requestMgr.createRequest({
+      kind: "import",
+      endpoint: "/api/v1/imports",
+      method: "POST",
+      displayLabel: files.map((f) => f.name).join(", "),
+      fileMetadata: files[0] ? extractSafeFileMetadata(files[0]) : undefined,
+      requestFingerprint: fingerprint,
     });
+    setActiveRequestId(managed.clientRequestId);
+
     if (idempotency.current.upload?.fingerprint !== fingerprint) {
       idempotency.current.upload = {
         fingerprint,
-        key: createIdempotencyKey(),
+        key: managed.idempotencyKey || createIdempotencyKey(),
       };
     }
     try {
@@ -419,6 +446,10 @@ export function ImportView({
       if (!response.import_id) {
         throw new Error("Hệ thống không tạo được mã lần nhập.");
       }
+      requestMgr.updateRequest(managed.clientRequestId, {
+        status: "accepted",
+        resourceId: response.import_id,
+      });
       const editable = buildEditableMappings(response);
       if (!actionAttempts.isCurrent(action.key, action.attemptId)) return;
       setCreated(response);
@@ -435,6 +466,10 @@ export function ImportView({
       actionAttempts.succeed(action.key, action.attemptId, "Đã tạo lần nhập mới.");
       delete idempotency.current.upload;
     } catch (caught) {
+      requestMgr.updateRequest(managed.clientRequestId, {
+        status: "failed",
+        error: parseApiError(caught),
+      });
       if (!retryableTransportFailure(caught)) {
         delete idempotency.current.upload;
       }
@@ -637,6 +672,12 @@ export function ImportView({
         key: createIdempotencyKey(),
       };
     }
+    if (activeRequestId) {
+      requestMgr.updateRequest(activeRequestId, {
+        status: "processing",
+        endpoint: `/api/v1/imports/${created.import_id}/process`,
+      });
+    }
     try {
       const response = await processImport(created.import_id, {
         idempotencyKey: idempotency.current.process.key,
@@ -650,13 +691,28 @@ export function ImportView({
           "Lần nhập này không thành công. Hãy tạo lần nhập mới với các tệp đang được giữ.",
         );
         delete idempotency.current.process;
+        if (activeRequestId) {
+          requestMgr.updateRequest(activeRequestId, {
+            status: "failed",
+            error: {
+              code: "IMPORT_FAILED",
+              message: "Lần nhập này không thành công trên máy chủ.",
+            },
+          });
+        }
         return;
       }
       const payload = await waitForResult(created.import_id);
       await completeImport(payload, true);
+      if (activeRequestId) {
+        requestMgr.updateRequest(activeRequestId, {
+          status: "completed",
+        });
+      }
       actionAttempts.succeed(action.key, action.attemptId, "Dữ liệu đã được xử lý và đồng bộ.");
     } catch (caught) {
       const stillProcessing = importStillProcessing(caught);
+      const apiErr = parseApiError(caught);
       setPhase(stillProcessing ? "processing" : "confirmed");
       setStatusText(
         stillProcessing
@@ -664,12 +720,21 @@ export function ImportView({
           : "Yêu cầu bị máy chủ từ chối trước khi xử lý xong. Hãy xem lỗi và chỉnh dữ liệu trước khi thử lại.",
       );
       if (stillProcessing) {
+        if (activeRequestId) {
+          requestMgr.updateRequest(activeRequestId, { status: "waiting" });
+        }
         actionAttempts.unknown(
           action.key,
           action.attemptId,
           "Không xác định được kết quả yêu cầu; máy chủ có thể vẫn đang xử lý. Chọn Đồng bộ để kiểm tra trước khi gửi lại.",
         );
       } else {
+        if (activeRequestId) {
+          requestMgr.updateRequest(activeRequestId, {
+            status: "failed",
+            error: apiErr,
+          });
+        }
         actionAttempts.fail(action.key, action.attemptId, errorState(caught).message);
       }
     } finally {
@@ -1217,6 +1282,16 @@ export function ImportView({
           </div>
         </>
       ) : null}
+
+      <RecentRequestsPanel
+        kind="import"
+        title="Yêu cầu nhập dữ liệu gần đây"
+        onCheckStatus={async (req) => {
+          if (req.resourceId) {
+            await refreshStatus();
+          }
+        }}
+      />
     </>
   );
 }
