@@ -709,6 +709,8 @@ function StrategyAnalysisDeepDive({
 }) {
   const [activeTab, setActiveTab] = useState<"comparison" | "matrix" | "critic">("comparison");
   const [diagnosticOrigin, setDiagnosticOrigin] = useState<DiagnosticOrigin | "auto">("auto");
+  const [criticStrategyFilter, setCriticStrategyFilter] = useState<"all" | "balanced" | "lean" | "protected">("all");
+  const [showTechSpecs, setShowTechSpecs] = useState(false);
 
   const rawStrategies = Array.isArray(decision?.strategies)
     ? decision.strategies
@@ -821,9 +823,6 @@ function StrategyAnalysisDeepDive({
       arrivalDate: p?.arrival_date ?? "—",
     };
   });
-
-  const [criticStrategyFilter, setCriticStrategyFilter] = useState<"all" | "balanced" | "lean" | "protected">("all");
-  const [showTechSpecs, setShowTechSpecs] = useState(false);
 
   return (
     <div className="strategy-deepdive-root">
@@ -1587,6 +1586,30 @@ export function DecisionBriefWorkspace({
     return sortedItems;
   }, [sortedItems, filterMode]);
 
+  const forecastDate = useMemo(() => {
+    if (brief?.forecast?.cutoff_date && /^\d{4}-\d{2}-\d{2}/.test(brief.forecast.cutoff_date)) {
+      return brief.forecast.cutoff_date.slice(0, 10);
+    }
+    if (decision?.as_of_date && /^\d{4}-\d{2}-\d{2}/.test(decision.as_of_date)) {
+      return decision.as_of_date.slice(0, 10);
+    }
+    if (brief?.procurement_rows?.[0]?.order_date && /^\d{4}-\d{2}-\d{2}/.test(brief.procurement_rows[0].order_date)) {
+      return brief.procurement_rows[0].order_date.slice(0, 10);
+    }
+    if (data?.today && /^\d{4}-\d{2}-\d{2}/.test(data.today)) {
+      return data.today.slice(0, 10);
+    }
+    if (brief?.generated_at && /^\d{4}-\d{2}-\d{2}/.test(brief.generated_at)) {
+      return brief.generated_at.slice(0, 10);
+    }
+    return new Date().toISOString().slice(0, 10);
+  }, [brief?.forecast?.cutoff_date, decision?.as_of_date, brief?.procurement_rows, data?.today, brief?.generated_at]);
+
+  const horizonDays = useMemo(() => {
+    const raw = brief?.forecast?.horizon_days ?? decision?.horizon_days;
+    return typeof raw === "number" && raw >= 1 && raw <= 30 ? raw : 7;
+  }, [brief?.forecast?.horizon_days, decision?.horizon_days]);
+
   if (loading) {
     return (
       <div className="cockpit-loading-state">
@@ -1661,30 +1684,6 @@ export function DecisionBriefWorkspace({
 
   const selectedItem =
     enrichedItems.find((item) => item.demand.ingredient_id === currentSelectedId) ?? null;
-
-  const forecastDate = useMemo(() => {
-    if (brief.forecast?.cutoff_date && /^\d{4}-\d{2}-\d{2}/.test(brief.forecast.cutoff_date)) {
-      return brief.forecast.cutoff_date.slice(0, 10);
-    }
-    if (decision?.as_of_date && /^\d{4}-\d{2}-\d{2}/.test(decision.as_of_date)) {
-      return decision.as_of_date.slice(0, 10);
-    }
-    if (brief.procurement_rows?.[0]?.order_date && /^\d{4}-\d{2}-\d{2}/.test(brief.procurement_rows[0].order_date)) {
-      return brief.procurement_rows[0].order_date.slice(0, 10);
-    }
-    if (data?.today && /^\d{4}-\d{2}-\d{2}/.test(data.today)) {
-      return data.today.slice(0, 10);
-    }
-    if (brief.generated_at && /^\d{4}-\d{2}-\d{2}/.test(brief.generated_at)) {
-      return brief.generated_at.slice(0, 10);
-    }
-    return new Date().toISOString().slice(0, 10);
-  }, [brief.forecast?.cutoff_date, decision?.as_of_date, brief.procurement_rows, data?.today, brief.generated_at]);
-
-  const horizonDays = useMemo(() => {
-    const raw = brief.forecast?.horizon_days ?? decision?.horizon_days;
-    return typeof raw === "number" && raw >= 1 && raw <= 30 ? raw : 7;
-  }, [brief.forecast?.horizon_days, decision?.horizon_days]);
 
   const urgentCount = enrichedItems.filter((item) => item.orderNeeded).length;
 
