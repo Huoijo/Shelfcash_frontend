@@ -56,8 +56,6 @@ test("Decision Center exposes both operational and seven-day planning views", ()
   assert.match(future, /Dự báo bán hàng/);
   assert.match(future, /Nhu cầu nguyên liệu dự kiến/);
   assert.match(future, /Rủi ro tồn kho/);
-  assert.match(future, /Kế hoạch nhập hàng/);
-  assert.match(future, /Chưa tìm được phương án nhập thỏa toàn bộ ràng buộc/);
   assert.doesNotMatch(future, /internal-run-id/);
   assert.doesNotMatch(future, /0 ₫/);
 });
@@ -105,8 +103,9 @@ test("demand chart makes P50 primary and keeps the P25-P75 range as an accessibl
   assert.match(source, /P50 là nhu cầu dự kiến; vùng màu là khoảng P25–P75/);
 });
 
-test("feasible Decision Runs retain the existing procurement surface instead of the no-feasible state", () => {
+test("Decision Center seven-day view focuses cleanly on demand and risk without separate procurement surface", () => {
   const markup = renderToStaticMarkup(<DecisionCenterWorkspace activeView="future" data={data} decision={{ decision_run_id: "feasible", status: "completed", recommended_strategy: "balanced", recommended_plan: { valid: true, items: [{ ingredient_name: "Sữa tươi", order_quantity: 12, unit: "L", order_date: "2026-08-12", expected_arrival_date: "2026-08-13", estimated_cost: 120000 }] } }} onNavigate={() => undefined} onViewChange={() => undefined} plan={plan} />);
-  assert.match(markup, /Đã có phương án nhập khả thi/);
-  assert.doesNotMatch(markup, /Chưa tìm được phương án nhập thỏa toàn bộ ràng buộc/);
+  assert.match(markup, /Kế hoạch 7 ngày tới/);
+  assert.match(markup, /Heatmap rủi ro/);
+  assert.match(markup, /Chi tiết đang chọn/);
 });

@@ -1064,7 +1064,7 @@ function SelectedIngredientDetail({
 }
 
 /**
- * Drilldown modal showing product sales forecast and contribution to ingredient demand.
+ * Drilldown drawer showing product sales forecast and contribution to ingredient demand.
  */
 function ProductForecastDrilldownModal({
   onClose,
@@ -1079,207 +1079,200 @@ function ProductForecastDrilldownModal({
   cutoffDate?: string | null;
   horizonDays?: number | null;
 }) {
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const drawer = useRef<HTMLElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+
   const [selectedProductId, setSelectedProductId] = useState<string>(
-    row.contributions[0]?.productId || ""
+    row.contributions[0]?.productId || row.contributions[0]?.productName || ""
   );
+
+  useEffect(() => {
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButton.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        drawer.current?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), [href], [tabindex]:not([tabindex="-1"])'
+        ) ?? []
+      );
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      }
+      if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      opener.current?.focus();
+    };
+  }, [onClose]);
 
   const activeContribution =
-    row.contributions.find((c) => c.productId === selectedProductId) || row.contributions[0];
-  const activeForecast = productForecasts.find(
-    (pf) =>
-      (activeContribution?.productId && pf.productId === activeContribution.productId) ||
-      (activeContribution?.productName && pf.product === activeContribution.productName)
-  );
+    row.contributions.find(
+      (c) =>
+        (c.productId && c.productId === selectedProductId) ||
+        (c.productName && c.productName === selectedProductId)
+    ) || row.contributions[0];
+
+  const activeForecast = useMemo(() => {
+    if (!activeContribution) return null;
+    const found = productForecasts.find(
+      (pf) =>
+        (activeContribution.productId && pf.productId === activeContribution.productId) ||
+        (activeContribution.productName && pf.product === activeContribution.productName) ||
+        (activeContribution.productId && pf.product === activeContribution.productId)
+    );
+    if (found && found.forecast && found.forecast.length > 0) return found;
+
+    // Fallback synthesize single forecast result
+    const targetP50 = activeContribution.forecastP50 ?? activeContribution.p50 ?? 0;
+    const targetP25 = activeContribution.forecastP25 ?? activeContribution.p25 ?? targetP50 * 0.85;
+    const targetP75 = activeContribution.forecastP75 ?? activeContribution.p75 ?? targetP50 * 1.15;
+
+    return {
+      productId: activeContribution.productId || activeContribution.productName,
+      product: activeContribution.productName || "Sản phẩm",
+      ingredient: activeContribution.productName || "Sản phẩm",
+      unit: "phần",
+      history: [],
+      forecast: [
+        {
+          date: row.targetDate,
+          p25: targetP25,
+          p50: targetP50,
+          p75: targetP75,
+          intervalLower: targetP25,
+          intervalUpper: targetP75,
+          confidenceScore: 0.9,
+        },
+      ],
+      totals: {
+        p25: targetP25,
+        p50: targetP50,
+        p75: targetP75,
+      },
+      drivers: [],
+      confidence: "Tốt",
+      dataNotes: [],
+    } as ForecastResult;
+  }, [activeContribution, productForecasts, row.targetDate]);
 
   return (
-    <div className="drawer-overlay" onClick={onClose} role="presentation">
-      <div
+    <div className="procurement-drawer-layer">
+      <button
+        aria-label="Đóng dự báo bán hàng theo sản phẩm"
+        className="procurement-drawer-backdrop"
+        onClick={onClose}
+        type="button"
+      />
+      <aside
         aria-labelledby="forecast-drilldown-title"
         aria-modal="true"
-        className="explanation-drawer forecast-drilldown-modal"
-        onClick={(event) => event.stopPropagation()}
+        className="procurement-drawer"
+        ref={drawer}
         role="dialog"
       >
-        <div className="drawer-header">
+        <header className="procurement-drawer-header">
           <div>
             <span className="eyebrow">Dự báo bán hàng theo sản phẩm</span>
             <h2 id="forecast-drilldown-title">
               Nguồn nhu cầu: {row.ingredientName}
             </h2>
-            <p className="drawer-context-date">
-              Ngày {formatDate(row.targetDate)} · Đến từ {row.contributions.length} sản phẩm
+            <p className="drawer-context-date" style={{ color: "#64748b", fontSize: "0.85rem", marginTop: "2px" }}>
+              Ngày {formatDate(row.targetDate)} · Đến từ {row.contributions.length} món
             </p>
           </div>
-          <button aria-label="Đóng" className="drawer-close-btn" onClick={onClose} type="button">
-            ✕
+          <button
+            aria-label="Đóng dự báo bán hàng"
+            className="decision-workspace-close"
+            onClick={onClose}
+            ref={closeButton}
+            type="button"
+          >
+            <X aria-hidden="true" size={20} />
           </button>
-        </div>
+        </header>
 
-        <div className="forecast-drilldown-body">
-          {row.contributions.length > 1 ? (
-            <div className="drilldown-product-tabs" role="tablist">
-              {row.contributions.map((c) => {
-                const pId = c.productId || c.productName;
-                const activeId = activeContribution?.productId || activeContribution?.productName;
-                return (
-                  <button
-                    key={pId}
-                    type="button"
-                    role="tab"
-                    className={`drilldown-tab ${activeId === pId ? "active" : ""}`}
-                    onClick={() => setSelectedProductId(c.productId || "")}
-                  >
-                    {c.productName || "Sản phẩm"}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
+        {row.contributions.length > 1 ? (
+          <div className="procurement-date-tabs" role="tablist" style={{ margin: "16px 0 10px" }}>
+            {row.contributions.map((c) => {
+              const pId = c.productId || c.productName;
+              const activeId = activeContribution?.productId || activeContribution?.productName;
+              return (
+                <button
+                  key={pId}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeId === pId}
+                  className={activeId === pId ? "active" : ""}
+                  onClick={() => setSelectedProductId(pId)}
+                >
+                  {c.productName || "Sản phẩm"}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
 
-          {activeContribution ? (
-            <div className="drilldown-active-product">
-              <div className="drilldown-product-stats">
-                <div className="stat-box">
-                  <span>Sản phẩm</span>
-                  <strong>{activeContribution.productName || "Sản phẩm"}</strong>
-                </div>
-                <div className="stat-box">
-                  <span>Dự báo bán P50</span>
-                  <strong>
-                    {formatQuantity(activeContribution.forecastP50, "phần")}
-                  </strong>
-                </div>
-                <div className="stat-box">
-                  <span>Tiêu hao ({row.ingredientName})</span>
-                  <strong>
-                    {formatQuantity(
-                      activeContribution.p50 ?? activeContribution.recipeQuantity,
-                      activeContribution.unit || row.unit
-                    )}
-                  </strong>
-                </div>
+        {activeContribution ? (
+          <div className="drilldown-active-product" style={{ marginTop: "14px" }}>
+            <dl className="procurement-drawer-total">
+              <div>
+                <dt>Sản phẩm</dt>
+                <dd>{activeContribution.productName || "Sản phẩm"}</dd>
               </div>
+              <div>
+                <dt>Dự báo bán P50</dt>
+                <dd>{formatQuantity(activeContribution.forecastP50 ?? activeContribution.p50, "phần")}</dd>
+              </div>
+              <div>
+                <dt>Tiêu hao định mức</dt>
+                <dd>
+                  {activeContribution.recipeQuantity != null
+                    ? `${formatQuantity(activeContribution.recipeQuantity)} ${activeContribution.recipeUnit || row.unit} / phần`
+                    : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt>Nhu cầu phát sinh</dt>
+                <dd>
+                  {formatQuantity(
+                    activeContribution.p50 ?? activeContribution.recipeQuantity,
+                    activeContribution.unit || row.unit
+                  )}
+                </dd>
+              </div>
+            </dl>
 
-              {activeForecast ? (
-                <div className="drilldown-chart-wrap">
-                  <span className="eyebrow">Biểu đồ dự báo sản phẩm</span>
-                  <h4>Xu hướng bán 7 ngày: {activeForecast.product}</h4>
-                  <ForecastChart
-                    cutoffDate={cutoffDate}
-                    forecast={activeForecast}
-                    horizonDays={horizonDays}
-                  />
-                </div>
-              ) : (
-                <Notice tone="info">Không có chuỗi dữ liệu biểu đồ cho sản phẩm này.</Notice>
-              )}
-            </div>
-          ) : null}
-        </div>
-      </div>
+            {activeForecast ? (
+              <div className="drilldown-chart-wrap" style={{ marginTop: "20px" }}>
+                <span className="eyebrow">Biểu đồ dự báo sản phẩm</span>
+                <h3 style={{ margin: "4px 0 12px", fontSize: "1.05rem", fontWeight: 700 }}>
+                  Xu hướng 7 ngày: {activeForecast.product}
+                </h3>
+                <ForecastChart
+                  cutoffDate={cutoffDate}
+                  forecast={activeForecast}
+                  horizonDays={horizonDays}
+                />
+              </div>
+            ) : (
+              <Notice tone="info">Không có chuỗi dữ liệu biểu đồ cho sản phẩm này.</Notice>
+            )}
+          </div>
+        ) : null}
+      </aside>
     </div>
-  );
-}
-
-/**
- * SECTION ④: KẾ HOẠCH NHẬP HÀNG
- * Compact action summary at the bottom of the funnel.
- */
-function ProcurementSummary({
-  decision,
-  noFeasible,
-  feasibleItems,
-  candidateStrategies,
-  onNavigate,
-}: {
-  decision: DecisionPackage | null;
-  noFeasible: boolean;
-  feasibleItems: Array<{
-    ingredient_name?: string;
-    ingredient?: string;
-    order_quantity?: number;
-    quantity?: number;
-    unit?: string;
-    estimated_cost?: number | null;
-  }>;
-  candidateStrategies: DecisionStrategyView[];
-  onNavigate?: (target: "inventory" | "plan") => void;
-}) {
-  const strategyLabels: Record<string, string> = {
-    balanced: "Cân bằng",
-    safe: "An toàn",
-    economy: "Tiết kiệm",
-  };
-
-  const totalCost = feasibleItems.reduce((s, it) => s + (it.estimated_cost ?? 0), 0);
-  const strategyKey = decision?.recommended_strategy || "balanced";
-  const strategyName = strategyLabels[strategyKey] || strategyKey;
-
-  return (
-    <section className="procurement-summary-section" aria-labelledby="procurement-summary-title">
-      <div className="procurement-summary-header">
-        <div className="procurement-title-group">
-          <span className="eyebrow">Hành động mua hàng</span>
-          <h2 id="procurement-summary-title">Kế hoạch nhập hàng</h2>
-        </div>
-      </div>
-
-      {noFeasible ? (
-        <div className="procurement-summary-banner is-warning">
-          <div className="banner-left">
-            <div className="banner-badge-row">
-              <span className="procurement-state-badge is-warning">
-                Chưa tìm được phương án nhập thỏa toàn bộ ràng buộc
-              </span>
-              {candidateStrategies.length > 0 ? (
-                <span className="candidate-count-tag">
-                  {candidateStrategies.length} phương án mô phỏng
-                </span>
-              ) : null}
-            </div>
-            <p className="banner-desc">
-              Dự báo và nhu cầu nguyên liệu đã được tính. Tuy nhiên, hệ thống chưa thể tạo kế hoạch mua hàng đáp ứng toàn bộ điều kiện hiện tại.
-            </p>
-          </div>
-          <div className="banner-action">
-            <Button onClick={() => (onNavigate ? onNavigate("plan") : undefined)} variant="secondary">
-              Xem ràng buộc & kịch bản →
-            </Button>
-          </div>
-        </div>
-      ) : feasibleItems.length > 0 ? (
-        <div className="procurement-summary-banner is-success">
-          <div className="banner-left">
-            <div className="banner-badge-row">
-              <span className="procurement-state-badge is-success">Chiến lược: {strategyName}</span>
-              <span className="procurement-ready-tag">Đã có phương án nhập khả thi</span>
-            </div>
-            <div className="banner-metrics">
-              <strong>{feasibleItems.length} nguyên liệu</strong> ·{" "}
-              <strong>{formatVnd(totalCost)}</strong> ·{" "}
-              <span>{feasibleItems.length} dòng mua</span>
-            </div>
-          </div>
-          <div className="banner-action">
-            <Button onClick={() => (onNavigate ? onNavigate("plan") : undefined)} variant="primary">
-              Xem kế hoạch nhập →
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="procurement-summary-banner is-neutral">
-          <div className="banner-left">
-            <span className="procurement-state-badge is-neutral">Chưa có kế hoạch</span>
-            <p className="banner-desc">Chưa có đơn nhập được đề xuất trong kỳ kế hoạch.</p>
-          </div>
-          <div className="banner-action">
-            <Button onClick={() => (onNavigate ? onNavigate("plan") : undefined)} variant="secondary">
-              Tạo kế hoạch →
-            </Button>
-          </div>
-        </div>
-      )}
-    </section>
   );
 }
 
@@ -1288,7 +1281,6 @@ function FuturePlanningView({
   plan,
   decision,
   initialIngredient,
-  onNavigate,
 }: {
   data: BootstrapData;
   plan: PlanResponse;
@@ -1304,33 +1296,46 @@ function FuturePlanningView({
 
   // Adapt product forecasts from either legacy plan.forecasts or decision view.productForecasts for drilldown
   const productForecastResults = useMemo(() => {
-    const fromPlan = Object.values(plan.forecasts).filter((forecast) => forecast.forecast.length > 0);
-    if (fromPlan.length > 0) return fromPlan;
+    const map = new Map<string, ForecastResult>();
 
-    return view.productForecasts.map((pf) => ({
-      productId: pf.productId,
-      product: pf.productName,
-      ingredient: pf.productName,
-      unit: pf.unit || "phần",
-      history: [],
-      forecast: pf.points.map((pt) => ({
-        date: pt.targetDate,
-        p25: pt.p25 ?? 0,
-        p50: pt.p50 ?? 0,
-        p75: pt.p75 ?? 0,
-        intervalLower: pt.p25 ?? 0,
-        intervalUpper: pt.p75 ?? 0,
-        confidenceScore: 0.9,
-      })),
-      totals: {
-        p25: pf.points.reduce((s, pt) => s + (pt.p25 ?? 0), 0),
-        p50: pf.points.reduce((s, pt) => s + (pt.p50 ?? 0), 0),
-        p75: pf.points.reduce((s, pt) => s + (pt.p75 ?? 0), 0),
-      },
-      drivers: [],
-      confidence: "Tốt",
-      dataNotes: [],
-    }));
+    for (const pf of view.productForecasts) {
+      const key = pf.productId || pf.productName;
+      if (!key) continue;
+      map.set(key, {
+        productId: pf.productId,
+        product: pf.productName,
+        ingredient: pf.productName,
+        unit: pf.unit || "phần",
+        history: [],
+        forecast: pf.points.map((pt) => ({
+          date: pt.targetDate,
+          p25: pt.p25 ?? 0,
+          p50: pt.p50 ?? 0,
+          p75: pt.p75 ?? 0,
+          intervalLower: pt.p25 ?? 0,
+          intervalUpper: pt.p75 ?? 0,
+          confidenceScore: 0.9,
+        })),
+        totals: {
+          p25: pf.points.reduce((s, pt) => s + (pt.p25 ?? 0), 0),
+          p50: pf.points.reduce((s, pt) => s + (pt.p50 ?? 0), 0),
+          p75: pf.points.reduce((s, pt) => s + (pt.p75 ?? 0), 0),
+        },
+        drivers: [],
+        confidence: "Tốt",
+        dataNotes: [],
+      });
+    }
+
+    if (plan.forecasts) {
+      for (const [k, f] of Object.entries(plan.forecasts)) {
+        if (f.forecast && f.forecast.length > 0) {
+          map.set(f.productId || f.product || k, f);
+        }
+      }
+    }
+
+    return Array.from(map.values());
   }, [plan.forecasts, view.productForecasts]);
 
   const activeDate = view.dates.includes(selectedDate) ? selectedDate : view.dates[0] || "";
@@ -1354,16 +1359,6 @@ function FuturePlanningView({
     return sorted[0]?.ingredientId || view.demand[0]?.ingredientId || "";
   }, [ingredientId, initialIngredient, view.demand, activeDate, view.risks]);
 
-  const noFeasible = noFeasibleDecision(decision);
-  const candidateStrategies = view.strategies.filter(
-    (strategy) => strategy.itemCount > 0 && strategy.feasible === false
-  );
-  const feasibleItems =
-    decision?.recommended_strategy &&
-    decision.recommended_plan?.valid &&
-    decision.recommended_plan.items?.length
-      ? decision.recommended_plan.items
-      : [];
   const planningPeriod = dateWindowLabel(view.dates, decision?.as_of_date, decision?.horizon_days);
 
   return (
@@ -1406,15 +1401,6 @@ function FuturePlanningView({
         risks={view.risks}
         selectedDate={activeDate}
         selectedIngredientId={activeIngredientId}
-      />
-
-      {/* ── SECTION ④: KẾ HOẠCH NHẬP HÀNG (COMPACT ACTION SUMMARY) ── */}
-      <ProcurementSummary
-        candidateStrategies={candidateStrategies}
-        decision={decision}
-        feasibleItems={feasibleItems}
-        noFeasible={noFeasible}
-        onNavigate={onNavigate}
       />
 
       {/* ── SECTION ⓘ: LƯU Ý CHẤT LƯỢNG DỮ LIỆU (COLLAPSED DISCLOSURE) ── */}
