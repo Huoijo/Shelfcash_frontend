@@ -57,57 +57,165 @@ function parseDaysRemaining(expiryDate?: string, todayDate?: string): number | n
   return Math.round((target - base) / (1000 * 60 * 60 * 24));
 }
 
-function DemandRows({
-  rows,
-  onExplain,
-  riskIds,
-}: {
-  rows: DecisionDemandView[];
-  onExplain: (row: DecisionDemandView) => void;
-  riskIds: Set<string>;
-}) {
-  return (
-    <div className="decision-demand-rows">
-      {rows.map((row) => {
-        const hasRisk = riskIds.has(row.ingredientId);
-        return (
-          <article
-            className={`decision-demand-card ${hasRisk ? "has-risk" : ""}`}
-            key={`${row.ingredientId}-${row.targetDate}`}
-          >
-            <div className="demand-card-header">
-              <div className="demand-card-title-group">
-                <h3 title={row.ingredientName}>{row.ingredientName}</h3>
-                <span className={`demand-risk-badge ${hasRisk ? "is-risk" : "is-safe"}`}>
-                  {hasRisk ? "Có nguy cơ thiếu" : "An toàn"}
-                </span>
-              </div>
-              <div className="demand-card-p50">
-                <strong>{quantity(row.p50, row.unit)}</strong>
-                <small>dự kiến</small>
-              </div>
-            </div>
+export type HeatmapSeverityLevel = 0 | 1 | 2 | 3;
 
-            <div className="demand-card-body">
-              <span className="demand-card-range">
-                Khoảng P25–P75: <strong>{quantity(row.p25, row.unit)} – {quantity(row.p75, row.unit)}</strong>
-              </span>
-            </div>
-
-            <div className="demand-card-footer">
-              <span className="demand-card-contributions">
-                Đến từ {row.contributions.length} món
-              </span>
-              <Button onClick={() => onExplain(row)} variant="secondary" className="demand-explain-btn">
-                Giải thích nhu cầu
-              </Button>
-            </div>
-          </article>
-        );
-      })}
-    </div>
-  );
+export interface HeatmapCellData {
+  ingredientId: string;
+  ingredientName: string;
+  unit: string;
+  targetDate: string;
+  level: HeatmapSeverityLevel;
+  levelLabel: string;
+  p50: number | null;
+  p25: number | null;
+  p75: number | null;
+  contributionsCount: number;
+  hasStockout: boolean;
+  stockoutDate?: string | null;
+  shortageQuantity?: number | null;
+  demandRow?: DecisionDemandView | null;
 }
+
+export interface HeatmapRowData {
+  ingredientId: string;
+  ingredientName: string;
+  unit: string;
+  cells: Record<string, HeatmapCellData>;
+  totalSeverity: number;
+  maxSeverity: HeatmapSeverityLevel;
+  hasAlert: boolean;
+  stockoutDate?: string | null;
+}
+
+/**
+ * Derive severity heat level for an ingredient on a specific date:
+ * 3 = Cảnh báo cao (Stockout projected on/before this day, or fill rate < 80%)
+ * 2 = Nguy cơ thiếu (Stockout projected within 1-2 days ahead, or shortage quantity > 0)
+ * 1 = Cần theo dõi (Demand spike > 35% above average, or stockout in 3+ days)
+ * 0 = Ổn định (Normal supply & expected demand)
+ */
+function deriveIngredientHeatLevel(
+  ingredientId: string,
+  targetDate: string,
+  demandRow: DecisionDemandView | undefined,
+  risk: DecisionRiskView | undefined,
+  avgDailyDemand: number
+): {
+  level: HeatmapSeverityLevel;
+  levelLabel: string;
+  hasStockout: boolean;
+  stockoutDate?: string | null;
+  shortageQuantity?: number | null;
+} {
+  // 1. Level 3 (Cảnh báo cao): Stockout occurs on or before this day, or critical fill rate (<80%)
+  if (risk?.stockoutDate && targetDate >= risk.stockoutDate) {
+    return {
+      level: 3,
+      levelLabel: `Cảnh báo cao (Thiếu từ ${formatDate(risk.stockoutDate)})`,
+      hasStockout: true,
+      stockoutDate: risk.stockoutDate,
+      shortageQuantity: risk.shortageQuantity,
+    };
+  }
+  if (risk?.fillRate != null && risk.fillRate < 0.8) {
+    return {
+      level: 3,
+      levelLabel: "Cảnh báo cao",
+      hasStockout: true,
+      stockoutDate: risk.stockoutDate,
+      shortageQuantity: risk.shortageQuantity,
+    };
+  }
+
+  // 2. Projected stockout later in the 7-day horizon
+  if (risk?.stockoutDate) {
+    const daysUntilStockout = parseDaysRemaining(risk.stockoutDate, targetDate);
+    // Within 1-2 days before stockout: Level 2 (Nguy cơ thiếu)
+    if (daysUntilStockout != null && daysUntilStockout <= 2) {
+      return {
+        level: 2,
+        levelLabel: `Nguy cơ thiếu từ ${formatDate(risk.stockoutDate)}`,
+        hasStockout: false,
+        stockoutDate: risk.stockoutDate,
+        shortageQuantity: risk.shortageQuantity,
+      };
+    }
+    // 3+ days before stockout: Level 1 (Cần theo dõi - Đủ tồn tới stockoutDate)
+    return {
+      level: 1,
+      levelLabel: `Cần theo dõi (Đủ tồn tới ${formatDate(risk.stockoutDate)})`,
+      hasStockout: false,
+      stockoutDate: risk.stockoutDate,
+      shortageQuantity: risk.shortageQuantity,
+    };
+  }
+
+  // Shortage without specific date
+  if (risk?.shortageQuantity != null && risk.shortageQuantity > 0) {
+    return {
+      level: 2,
+      levelLabel: "Nguy cơ thiếu",
+      hasStockout: false,
+      stockoutDate: null,
+      shortageQuantity: risk.shortageQuantity,
+    };
+  }
+  if (risk?.fillRate != null && risk.fillRate < 0.95) {
+    return {
+      level: 2,
+      levelLabel: "Nguy cơ thiếu",
+      hasStockout: false,
+      stockoutDate: null,
+      shortageQuantity: risk.shortageQuantity,
+    };
+  }
+
+  // 3. Level 1: Demand spike or high variance
+  if (demandRow?.p50 != null && avgDailyDemand > 0 && demandRow.p50 > 1.35 * avgDailyDemand) {
+    return {
+      level: 1,
+      levelLabel: "Cần theo dõi (Tăng đột biến)",
+      hasStockout: false,
+    };
+  }
+  if (
+    demandRow?.p50 != null &&
+    demandRow.p75 != null &&
+    demandRow.p25 != null &&
+    demandRow.p50 > 0 &&
+    (demandRow.p75 - demandRow.p25) / demandRow.p50 > 0.5
+  ) {
+    return {
+      level: 1,
+      levelLabel: "Cần theo dõi (Dao động lớn)",
+      hasStockout: false,
+    };
+  }
+
+  // 4. Level 0: Safe & stable
+  return {
+    level: 0,
+    levelLabel: "Ổn định",
+    hasStockout: false,
+  };
+}
+
+function formatHeaderDay(dateStr: string): { dayOfWeek: string; dateFormatted: string } {
+  try {
+    const d = new Date(`${dateStr}T00:00:00Z`);
+    const dayIndex = d.getUTCDay();
+    const days = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+    const [year, month, day] = dateStr.split("-");
+    return {
+      dayOfWeek: days[dayIndex] ?? "",
+      dateFormatted: `${day}/${month}`,
+    };
+  } catch {
+    return { dayOfWeek: "", dateFormatted: dateStr };
+  }
+}
+
+
 
 function TodayOperationalView({
   data,
@@ -469,26 +577,732 @@ function TodayOperationalView({
   );
 }
 
+function DemandRiskHeatmap({
+  dates,
+  demand,
+  risks,
+  selectedDate,
+  selectedIngredientId,
+  onSelectDate,
+  onSelectIngredient,
+}: {
+  dates: string[];
+  demand: DecisionDemandView[];
+  risks: DecisionRiskView[];
+  selectedDate: string;
+  selectedIngredientId: string;
+  onSelectDate: (date: string) => void;
+  onSelectIngredient: (ingredientId: string) => void;
+}) {
+  const [hoveredCell, setHoveredCell] = useState<HeatmapCellData | null>(null);
+
+  // Map risks by ingredientId
+  const riskMap = useMemo(() => {
+    const map = new Map<string, DecisionRiskView>();
+    for (const r of risks) {
+      map.set(r.ingredientId, r);
+    }
+    return map;
+  }, [risks]);
+
+  // Compute average daily demand per ingredient
+  const avgDemandMap = useMemo(() => {
+    const sumMap = new Map<string, { total: number; count: number }>();
+    for (const d of demand) {
+      if (d.p50 != null) {
+        const cur = sumMap.get(d.ingredientId) ?? { total: 0, count: 0 };
+        cur.total += d.p50;
+        cur.count += 1;
+        sumMap.set(d.ingredientId, cur);
+      }
+    }
+    const avgMap = new Map<string, number>();
+    for (const [id, stats] of sumMap.entries()) {
+      avgMap.set(id, stats.count > 0 ? stats.total / stats.count : 0);
+    }
+    return avgMap;
+  }, [demand]);
+
+  // Map demand by ingredientId-targetDate
+  const demandMap = useMemo(() => {
+    const map = new Map<string, DecisionDemandView>();
+    for (const d of demand) {
+      map.set(`${d.ingredientId}-${d.targetDate}`, d);
+    }
+    return map;
+  }, [demand]);
+
+  // List of unique ingredients
+  const uniqueIngredients = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; unit: string }>();
+    for (const d of demand) {
+      if (!map.has(d.ingredientId)) {
+        map.set(d.ingredientId, {
+          id: d.ingredientId,
+          name: d.ingredientName,
+          unit: d.unit,
+        });
+      }
+    }
+    return Array.from(map.values());
+  }, [demand]);
+
+  // Build rows with cells for all dates
+  const rows: HeatmapRowData[] = useMemo(() => {
+    return uniqueIngredients
+      .map((ing) => {
+        const risk = riskMap.get(ing.id);
+        const avg = avgDemandMap.get(ing.id) ?? 0;
+        const cells: Record<string, HeatmapCellData> = {};
+        let totalSeverity = 0;
+        let maxSeverity: HeatmapSeverityLevel = 0;
+
+        for (const date of dates) {
+          const dRow = demandMap.get(`${ing.id}-${date}`);
+          const heat = deriveIngredientHeatLevel(ing.id, date, dRow, risk, avg);
+
+          cells[date] = {
+            ingredientId: ing.id,
+            ingredientName: ing.name,
+            unit: ing.unit,
+            targetDate: date,
+            level: heat.level,
+            levelLabel: heat.levelLabel,
+            p50: dRow?.p50 ?? null,
+            p25: dRow?.p25 ?? null,
+            p75: dRow?.p75 ?? null,
+            contributionsCount: dRow?.contributions.length ?? 0,
+            hasStockout: heat.hasStockout,
+            stockoutDate: heat.stockoutDate,
+            shortageQuantity: heat.shortageQuantity,
+            demandRow: dRow ?? null,
+          };
+
+          totalSeverity += heat.level;
+          if (heat.level > maxSeverity) {
+            maxSeverity = heat.level;
+          }
+        }
+
+        return {
+          ingredientId: ing.id,
+          ingredientName: ing.name,
+          unit: ing.unit,
+          cells,
+          totalSeverity,
+          maxSeverity,
+          hasAlert: maxSeverity >= 2,
+          stockoutDate: risk?.stockoutDate,
+        };
+      })
+      .sort((a, b) => {
+        if (b.totalSeverity !== a.totalSeverity) {
+          return b.totalSeverity - a.totalSeverity;
+        }
+        if (b.maxSeverity !== a.maxSeverity) {
+          return b.maxSeverity - a.maxSeverity;
+        }
+        return a.ingredientName.localeCompare(b.ingredientName);
+      });
+  }, [uniqueIngredients, dates, riskMap, avgDemandMap, demandMap]);
+
+  // Summary Metrics
+  const summary = useMemo(() => {
+    const alertIngs = rows.filter((r) => r.hasAlert).length;
+    let highCells = 0;
+    const dateRiskSums: Record<string, number> = {};
+
+    for (const date of dates) {
+      dateRiskSums[date] = 0;
+    }
+
+    for (const r of rows) {
+      for (const date of dates) {
+        const cell = r.cells[date];
+        if (cell) {
+          if (cell.level === 3) highCells += 1;
+          dateRiskSums[date] = (dateRiskSums[date] ?? 0) + cell.level;
+        }
+      }
+    }
+
+    let peakDate = dates[0] || "";
+    let maxRisk = -1;
+    for (const date of dates) {
+      const sum = dateRiskSums[date] ?? 0;
+      if (sum > maxRisk) {
+        maxRisk = sum;
+        peakDate = date;
+      }
+    }
+
+    return {
+      alertIngredients: alertIngs,
+      highAlertCells: highCells,
+      peakRiskDate: peakDate,
+    };
+  }, [rows, dates]);
+
+  return (
+    <div className="demand-heatmap-container">
+      {/* ── SECTION ①: TOP SUMMARY STRIP & LEGEND ── */}
+      <div className="heatmap-summary-strip">
+        <div className="heatmap-mini-stats">
+          {summary.alertIngredients > 0 ? (
+            <>
+              <div className="mini-stat-pill is-warning">
+                <strong>{summary.alertIngredients}</strong> nguyên liệu có cảnh báo
+              </div>
+              <div className="mini-stat-pill is-danger">
+                <strong>{summary.highAlertCells}</strong> điểm nguy cấp
+              </div>
+              <div className="mini-stat-pill is-neutral">
+                Đỉnh rủi ro: <strong>{formatDate(summary.peakRiskDate)}</strong>
+              </div>
+            </>
+          ) : (
+            <div className="mini-stat-pill is-success">
+              ✓ Không có nguyên liệu cần chú ý trong 7 ngày tới
+            </div>
+          )}
+        </div>
+
+        <div className="heatmap-legend" aria-label="Chú thích mức độ cảnh báo">
+          <span className="legend-item">
+            <span className="legend-color-box level-0" /> Ổn định
+          </span>
+          <span className="legend-item">
+            <span className="legend-color-box level-1" /> Cần theo dõi
+          </span>
+          <span className="legend-item">
+            <span className="legend-color-box level-2" /> Nguy cơ thiếu
+          </span>
+          <span className="legend-item">
+            <span className="legend-color-box level-3" /> Cảnh báo cao
+          </span>
+        </div>
+      </div>
+
+      {/* ── SECTION ②: HEATMAP TABLE MATRIX (HERO) ── */}
+      <div className="heatmap-matrix-wrap" role="region" aria-label="Bảng heatmap cảnh báo nhu cầu 7 ngày">
+        <table className="demand-heatmap-table">
+          <thead>
+            <tr>
+              <th className="heatmap-th-corner">Nguyên liệu</th>
+              {dates.map((date) => {
+                const headerInfo = formatHeaderDay(date);
+                const isActiveDate = selectedDate === date;
+                return (
+                  <th
+                    key={date}
+                    className={`heatmap-th-date ${isActiveDate ? "is-active-col" : ""}`}
+                    onClick={() => onSelectDate(date)}
+                    title={`Chọn ngày ${formatDate(date)}`}
+                  >
+                    <div className="th-date-inner">
+                      <span className="th-weekday">{headerInfo.dayOfWeek}</span>
+                      <span className="th-date-str">{headerInfo.dateFormatted}</span>
+                    </div>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const isSelectedIng = row.ingredientId === selectedIngredientId;
+              return (
+                <tr
+                  key={row.ingredientId}
+                  className={`heatmap-tr ${isSelectedIng ? "is-active-row" : ""}`}
+                >
+                  <td
+                    className="heatmap-td-label"
+                    onClick={() => onSelectIngredient(row.ingredientId)}
+                    title={`Chọn nguyên liệu ${row.ingredientName}`}
+                  >
+                    <div className="td-label-inner">
+                      <span className="ing-name">{row.ingredientName}</span>
+                      {row.hasAlert ? (
+                        <span className="ing-alert-indicator" title="Có cảnh báo trong tuần" />
+                      ) : null}
+                    </div>
+                  </td>
+
+                  {dates.map((date) => {
+                    const cell = row.cells[date];
+                    if (!cell) return <td key={date} className="heatmap-td-empty">—</td>;
+
+                    const isCellSelected =
+                      selectedDate === date && selectedIngredientId === row.ingredientId;
+                    const isActiveCol = selectedDate === date;
+
+                    return (
+                      <td
+                        key={date}
+                        className={`heatmap-td-cell level-${cell.level} ${
+                          isCellSelected ? "is-selected-cell" : ""
+                        } ${isActiveCol ? "is-col-focused" : ""}`}
+                        onClick={() => {
+                          onSelectDate(date);
+                          onSelectIngredient(row.ingredientId);
+                        }}
+                        onMouseEnter={() => setHoveredCell(cell)}
+                        onMouseLeave={() => setHoveredCell(null)}
+                      >
+                        <div className="cell-inner">
+                          {cell.level === 3 ? (
+                            <span className="cell-alert-mark">!</span>
+                          ) : cell.level === 2 ? (
+                            <span className="cell-warning-mark">▲</span>
+                          ) : null}
+                          <span className="cell-mini-qty">
+                            {cell.p50 != null ? `${cell.p50 < 10 ? cell.p50.toFixed(1) : Math.round(cell.p50)}` : "—"}
+                          </span>
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        {/* Hover Tooltip Overlay */}
+        {hoveredCell ? (
+          <div className="heatmap-hover-tooltip" aria-hidden="true">
+            <div className="tooltip-header">
+              <strong>{hoveredCell.ingredientName}</strong>
+              <span>· {formatDate(hoveredCell.targetDate)}</span>
+            </div>
+            <div className="tooltip-body">
+              <div className="tooltip-level-row">
+                <span className={`tooltip-level-pill level-${hoveredCell.level}`}>
+                  {hoveredCell.levelLabel}
+                </span>
+                {hoveredCell.hasStockout ? (
+                  <span className="tooltip-stockout-note">Có nguy cơ cạn kho</span>
+                ) : null}
+              </div>
+              <div className="tooltip-metrics">
+                <span>Nhu cầu P50: <strong>{quantity(hoveredCell.p50, hoveredCell.unit)}</strong></span>
+                <small>Khoảng P25–P75: {quantity(hoveredCell.p25, hoveredCell.unit)} – {quantity(hoveredCell.p75, hoveredCell.unit)}</small>
+                <small>Đến từ {hoveredCell.contributionsCount} món</small>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * SECTION ③: CHI TIẾT ĐANG CHỌN
+ * Merges Demand Facts + Inventory Risk Facts + Demand Sources into one clean section.
+ */
+function SelectedIngredientDetail({
+  selectedDate,
+  selectedIngredientId,
+  demand,
+  risks,
+  onExplain,
+  onOpenForecastDrilldown,
+}: {
+  selectedDate: string;
+  selectedIngredientId: string;
+  demand: DecisionDemandView[];
+  risks: DecisionRiskView[];
+  onExplain: (row: DecisionDemandView) => void;
+  onOpenForecastDrilldown: (row: DecisionDemandView) => void;
+}) {
+  const demandRow = demand.find(
+    (d) => d.ingredientId === selectedIngredientId && d.targetDate === selectedDate
+  );
+  const risk = risks.find((r) => r.ingredientId === selectedIngredientId);
+  const ingredientName = demandRow?.ingredientName || risk?.ingredientName || "Nguyên liệu";
+  const unit = demandRow?.unit || risk?.unit || "";
+
+  // Derive heat level
+  const avgDaily = useMemo(() => {
+    const matching = demand.filter((d) => d.ingredientId === selectedIngredientId);
+    if (!matching.length) return 0;
+    const sum = matching.reduce((s, m) => s + (m.p50 ?? 0), 0);
+    return sum / matching.length;
+  }, [demand, selectedIngredientId]);
+
+  const heat = useMemo(() => {
+    return deriveIngredientHeatLevel(selectedIngredientId, selectedDate, demandRow, risk, avgDaily);
+  }, [selectedIngredientId, selectedDate, demandRow, risk, avgDaily]);
+
+  const contributions = demandRow?.contributions ?? [];
+
+  if (!demandRow && !risk) {
+    return (
+      <section className="selected-detail-section" aria-labelledby="selected-detail-title">
+        <div className="selected-detail-header">
+          <div>
+            <span className="eyebrow">Chi tiết đang chọn</span>
+            <h2 id="selected-detail-title">Chi tiết nguyên liệu</h2>
+          </div>
+        </div>
+        <p className="quiet-copy">Chưa chọn nguyên liệu hoặc ngày trong kỳ kế hoạch.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="selected-detail-section" aria-labelledby="selected-detail-title">
+      <div className="selected-detail-header">
+        <div className="selected-detail-title-group">
+          <span className="eyebrow">Chi tiết đang chọn</span>
+          <h2 id="selected-detail-title">{ingredientName}</h2>
+          <span className="selected-detail-date">{formatDate(selectedDate)}</span>
+        </div>
+        <span className={`detail-severity-badge level-${heat.level}`}>
+          {heat.level === 3
+            ? "Cảnh báo cao"
+            : heat.level === 2
+              ? "Nguy cơ thiếu"
+              : heat.level === 1
+                ? "Cần theo dõi"
+                : "Ổn định"}
+        </span>
+      </div>
+
+      <div className="selected-detail-zones">
+        {/* ZONE 1: NHU CẦU */}
+        <div className="detail-zone">
+          <span className="zone-label">Nhu cầu</span>
+          <div className="zone-metric-highlight">
+            <strong>{quantity(demandRow?.p50, unit)}</strong>
+            <small>P50 dự kiến</small>
+          </div>
+          <p className="zone-subtext">
+            Khoảng P25–P75: <strong>{quantity(demandRow?.p25, unit)} – {quantity(demandRow?.p75, unit)}</strong>
+          </p>
+        </div>
+
+        <div className="zone-divider" />
+
+        {/* ZONE 2: RỦI RO TỒN KHO */}
+        <div className="detail-zone">
+          <span className="zone-label">Rủi ro tồn kho</span>
+          <div className="zone-grid-facts">
+            <div className="fact-item">
+              <span className="fact-title">Tồn đầu kỳ</span>
+              <strong>{risk ? quantity(risk.beginningInventory, unit) : "—"}</strong>
+            </div>
+            <div className="fact-item">
+              <span className="fact-title">Mức đáp ứng</span>
+              <strong>{risk ? percentage(risk.fillRate) : "100%"}</strong>
+            </div>
+            <div className="fact-item">
+              <span className="fact-title">Có thể thiếu từ</span>
+              <strong className={risk?.stockoutDate ? "text-danger" : ""}>
+                {risk?.stockoutDate ? formatDate(risk.stockoutDate) : "Không dự báo thiếu"}
+              </strong>
+            </div>
+            <div className="fact-item">
+              <span className="fact-title">Thiếu dự kiến</span>
+              <strong className={risk?.shortageQuantity ? "text-danger" : ""}>
+                {risk?.shortageQuantity != null && risk.shortageQuantity > 0
+                  ? quantity(risk.shortageQuantity, unit)
+                  : "0"}
+              </strong>
+            </div>
+          </div>
+        </div>
+
+        <div className="zone-divider" />
+
+        {/* ZONE 3: NGUỒN NHU CẦU */}
+        <div className="detail-zone">
+          <span className="zone-label">Nguồn nhu cầu</span>
+          <div className="zone-sources-summary">
+            <strong>Đến từ {contributions.length} món</strong>
+            {contributions.length > 0 ? (
+              <div className="source-dish-chips">
+                {contributions.map((c) => {
+                  const pName = c.productName || c.productId || "Món";
+                  const pQty = c.p50 ?? c.recipeQuantity;
+                  const pUnit = c.unit || unit;
+                  return (
+                    <span key={c.productId || c.productName} className="source-dish-chip">
+                      {pName} {pQty != null ? `(${quantity(pQty, pUnit)})` : ""}
+                    </span>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+          <div className="zone-actions">
+            {demandRow ? (
+              <Button
+                onClick={() => onExplain(demandRow)}
+                variant="secondary"
+                className="zone-btn"
+              >
+                Giải thích nhu cầu →
+              </Button>
+            ) : null}
+            {demandRow && contributions.length > 0 ? (
+              <Button
+                onClick={() => onOpenForecastDrilldown(demandRow)}
+                variant="secondary"
+                className="zone-btn"
+              >
+                Xem nguồn nhu cầu (Dự báo bán hàng) →
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Drilldown modal showing product sales forecast and contribution to ingredient demand.
+ */
+function ProductForecastDrilldownModal({
+  onClose,
+  row,
+  productForecasts,
+  cutoffDate,
+  horizonDays,
+}: {
+  onClose: () => void;
+  row: DecisionDemandView;
+  productForecasts: ForecastResult[];
+  cutoffDate?: string | null;
+  horizonDays?: number | null;
+}) {
+  const [selectedProductId, setSelectedProductId] = useState<string>(
+    row.contributions[0]?.productId || ""
+  );
+
+  const activeContribution =
+    row.contributions.find((c) => c.productId === selectedProductId) || row.contributions[0];
+  const activeForecast = productForecasts.find(
+    (pf) =>
+      (activeContribution?.productId && pf.productId === activeContribution.productId) ||
+      (activeContribution?.productName && pf.product === activeContribution.productName)
+  );
+
+  return (
+    <div className="drawer-overlay" onClick={onClose} role="presentation">
+      <div
+        aria-labelledby="forecast-drilldown-title"
+        aria-modal="true"
+        className="explanation-drawer forecast-drilldown-modal"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="drawer-header">
+          <div>
+            <span className="eyebrow">Dự báo bán hàng theo sản phẩm</span>
+            <h2 id="forecast-drilldown-title">
+              Nguồn nhu cầu: {row.ingredientName}
+            </h2>
+            <p className="drawer-context-date">
+              Ngày {formatDate(row.targetDate)} · Đến từ {row.contributions.length} sản phẩm
+            </p>
+          </div>
+          <button aria-label="Đóng" className="drawer-close-btn" onClick={onClose} type="button">
+            ✕
+          </button>
+        </div>
+
+        <div className="forecast-drilldown-body">
+          {row.contributions.length > 1 ? (
+            <div className="drilldown-product-tabs" role="tablist">
+              {row.contributions.map((c) => {
+                const pId = c.productId || c.productName;
+                const activeId = activeContribution?.productId || activeContribution?.productName;
+                return (
+                  <button
+                    key={pId}
+                    type="button"
+                    role="tab"
+                    className={`drilldown-tab ${activeId === pId ? "active" : ""}`}
+                    onClick={() => setSelectedProductId(c.productId || "")}
+                  >
+                    {c.productName || "Sản phẩm"}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {activeContribution ? (
+            <div className="drilldown-active-product">
+              <div className="drilldown-product-stats">
+                <div className="stat-box">
+                  <span>Sản phẩm</span>
+                  <strong>{activeContribution.productName || "Sản phẩm"}</strong>
+                </div>
+                <div className="stat-box">
+                  <span>Dự báo bán P50</span>
+                  <strong>
+                    {formatQuantity(activeContribution.forecastP50, "phần")}
+                  </strong>
+                </div>
+                <div className="stat-box">
+                  <span>Tiêu hao ({row.ingredientName})</span>
+                  <strong>
+                    {formatQuantity(
+                      activeContribution.p50 ?? activeContribution.recipeQuantity,
+                      activeContribution.unit || row.unit
+                    )}
+                  </strong>
+                </div>
+              </div>
+
+              {activeForecast ? (
+                <div className="drilldown-chart-wrap">
+                  <span className="eyebrow">Biểu đồ dự báo sản phẩm</span>
+                  <h4>Xu hướng bán 7 ngày: {activeForecast.product}</h4>
+                  <ForecastChart
+                    cutoffDate={cutoffDate}
+                    forecast={activeForecast}
+                    horizonDays={horizonDays}
+                  />
+                </div>
+              ) : (
+                <Notice tone="info">Không có chuỗi dữ liệu biểu đồ cho sản phẩm này.</Notice>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * SECTION ④: KẾ HOẠCH NHẬP HÀNG
+ * Compact action summary at the bottom of the funnel.
+ */
+function ProcurementSummary({
+  decision,
+  noFeasible,
+  feasibleItems,
+  candidateStrategies,
+  onNavigate,
+}: {
+  decision: DecisionPackage | null;
+  noFeasible: boolean;
+  feasibleItems: Array<{
+    ingredient_name?: string;
+    ingredient?: string;
+    order_quantity?: number;
+    quantity?: number;
+    unit?: string;
+    estimated_cost?: number | null;
+  }>;
+  candidateStrategies: DecisionStrategyView[];
+  onNavigate?: (target: "inventory" | "plan") => void;
+}) {
+  const strategyLabels: Record<string, string> = {
+    balanced: "Cân bằng",
+    safe: "An toàn",
+    economy: "Tiết kiệm",
+  };
+
+  const totalCost = feasibleItems.reduce((s, it) => s + (it.estimated_cost ?? 0), 0);
+  const strategyKey = decision?.recommended_strategy || "balanced";
+  const strategyName = strategyLabels[strategyKey] || strategyKey;
+
+  return (
+    <section className="procurement-summary-section" aria-labelledby="procurement-summary-title">
+      <div className="procurement-summary-header">
+        <div className="procurement-title-group">
+          <span className="eyebrow">Hành động mua hàng</span>
+          <h2 id="procurement-summary-title">Kế hoạch nhập hàng</h2>
+        </div>
+      </div>
+
+      {noFeasible ? (
+        <div className="procurement-summary-banner is-warning">
+          <div className="banner-left">
+            <div className="banner-badge-row">
+              <span className="procurement-state-badge is-warning">
+                Chưa tìm được phương án nhập thỏa toàn bộ ràng buộc
+              </span>
+              {candidateStrategies.length > 0 ? (
+                <span className="candidate-count-tag">
+                  {candidateStrategies.length} phương án mô phỏng
+                </span>
+              ) : null}
+            </div>
+            <p className="banner-desc">
+              Dự báo và nhu cầu nguyên liệu đã được tính. Tuy nhiên, hệ thống chưa thể tạo kế hoạch mua hàng đáp ứng toàn bộ điều kiện hiện tại.
+            </p>
+          </div>
+          <div className="banner-action">
+            <Button onClick={() => (onNavigate ? onNavigate("plan") : undefined)} variant="secondary">
+              Xem ràng buộc & kịch bản →
+            </Button>
+          </div>
+        </div>
+      ) : feasibleItems.length > 0 ? (
+        <div className="procurement-summary-banner is-success">
+          <div className="banner-left">
+            <div className="banner-badge-row">
+              <span className="procurement-state-badge is-success">Chiến lược: {strategyName}</span>
+              <span className="procurement-ready-tag">Đã có phương án nhập khả thi</span>
+            </div>
+            <div className="banner-metrics">
+              <strong>{feasibleItems.length} nguyên liệu</strong> ·{" "}
+              <strong>{formatVnd(totalCost)}</strong> ·{" "}
+              <span>{feasibleItems.length} dòng mua</span>
+            </div>
+          </div>
+          <div className="banner-action">
+            <Button onClick={() => (onNavigate ? onNavigate("plan") : undefined)} variant="primary">
+              Xem kế hoạch nhập →
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="procurement-summary-banner is-neutral">
+          <div className="banner-left">
+            <span className="procurement-state-badge is-neutral">Chưa có kế hoạch</span>
+            <p className="banner-desc">Chưa có đơn nhập được đề xuất trong kỳ kế hoạch.</p>
+          </div>
+          <div className="banner-action">
+            <Button onClick={() => (onNavigate ? onNavigate("plan") : undefined)} variant="secondary">
+              Tạo kế hoạch →
+            </Button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function FuturePlanningView({
   data,
   plan,
   decision,
   initialIngredient,
+  onNavigate,
 }: {
   data: BootstrapData;
   plan: PlanResponse;
   decision: DecisionPackage | null;
   initialIngredient?: string;
+  onNavigate?: (target: "inventory" | "plan") => void;
 }) {
   const view = useMemo(() => adaptDecisionRunView(decision, data), [data, decision]);
-  const ingredientOptions = Array.from(
-    new Map(view.demand.map((item) => [item.ingredientId, item.ingredientName])).entries()
-  );
   const [ingredientId, setIngredientId] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
   const [explaining, setExplaining] = useState<DecisionDemandView | null>(null);
+  const [drilldownRow, setDrilldownRow] = useState<DecisionDemandView | null>(null);
 
-  // Adapt product forecasts from either legacy plan.forecasts or decision view.productForecasts
+  // Adapt product forecasts from either legacy plan.forecasts or decision view.productForecasts for drilldown
   const productForecastResults = useMemo(() => {
     const fromPlan = Object.values(plan.forecasts).filter((forecast) => forecast.forecast.length > 0);
     if (fromPlan.length > 0) return fromPlan;
@@ -519,20 +1333,27 @@ function FuturePlanningView({
     }));
   }, [plan.forecasts, view.productForecasts]);
 
-  const [forecastKey, setForecastKey] = useState("");
-  const selectedForecast =
-    productForecastResults.find((item) => (item.productId || item.product) === forecastKey) ??
-    productForecastResults[0];
-
-  const selectedIngredientId = ingredientOptions.some(([id]) => id === ingredientId)
-    ? ingredientId
-    : ingredientOptions.some(([id]) => id === initialIngredient)
-      ? initialIngredient ?? ""
-      : ingredientOptions[0]?.[0] || "";
-  const selectedDemand = view.demand.filter((item) => item.ingredientId === selectedIngredientId);
   const activeDate = view.dates.includes(selectedDate) ? selectedDate : view.dates[0] || "";
-  const dateRows = view.demand.filter((item) => item.targetDate === activeDate);
-  const riskIds = new Set(view.risks.map((risk) => risk.ingredientId));
+
+  // Prioritize ingredient with highest risk or initialIngredient
+  const activeIngredientId = useMemo(() => {
+    if (ingredientId && view.demand.some((d) => d.ingredientId === ingredientId)) {
+      return ingredientId;
+    }
+    if (initialIngredient && view.demand.some((d) => d.ingredientId === initialIngredient)) {
+      return initialIngredient;
+    }
+    // Find highest risk ingredient for activeDate
+    const dateDemand = view.demand.filter((d) => d.targetDate === activeDate);
+    const riskMap = new Map(view.risks.map((r) => [r.ingredientId, r]));
+    const sorted = [...dateDemand].sort((a, b) => {
+      const riskA = riskMap.has(a.ingredientId) ? 2 : 0;
+      const riskB = riskMap.has(b.ingredientId) ? 2 : 0;
+      return riskB - riskA;
+    });
+    return sorted[0]?.ingredientId || view.demand[0]?.ingredientId || "";
+  }, [ingredientId, initialIngredient, view.demand, activeDate, view.risks]);
+
   const noFeasible = noFeasibleDecision(decision);
   const candidateStrategies = view.strategies.filter(
     (strategy) => strategy.itemCount > 0 && strategy.feasible === false
@@ -552,227 +1373,51 @@ function FuturePlanningView({
         <h2>Kế hoạch 7 ngày tới{planningPeriod ? ` · ${planningPeriod}` : ""}</h2>
       </section>
 
-      {/* ── 1. Charts Grid (Product Forecast & Ingredient Demand) ── */}
-      <div className="decision-chart-grid">
-        <section className="decision-chart-panel">
-          <div className="decision-chart-heading">
-            <div>
-              <span className="eyebrow">Dự báo sản phẩm</span>
-              <h3>
-                Dự báo bán hàng{" "}
-                <GuidanceHint
-                  content="Biểu đồ thể hiện số món hoặc ly dự kiến bán ra, không phải số lượng nguyên liệu cần nhập."
-                  label="Phạm vi dữ liệu dự báo"
-                />
-              </h3>
-            </div>
-            {productForecastResults.length ? (
-              <label className="decision-selector">
-                <span className="sr-only">Chọn sản phẩm</span>
-                <select
-                  onChange={(event) => setForecastKey(event.target.value)}
-                  value={selectedForecast?.productId || selectedForecast?.product || ""}
-                >
-                  {productForecastResults.map((forecast) => (
-                    <option
-                      key={forecast.productId || forecast.product}
-                      value={forecast.productId || forecast.product}
-                    >
-                      {forecast.product || "Sản phẩm chưa xác định"}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-          </div>
-          {selectedForecast ? (
-            <ForecastChart
-              cutoffDate={decision?.as_of_date}
-              forecast={selectedForecast}
-              horizonDays={decision?.horizon_days}
-            />
-          ) : (
-            <Notice tone="info">Chưa có chuỗi dự báo sản phẩm trong kết quả hiện tại.</Notice>
-          )}
-        </section>
-
-        {selectedDemand.length ? (
-          <section className="decision-chart-panel">
-            <div className="decision-chart-heading decision-chart-selector-heading">
-              <div>
-                <span className="eyebrow">Nhu cầu nguyên liệu</span>
-                <h3>Nhu cầu theo nguyên liệu</h3>
-              </div>
-              <label className="decision-selector">
-                <span className="sr-only">Chọn nguyên liệu</span>
-                <select
-                  onChange={(event) => setIngredientId(event.target.value)}
-                  value={selectedIngredientId}
-                >
-                  {ingredientOptions.map(([id, name]) => (
-                    <option key={id} value={id}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <DemandChart
-              ingredientName={selectedDemand[0]?.ingredientName || "Nguyên liệu"}
-              rows={selectedDemand}
-              unit={selectedDemand[0]?.unit || ""}
-            />
-          </section>
-        ) : null}
-      </div>
-
-      {/* ── 2. Daily Ingredient Demand Breakdowns ── */}
+      {/* ── SECTION ①: TỔNG QUAN & SECTION ②: HEATMAP RỦI RO (HERO VISUALIZATION) ── */}
       <section className="decision-demand-section" aria-labelledby="decision-demand-title">
         <div className="decision-section-heading">
           <div>
-            <span className="eyebrow">Nhu cầu nguyên liệu</span>
-            <h2 id="decision-demand-title">Nhu cầu nguyên liệu dự kiến</h2>
+            <span className="eyebrow">Nhu cầu nguyên liệu dự kiến</span>
+            <h2 id="decision-demand-title">Heatmap rủi ro</h2>
           </div>
           {activeDate ? <span className="decision-active-date-badge">{formatDate(activeDate)}</span> : null}
         </div>
 
-        {view.dates.length ? (
-          <div aria-label="Chọn ngày nhu cầu" className="procurement-date-tabs" role="tablist">
-            {view.dates.map((date) => (
-              <button
-                aria-selected={activeDate === date}
-                className={activeDate === date ? "active" : ""}
-                key={date}
-                onClick={() => setSelectedDate(date)}
-                role="tab"
-                type="button"
-              >
-                {formatDate(date)}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
-        {dateRows.length ? (
-          <DemandRows onExplain={setExplaining} riskIds={riskIds} rows={dateRows} />
+        {view.demand.length ? (
+          <DemandRiskHeatmap
+            dates={view.dates}
+            demand={view.demand}
+            risks={view.risks}
+            selectedDate={activeDate}
+            selectedIngredientId={activeIngredientId}
+            onSelectDate={(date) => setSelectedDate(date)}
+            onSelectIngredient={(id) => setIngredientId(id)}
+          />
         ) : (
           <Notice tone="info">Chưa có nhu cầu nguyên liệu trong kết quả hiện tại.</Notice>
         )}
       </section>
 
-      {/* ── 3. Inventory Risk Section ── */}
-      {view.risks.length ? (
-        <section className="decision-risk-section" aria-labelledby="decision-risk-title">
-          <SectionHeading title="Rủi ro tồn kho" />
-          <div className="decision-risk-list">
-            {view.risks.map((risk) => (
-              <article key={risk.ingredientId}>
-                <h3>{risk.ingredientName}</h3>
-                <p>
-                  {risk.stockoutDate
-                    ? `Có thể thiếu từ ${formatDate(risk.stockoutDate)}`
-                    : "Có tín hiệu rủi ro tồn kho"}
-                </p>
-                <dl>
-                  <div>
-                    <dt>Thiếu dự kiến</dt>
-                    <dd>{quantity(risk.shortageQuantity, risk.unit)}</dd>
-                  </div>
-                  <div>
-                    <dt>Tồn đầu kỳ</dt>
-                    <dd>{quantity(risk.beginningInventory, risk.unit)}</dd>
-                  </div>
-                  <div>
-                    <dt>Mức đáp ứng</dt>
-                    <dd>{percentage(risk.fillRate)}</dd>
-                  </div>
-                </dl>
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : null}
+      {/* ── SECTION ③: CHI TIẾT ĐANG CHỌN (MERGES DEMAND + INVENTORY RISK + SOURCES) ── */}
+      <SelectedIngredientDetail
+        demand={view.demand}
+        onExplain={(row) => setExplaining(row)}
+        onOpenForecastDrilldown={(row) => setDrilldownRow(row)}
+        risks={view.risks}
+        selectedDate={activeDate}
+        selectedIngredientId={activeIngredientId}
+      />
 
-      {/* ── 4. Procurement Recommendation Section ── */}
-      <section className="decision-procurement" aria-labelledby="decision-procurement-title">
-        <SectionHeading title="Kế hoạch nhập hàng" />
-        {noFeasible ? (
-          <>
-            <Notice tone="warning">
-              <strong>Chưa tìm được phương án nhập thỏa toàn bộ ràng buộc</strong>
-              <br />
-              Dự báo và nhu cầu nguyên liệu đã được tính. Tuy nhiên, hệ thống chưa thể tạo kế hoạch mua hàng đáp ứng toàn bộ điều kiện hiện tại.
-            </Notice>
-            {view.blockers.length ? (
-              <ul className="warning-list">
-                {view.blockers.map((blocker, index) => (
-                  <li key={`${blocker.title}-${index}`}>
-                    <strong>{blocker.title}</strong>
-                    {blocker.observed != null
-                      ? ` Mức đáp ứng thấp nhất: ${percentage(blocker.observed)}.`
-                      : ""}
-                    {blocker.required != null
-                      ? ` Yêu cầu tối thiểu: ${percentage(blocker.required)}.`
-                      : ""}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="quiet-copy">Chưa có lý do chi tiết cho kết quả này.</p>
-            )}
-            {candidateStrategies.length ? (
-              <div className="decision-candidate-list">
-                {candidateStrategies.map((strategy) => (
-                  <article key={strategy.key}>
-                    <span className="eyebrow">{strategy.label}</span>
-                    <h3>Phương án mô phỏng tham khảo</h3>
-                    <p>Chưa đủ điều kiện để tạo đơn nhập · {strategy.itemCount} dòng mua mô phỏng.</p>
-                    {strategy.observedFillRate != null ? (
-                      <small>
-                        Mức đáp ứng thấp nhất {percentage(strategy.observedFillRate)}
-                        {strategy.requiredFillRate != null
-                          ? ` · yêu cầu ${percentage(strategy.requiredFillRate)}`
-                          : ""}
-                      </small>
-                    ) : null}
-                  </article>
-                ))}
-              </div>
-            ) : null}
-          </>
-        ) : feasibleItems.length ? (
-          <>
-            <Notice tone="success">Đã có phương án nhập khả thi. Kiểm tra chi tiết trước khi tạo đơn.</Notice>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Nguyên liệu</th>
-                    <th>Số lượng</th>
-                    <th>Đặt hàng</th>
-                    <th>Dự kiến giao</th>
-                    <th>Chi phí</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {feasibleItems.map((item, index) => (
-                    <tr key={`${item.ingredient_id ?? item.ingredient_name}-${index}`}>
-                      <td>{item.ingredient_name || item.ingredient || "Nguyên liệu chưa xác định"}</td>
-                      <td>{quantity(item.order_quantity ?? item.quantity, item.unit)}</td>
-                      <td>{item.order_date ? formatDate(item.order_date) : "—"}</td>
-                      <td>{item.expected_arrival_date ? formatDate(item.expected_arrival_date) : "—"}</td>
-                      <td>{item.estimated_cost == null ? "—" : formatVnd(item.estimated_cost)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : (
-          <Notice tone="info">Chưa có kế hoạch nhập để hiển thị.</Notice>
-        )}
-      </section>
+      {/* ── SECTION ④: KẾ HOẠCH NHẬP HÀNG (COMPACT ACTION SUMMARY) ── */}
+      <ProcurementSummary
+        candidateStrategies={candidateStrategies}
+        decision={decision}
+        feasibleItems={feasibleItems}
+        noFeasible={noFeasible}
+        onNavigate={onNavigate}
+      />
 
+      {/* ── SECTION ⓘ: LƯU Ý CHẤT LƯỢNG DỮ LIỆU (COLLAPSED DISCLOSURE) ── */}
       {view.warnings.length ? (
         <Details summary="Lưu ý về chất lượng dữ liệu và kết quả">
           <ul className="warning-list">
@@ -783,7 +1428,17 @@ function FuturePlanningView({
         </Details>
       ) : null}
 
+      {/* Dialogs */}
       {explaining ? <DemandExplanationDialog onClose={() => setExplaining(null)} row={explaining} /> : null}
+      {drilldownRow ? (
+        <ProductForecastDrilldownModal
+          cutoffDate={decision?.as_of_date}
+          horizonDays={decision?.horizon_days}
+          onClose={() => setDrilldownRow(null)}
+          productForecasts={productForecastResults}
+          row={drilldownRow}
+        />
+      ) : null}
     </div>
   );
 }
@@ -851,6 +1506,7 @@ export function DecisionCenterWorkspace({
           data={data}
           decision={decision}
           initialIngredient={initialIngredient}
+          onNavigate={(target) => onNavigate(target)}
           plan={plan}
         />
       )}
