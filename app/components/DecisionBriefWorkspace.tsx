@@ -37,7 +37,10 @@ import {
   YAxis,
 } from "recharts";
 import { addDaysToDateOnly } from "../../lib/api-contract";
+import { adaptDecisionRunView } from "../../lib/decision-view";
+import { extractProcurementRows, projectIngredientDailyRisks } from "../../lib/risk-engine";
 import type {
+  BootstrapData,
   DecisionBriefFacts,
   DecisionExplanationResponse,
   DecisionPackage,
@@ -216,7 +219,7 @@ function normalizeProcurementTimelineData(
     }
 
     const [year, month, day] = dateStr.split("-");
-    const d = `${month}/${day}`;
+    const d = `${day}/${month}`;
     const fullDate = `${day}/${month}/${year}`;
 
     const dateObj = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
@@ -231,7 +234,11 @@ function normalizeProcurementTimelineData(
     const isArrival = Boolean(
       procurement &&
         arrivalDateKey &&
-        (arrivalDateKey === dateStr || arrivalDateKey.endsWith(d.replace("/", "-")))
+        (arrivalDateKey === dateStr ||
+          arrivalDateKey.endsWith(dateStr) ||
+          arrivalDateKey.endsWith(`${year}-${month}-${day}`) ||
+          arrivalDateKey.endsWith(`${day}-${month}`) ||
+          arrivalDateKey.endsWith(`${month}-${day}`))
     );
     const arrivalQty = isArrival && procurement ? procurement.quantity : 0;
     const dayBeginningInv = currentInv;
@@ -306,8 +313,8 @@ function ProcurementInventoryChart({
       </div>
 
       <div className="pane-chart-body">
-        <ResponsiveContainer width="100%" height={145}>
-          <ComposedChart syncId={syncId} data={data} margin={{ top: 12, right: 16, left: -6, bottom: 2 }}>
+        <ResponsiveContainer width="100%" height={155}>
+          <ComposedChart syncId={syncId} data={data} margin={{ top: 24, right: 20, left: -6, bottom: 2 }}>
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#0284c7" stopOpacity={0.22} />
@@ -332,8 +339,8 @@ function ProcurementInventoryChart({
                 return (
                   <div className="cockpit-chart-tooltip synced-inventory-tooltip">
                     <div className="tooltip-title">
-                      <span>Tồn kho ngày {label}</span>
-                      <small>{p.fullDate}</small>
+                      <span>Tồn kho ngày {p.date ?? label}</span>
+                      <span className="tooltip-fulldate">{p.fullDate}</span>
                     </div>
                     <div className="tooltip-row">
                       <span>Tồn đầu ngày:</span>
@@ -398,12 +405,44 @@ function ProcurementInventoryChart({
                 stroke="#059669"
                 strokeDasharray="3 3"
                 strokeWidth={1.5}
-                label={{
-                  value: `📦 Hàng về (+${formatQuantity(arrivalPoint.arrivalQty)}${unit})`,
-                  position: "top",
-                  fill: "#059669",
-                  fontSize: 10,
-                  fontWeight: 700,
+                label={(props: any) => {
+                  const { viewBox } = props;
+                  if (!viewBox) return null;
+                  const labelText = `📦 Hàng về (+${formatQuantity(arrivalPoint.arrivalQty)}${unit})`;
+                  const width = Math.max(96, labelText.length * 6.5 + 18);
+                  const arrivalIndex = data.findIndex((d) => d.date === arrivalPoint.date);
+                  const isRightEdge = arrivalIndex >= data.length - 2;
+                  const isLeftEdge = arrivalIndex <= 0;
+                  const x = isRightEdge
+                    ? Math.max(4, viewBox.x - width - 4)
+                    : isLeftEdge
+                      ? viewBox.x + 4
+                      : Math.max(4, viewBox.x - width / 2);
+                  const y = 3;
+                  return (
+                    <g className="arrival-marker-pill">
+                      <rect
+                        x={x}
+                        y={y}
+                        width={width}
+                        height={18}
+                        rx={4}
+                        fill="#ecfdf5"
+                        stroke="#10b981"
+                        strokeWidth={1}
+                      />
+                      <text
+                        x={x + width / 2}
+                        y={y + 12.5}
+                        textAnchor="middle"
+                        fill="#047857"
+                        fontSize={10}
+                        fontWeight={700}
+                      >
+                        {labelText}
+                      </text>
+                    </g>
+                  );
                 }}
               />
             ) : null}
@@ -414,12 +453,45 @@ function ProcurementInventoryChart({
                 stroke="#dc2626"
                 strokeDasharray="2 2"
                 strokeWidth={1.5}
-                label={{
-                  value: dangerPoint.isStockout ? "🚫 Cạn kho" : "⚠️ Nguy cơ cạn",
-                  position: "insideBottomLeft",
-                  fill: "#dc2626",
-                  fontSize: 10,
-                  fontWeight: 700,
+                label={(props: any) => {
+                  const { viewBox } = props;
+                  if (!viewBox) return null;
+                  const labelText = dangerPoint.isStockout ? "🚫 Cạn kho" : "⚠️ Nguy cơ cạn";
+                  const width = Math.max(82, labelText.length * 6.8 + 16);
+                  const dangerIndex = data.findIndex((d) => d.date === dangerPoint.date);
+                  const isRightEdge = dangerIndex >= data.length - 2;
+                  const isLeftEdge = dangerIndex <= 0;
+                  const x = isRightEdge
+                    ? Math.max(4, viewBox.x - width - 4)
+                    : isLeftEdge
+                      ? viewBox.x + 4
+                      : Math.max(4, viewBox.x - width / 2);
+                  const isSameDateAsArrival = arrivalPoint && arrivalPoint.date === dangerPoint.date;
+                  const y = isSameDateAsArrival ? 23 : 3;
+                  return (
+                    <g className="danger-marker-pill">
+                      <rect
+                        x={x}
+                        y={y}
+                        width={width}
+                        height={18}
+                        rx={4}
+                        fill="#fef2f2"
+                        stroke="#f87171"
+                        strokeWidth={1}
+                      />
+                      <text
+                        x={x + width / 2}
+                        y={y + 12.5}
+                        textAnchor="middle"
+                        fill="#b91c1c"
+                        fontSize={10}
+                        fontWeight={700}
+                      >
+                        {labelText}
+                      </text>
+                    </g>
+                  );
                 }}
               />
             ) : null}
@@ -464,7 +536,7 @@ function ProcurementDemandChart({
 
       <div className="pane-chart-body">
         <ResponsiveContainer width="100%" height={140}>
-          <ComposedChart syncId={syncId} data={data} margin={{ top: 8, right: 16, left: -6, bottom: 4 }}>
+          <ComposedChart syncId={syncId} data={data} margin={{ top: 8, right: 20, left: -6, bottom: 4 }}>
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#147a62" stopOpacity={0.25} />
@@ -495,8 +567,8 @@ function ProcurementDemandChart({
                 return (
                   <div className="cockpit-chart-tooltip synced-demand-tooltip">
                     <div className="tooltip-title">
-                      <span>Nhu cầu ngày {label}</span>
-                      <small>{p.fullDate}</small>
+                      <span>Nhu cầu ngày {p.date ?? label}</span>
+                      <span className="tooltip-fulldate">{p.fullDate}</span>
                     </div>
                     <div className="tooltip-row">
                       <span className="tooltip-dot p50-dot" />
@@ -567,10 +639,16 @@ function IngredientDecisionChart({
   item,
   startDate,
   horizonDays = 7,
+  decision,
+  data: bootstrapData,
+  briefProcurementRows,
 }: {
   item: IngredientItemData;
   startDate: string;
   horizonDays?: number;
+  decision?: DecisionPackage | null;
+  data?: BootstrapData;
+  briefProcurementRows?: ProcurementRow[];
 }) {
   const chartId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const syncId = `procurement-timeline-${chartId}`;
@@ -578,18 +656,65 @@ function IngredientDecisionChart({
   const demandGradientId = `demand-band-gradient-${chartId}`;
   const unit = item.demand.unit ? ` ${item.demand.unit}` : "";
 
-  const data = useMemo(
-    () =>
-      normalizeProcurementTimelineData(
-        item.demand,
-        item.procurement,
-        startDate,
-        horizonDays,
-        item.currentStock
-      ),
-    [item, startDate, horizonDays]
-  );
+  const data = useMemo(() => {
+    if (decision) {
+      const view = adaptDecisionRunView(decision, bootstrapData ?? ({} as any));
+      const matchingDemand = view.demand.filter(
+        (d) => d.ingredientId === item.demand.ingredient_id
+      );
+      if (matchingDemand.length > 0 && view.dates.length > 0) {
+        const risk = view.risks.find((r) => r.ingredientId === item.demand.ingredient_id);
+        const procurementRows = extractProcurementRows(decision, briefProcurementRows);
+        const projection = projectIngredientDailyRisks(
+          item.demand.ingredient_id,
+          item.demand.ingredient_name ?? "Nguyên liệu",
+          item.demand.unit ?? "",
+          view.dates,
+          view.demand,
+          risk,
+          bootstrapData,
+          procurementRows
+        );
 
+        return projection.dailyRisks.map((dr) => {
+          const [year, month, day] = dr.targetDate.split("-");
+          return {
+            date: `${day}/${month}`,
+            fullDate: `${day}/${month}/${year}`,
+            isoDate: dr.targetDate,
+            p50: dr.demandP50 ?? 0,
+            bandLow: dr.demandP25 ?? (dr.demandP50 ? dr.demandP50 * 0.8 : 0),
+            bandHigh: dr.demandP75 ?? (dr.demandP50 ? dr.demandP50 * 1.2 : 0),
+            dayBeginningInv: dr.openingStock ?? 0,
+            dayEndingInv: dr.closingStock ?? 0,
+            isArrival: dr.isArrival,
+            arrivalQty: dr.incomingQuantity,
+            isStockoutDanger: dr.severityLevel >= 2,
+            isStockout: dr.severityLevel === 3 || dr.hasStockout,
+            shortageQty: dr.shortageQuantity,
+            status:
+              dr.severityLevel === 3
+                ? "stockout"
+                : dr.severityLevel === 2
+                  ? "danger"
+                  : dr.severityLevel === 1
+                    ? "watch"
+                    : "safe",
+          };
+        });
+      }
+    }
+
+    return normalizeProcurementTimelineData(
+      item.demand,
+      item.procurement,
+      startDate,
+      horizonDays,
+      item.currentStock
+    );
+  }, [decision, bootstrapData, briefProcurementRows, item, startDate, horizonDays]);
+
+  const totalP50 = data.reduce((s, d) => s + (d.p50 ?? 0), 0) || (item.demand.p50 ?? 0);
   const arrivalPoint = data.find((d) => d.isArrival);
   const dangerPoint = data.find((d) => d.isStockoutDanger && !d.isArrival);
 
@@ -647,7 +772,7 @@ function IngredientDecisionChart({
         unit={unit}
         syncId={syncId}
         gradientId={demandGradientId}
-        totalP50={item.demand.p50 ?? 0}
+        totalP50={totalP50}
       />
     </div>
   );
@@ -2276,6 +2401,9 @@ export function DecisionBriefWorkspace({
                     item={selectedItem}
                     startDate={forecastDate}
                     horizonDays={horizonDays}
+                    decision={decision}
+                    data={data}
+                    briefProcurementRows={brief.procurement_rows}
                   />
                 </div>
 

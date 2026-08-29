@@ -2,7 +2,15 @@
 
 import { ArrowRight, CircleAlert, Clock3, PackageSearch, ScanSearch, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { adaptDecisionRunView, type DecisionDemandView } from "../../lib/decision-view";
+import { adaptDecisionRunView, type DecisionDemandView, type DecisionRiskView } from "../../lib/decision-view";
+import {
+  extractProcurementRows,
+  projectIngredientDailyRisks,
+  type DailyIngredientRiskState,
+  type HeatmapSeverityLevel,
+  type IngredientRiskProjection,
+  type RiskSeverity,
+} from "../../lib/risk-engine";
 import type { BootstrapData, DecisionPackage, PlanResponse } from "../../lib/types";
 import { DemandChart } from "./DemandChart";
 import { ForecastChart } from "./ForecastChart";
@@ -57,149 +65,6 @@ function parseDaysRemaining(expiryDate?: string, todayDate?: string): number | n
   return Math.round((target - base) / (1000 * 60 * 60 * 24));
 }
 
-export type HeatmapSeverityLevel = 0 | 1 | 2 | 3;
-
-export interface HeatmapCellData {
-  ingredientId: string;
-  ingredientName: string;
-  unit: string;
-  targetDate: string;
-  level: HeatmapSeverityLevel;
-  levelLabel: string;
-  p50: number | null;
-  p25: number | null;
-  p75: number | null;
-  contributionsCount: number;
-  hasStockout: boolean;
-  stockoutDate?: string | null;
-  shortageQuantity?: number | null;
-  demandRow?: DecisionDemandView | null;
-}
-
-export interface HeatmapRowData {
-  ingredientId: string;
-  ingredientName: string;
-  unit: string;
-  cells: Record<string, HeatmapCellData>;
-  totalSeverity: number;
-  maxSeverity: HeatmapSeverityLevel;
-  hasAlert: boolean;
-  stockoutDate?: string | null;
-}
-
-/**
- * Derive severity heat level for an ingredient on a specific date:
- * 3 = Cảnh báo cao (Stockout projected on/before this day, or fill rate < 80%)
- * 2 = Nguy cơ thiếu (Stockout projected within 1-2 days ahead, or shortage quantity > 0)
- * 1 = Cần theo dõi (Demand spike > 35% above average, or stockout in 3+ days)
- * 0 = Ổn định (Normal supply & expected demand)
- */
-function deriveIngredientHeatLevel(
-  ingredientId: string,
-  targetDate: string,
-  demandRow: DecisionDemandView | undefined,
-  risk: DecisionRiskView | undefined,
-  avgDailyDemand: number
-): {
-  level: HeatmapSeverityLevel;
-  levelLabel: string;
-  hasStockout: boolean;
-  stockoutDate?: string | null;
-  shortageQuantity?: number | null;
-} {
-  // 1. Level 3 (Cảnh báo cao): Stockout occurs on or before this day, or critical fill rate (<80%)
-  if (risk?.stockoutDate && targetDate >= risk.stockoutDate) {
-    return {
-      level: 3,
-      levelLabel: `Cảnh báo cao (Thiếu từ ${formatDate(risk.stockoutDate)})`,
-      hasStockout: true,
-      stockoutDate: risk.stockoutDate,
-      shortageQuantity: risk.shortageQuantity,
-    };
-  }
-  if (risk?.fillRate != null && risk.fillRate < 0.8) {
-    return {
-      level: 3,
-      levelLabel: "Cảnh báo cao",
-      hasStockout: true,
-      stockoutDate: risk.stockoutDate,
-      shortageQuantity: risk.shortageQuantity,
-    };
-  }
-
-  // 2. Projected stockout later in the 7-day horizon
-  if (risk?.stockoutDate) {
-    const daysUntilStockout = parseDaysRemaining(risk.stockoutDate, targetDate);
-    // Within 1-2 days before stockout: Level 2 (Nguy cơ thiếu)
-    if (daysUntilStockout != null && daysUntilStockout <= 2) {
-      return {
-        level: 2,
-        levelLabel: `Nguy cơ thiếu từ ${formatDate(risk.stockoutDate)}`,
-        hasStockout: false,
-        stockoutDate: risk.stockoutDate,
-        shortageQuantity: risk.shortageQuantity,
-      };
-    }
-    // 3+ days before stockout: Level 1 (Cần theo dõi - Đủ tồn tới stockoutDate)
-    return {
-      level: 1,
-      levelLabel: `Cần theo dõi (Đủ tồn tới ${formatDate(risk.stockoutDate)})`,
-      hasStockout: false,
-      stockoutDate: risk.stockoutDate,
-      shortageQuantity: risk.shortageQuantity,
-    };
-  }
-
-  // Shortage without specific date
-  if (risk?.shortageQuantity != null && risk.shortageQuantity > 0) {
-    return {
-      level: 2,
-      levelLabel: "Nguy cơ thiếu",
-      hasStockout: false,
-      stockoutDate: null,
-      shortageQuantity: risk.shortageQuantity,
-    };
-  }
-  if (risk?.fillRate != null && risk.fillRate < 0.95) {
-    return {
-      level: 2,
-      levelLabel: "Nguy cơ thiếu",
-      hasStockout: false,
-      stockoutDate: null,
-      shortageQuantity: risk.shortageQuantity,
-    };
-  }
-
-  // 3. Level 1: Demand spike or high variance
-  if (demandRow?.p50 != null && avgDailyDemand > 0 && demandRow.p50 > 1.35 * avgDailyDemand) {
-    return {
-      level: 1,
-      levelLabel: "Cần theo dõi (Tăng đột biến)",
-      hasStockout: false,
-    };
-  }
-  if (
-    demandRow?.p50 != null &&
-    demandRow.p75 != null &&
-    demandRow.p25 != null &&
-    demandRow.p50 > 0 &&
-    (demandRow.p75 - demandRow.p25) / demandRow.p50 > 0.5
-  ) {
-    return {
-      level: 1,
-      levelLabel: "Cần theo dõi (Dao động lớn)",
-      hasStockout: false,
-    };
-  }
-
-  // 4. Level 0: Safe & stable
-  return {
-    level: 0,
-    levelLabel: "Ổn định",
-    hasStockout: false,
-  };
-}
-
 function formatHeaderDay(dateStr: string): { dayOfWeek: string; dateFormatted: string } {
   try {
     const d = new Date(`${dateStr}T00:00:00Z`);
@@ -213,6 +78,23 @@ function formatHeaderDay(dateStr: string): { dayOfWeek: string; dateFormatted: s
   } catch {
     return { dayOfWeek: "", dateFormatted: dateStr };
   }
+}
+
+export type { HeatmapSeverityLevel };
+
+export interface HeatmapCellData extends DailyIngredientRiskState {
+  level: HeatmapSeverityLevel;
+}
+
+export interface HeatmapRowData {
+  ingredientId: string;
+  ingredientName: string;
+  unit: string;
+  cells: Record<string, HeatmapCellData>;
+  totalSeverity: number;
+  maxSeverity: HeatmapSeverityLevel;
+  hasAlert: boolean;
+  stockoutDate?: string | null;
 }
 
 
@@ -581,6 +463,8 @@ function DemandRiskHeatmap({
   dates,
   demand,
   risks,
+  data,
+  decision,
   selectedDate,
   selectedIngredientId,
   onSelectDate,
@@ -589,12 +473,20 @@ function DemandRiskHeatmap({
   dates: string[];
   demand: DecisionDemandView[];
   risks: DecisionRiskView[];
+  data?: BootstrapData;
+  decision?: DecisionPackage | null;
   selectedDate: string;
   selectedIngredientId: string;
   onSelectDate: (date: string) => void;
   onSelectIngredient: (ingredientId: string) => void;
 }) {
   const [hoveredCell, setHoveredCell] = useState<HeatmapCellData | null>(null);
+
+  // Extract incoming procurement rows
+  const procurementRows = useMemo(
+    () => extractProcurementRows(decision),
+    [decision]
+  );
 
   // Map risks by ingredientId
   const riskMap = useMemo(() => {
@@ -604,33 +496,6 @@ function DemandRiskHeatmap({
     }
     return map;
   }, [risks]);
-
-  // Compute average daily demand per ingredient
-  const avgDemandMap = useMemo(() => {
-    const sumMap = new Map<string, { total: number; count: number }>();
-    for (const d of demand) {
-      if (d.p50 != null) {
-        const cur = sumMap.get(d.ingredientId) ?? { total: 0, count: 0 };
-        cur.total += d.p50;
-        cur.count += 1;
-        sumMap.set(d.ingredientId, cur);
-      }
-    }
-    const avgMap = new Map<string, number>();
-    for (const [id, stats] of sumMap.entries()) {
-      avgMap.set(id, stats.count > 0 ? stats.total / stats.count : 0);
-    }
-    return avgMap;
-  }, [demand]);
-
-  // Map demand by ingredientId-targetDate
-  const demandMap = useMemo(() => {
-    const map = new Map<string, DecisionDemandView>();
-    for (const d of demand) {
-      map.set(`${d.ingredientId}-${d.targetDate}`, d);
-    }
-    return map;
-  }, [demand]);
 
   // List of unique ingredients
   const uniqueIngredients = useMemo(() => {
@@ -647,41 +512,31 @@ function DemandRiskHeatmap({
     return Array.from(map.values());
   }, [demand]);
 
-  // Build rows with cells for all dates
+  // Build rows with single groundtruth risk projection for all dates
   const rows: HeatmapRowData[] = useMemo(() => {
     return uniqueIngredients
       .map((ing) => {
         const risk = riskMap.get(ing.id);
-        const avg = avgDemandMap.get(ing.id) ?? 0;
+        const projection = projectIngredientDailyRisks(
+          ing.id,
+          ing.name,
+          ing.unit,
+          dates,
+          demand,
+          risk,
+          data,
+          procurementRows
+        );
+
         const cells: Record<string, HeatmapCellData> = {};
         let totalSeverity = 0;
-        let maxSeverity: HeatmapSeverityLevel = 0;
 
-        for (const date of dates) {
-          const dRow = demandMap.get(`${ing.id}-${date}`);
-          const heat = deriveIngredientHeatLevel(ing.id, date, dRow, risk, avg);
-
-          cells[date] = {
-            ingredientId: ing.id,
-            ingredientName: ing.name,
-            unit: ing.unit,
-            targetDate: date,
-            level: heat.level,
-            levelLabel: heat.levelLabel,
-            p50: dRow?.p50 ?? null,
-            p25: dRow?.p25 ?? null,
-            p75: dRow?.p75 ?? null,
-            contributionsCount: dRow?.contributions.length ?? 0,
-            hasStockout: heat.hasStockout,
-            stockoutDate: heat.stockoutDate,
-            shortageQuantity: heat.shortageQuantity,
-            demandRow: dRow ?? null,
+        for (const dr of projection.dailyRisks) {
+          cells[dr.targetDate] = {
+            ...dr,
+            level: dr.severityLevel,
           };
-
-          totalSeverity += heat.level;
-          if (heat.level > maxSeverity) {
-            maxSeverity = heat.level;
-          }
+          totalSeverity += dr.severityLevel;
         }
 
         return {
@@ -690,9 +545,9 @@ function DemandRiskHeatmap({
           unit: ing.unit,
           cells,
           totalSeverity,
-          maxSeverity,
-          hasAlert: maxSeverity >= 2,
-          stockoutDate: risk?.stockoutDate,
+          maxSeverity: projection.maxSeverity,
+          hasAlert: projection.hasAlert,
+          stockoutDate: projection.stockoutDate,
         };
       })
       .sort((a, b) => {
@@ -704,7 +559,7 @@ function DemandRiskHeatmap({
         }
         return a.ingredientName.localeCompare(b.ingredientName);
       });
-  }, [uniqueIngredients, dates, riskMap, avgDemandMap, demandMap]);
+  }, [uniqueIngredients, dates, demand, riskMap, data, procurementRows]);
 
   // Summary Metrics
   const summary = useMemo(() => {
@@ -753,16 +608,18 @@ function DemandRiskHeatmap({
               <div className="mini-stat-pill is-warning">
                 <strong>{summary.alertIngredients}</strong> nguyên liệu có cảnh báo
               </div>
-              <div className="mini-stat-pill is-danger">
-                <strong>{summary.highAlertCells}</strong> điểm nguy cấp
-              </div>
+              {summary.highAlertCells > 0 ? (
+                <div className="mini-stat-pill is-danger">
+                  <strong>{summary.highAlertCells}</strong> ô cảnh báo cao
+                </div>
+              ) : null}
               <div className="mini-stat-pill is-neutral">
                 Đỉnh rủi ro: <strong>{formatDate(summary.peakRiskDate)}</strong>
               </div>
             </>
           ) : (
             <div className="mini-stat-pill is-success">
-              ✓ Không có nguyên liệu cần chú ý trong 7 ngày tới
+              ✓ Tồn kho an toàn, không có nguy cơ thiếu hàng trong 7 ngày tới
             </div>
           )}
         </div>
@@ -851,13 +708,13 @@ function DemandRiskHeatmap({
                         onMouseLeave={() => setHoveredCell(null)}
                       >
                         <div className="cell-inner">
-                          {cell.level === 3 ? (
-                            <span className="cell-alert-mark">!</span>
-                          ) : cell.level === 2 ? (
-                            <span className="cell-warning-mark">▲</span>
+                          {cell.hasStockout || cell.shortageQuantity > 0 ? (
+                            <span className="cell-alert-mark" title="Có nguy cơ cạn kho">!</span>
+                          ) : cell.isArrival ? (
+                            <span className="cell-arrival-mark" title="Có hàng về">📦</span>
                           ) : null}
                           <span className="cell-mini-qty">
-                            {cell.p50 != null ? `${cell.p50 < 10 ? cell.p50.toFixed(1) : Math.round(cell.p50)}` : "—"}
+                            {cell.demandP50 != null ? `${cell.demandP50 < 10 ? cell.demandP50.toFixed(1) : Math.round(cell.demandP50)}` : "—"}
                           </span>
                         </div>
                       </td>
@@ -879,15 +736,27 @@ function DemandRiskHeatmap({
             <div className="tooltip-body">
               <div className="tooltip-level-row">
                 <span className={`tooltip-level-pill level-${hoveredCell.level}`}>
-                  {hoveredCell.levelLabel}
+                  {hoveredCell.severityLabel}
                 </span>
                 {hoveredCell.hasStockout ? (
                   <span className="tooltip-stockout-note">Có nguy cơ cạn kho</span>
                 ) : null}
               </div>
+              {hoveredCell.reason ? (
+                <p className="tooltip-reason-text">{hoveredCell.reason}</p>
+              ) : null}
               <div className="tooltip-metrics">
-                <span>Nhu cầu P50: <strong>{quantity(hoveredCell.p50, hoveredCell.unit)}</strong></span>
-                <small>Khoảng P25–P75: {quantity(hoveredCell.p25, hoveredCell.unit)} – {quantity(hoveredCell.p75, hoveredCell.unit)}</small>
+                <span>Nhu cầu P50: <strong>{quantity(hoveredCell.demandP50, hoveredCell.unit)}</strong></span>
+                {hoveredCell.closingStock != null ? (
+                  <span>Tồn cuối ngày: <strong>{quantity(hoveredCell.closingStock, hoveredCell.unit)}</strong></span>
+                ) : null}
+                {hoveredCell.isArrival ? (
+                  <span className="tooltip-arrival-info">📦 Hàng về: <strong>+{quantity(hoveredCell.incomingQuantity, hoveredCell.unit)}</strong></span>
+                ) : null}
+                {hoveredCell.shortageQuantity > 0 ? (
+                  <span className="tooltip-shortage-info text-danger">⚠️ Thiếu dự kiến: <strong>{quantity(hoveredCell.shortageQuantity, hoveredCell.unit)}</strong></span>
+                ) : null}
+                <small>Khoảng P25–P75: {quantity(hoveredCell.demandP25, hoveredCell.unit)} – {quantity(hoveredCell.demandP75, hoveredCell.unit)}</small>
                 <small>Đến từ {hoveredCell.contributionsCount} món</small>
               </div>
             </div>
@@ -903,17 +772,23 @@ function DemandRiskHeatmap({
  * Merges Demand Facts + Inventory Risk Facts + Demand Sources into one clean section.
  */
 function SelectedIngredientDetail({
+  dates = [],
   selectedDate,
   selectedIngredientId,
   demand,
   risks,
+  data,
+  decision,
   onExplain,
   onOpenForecastDrilldown,
 }: {
+  dates?: string[];
   selectedDate: string;
   selectedIngredientId: string;
   demand: DecisionDemandView[];
   risks: DecisionRiskView[];
+  data?: BootstrapData;
+  decision?: DecisionPackage | null;
   onExplain: (row: DecisionDemandView) => void;
   onOpenForecastDrilldown: (row: DecisionDemandView) => void;
 }) {
@@ -924,18 +799,29 @@ function SelectedIngredientDetail({
   const ingredientName = demandRow?.ingredientName || risk?.ingredientName || "Nguyên liệu";
   const unit = demandRow?.unit || risk?.unit || "";
 
-  // Derive heat level
-  const avgDaily = useMemo(() => {
-    const matching = demand.filter((d) => d.ingredientId === selectedIngredientId);
-    if (!matching.length) return 0;
-    const sum = matching.reduce((s, m) => s + (m.p50 ?? 0), 0);
-    return sum / matching.length;
-  }, [demand, selectedIngredientId]);
+  const procurementRows = useMemo(
+    () => extractProcurementRows(decision),
+    [decision]
+  );
 
-  const heat = useMemo(() => {
-    return deriveIngredientHeatLevel(selectedIngredientId, selectedDate, demandRow, risk, avgDaily);
-  }, [selectedIngredientId, selectedDate, demandRow, risk, avgDaily]);
+  // Authoritative daily risk simulation across full planning window
+  const projection = useMemo(() => {
+    const horizonDates = dates.length > 0 ? dates : [selectedDate];
+    return projectIngredientDailyRisks(
+      selectedIngredientId,
+      ingredientName,
+      unit,
+      horizonDates,
+      demand,
+      risk,
+      data,
+      procurementRows
+    );
+  }, [selectedIngredientId, ingredientName, unit, dates, selectedDate, demand, risk, data, procurementRows]);
 
+  const dailyRisk =
+    projection.dailyRisks.find((dr) => dr.targetDate === selectedDate) ??
+    projection.dailyRisks[0];
   const contributions = demandRow?.contributions ?? [];
 
   if (!demandRow && !risk) {
@@ -960,14 +846,8 @@ function SelectedIngredientDetail({
           <h2 id="selected-detail-title">{ingredientName}</h2>
           <span className="selected-detail-date">{formatDate(selectedDate)}</span>
         </div>
-        <span className={`detail-severity-badge level-${heat.level}`}>
-          {heat.level === 3
-            ? "Cảnh báo cao"
-            : heat.level === 2
-              ? "Nguy cơ thiếu"
-              : heat.level === 1
-                ? "Cần theo dõi"
-                : "Ổn định"}
+        <span className={`detail-severity-badge level-${dailyRisk?.severityLevel ?? 0}`}>
+          {dailyRisk?.severityLabel ?? "Ổn định"}
         </span>
       </div>
 
@@ -991,24 +871,26 @@ function SelectedIngredientDetail({
           <span className="zone-label">Rủi ro tồn kho</span>
           <div className="zone-grid-facts">
             <div className="fact-item">
-              <span className="fact-title">Tồn đầu kỳ</span>
-              <strong>{risk ? quantity(risk.beginningInventory, unit) : "—"}</strong>
+              <span className="fact-title">Tồn đầu ngày</span>
+              <strong>{dailyRisk?.openingStock != null ? quantity(dailyRisk.openingStock, unit) : (risk ? quantity(risk.beginningInventory, unit) : "—")}</strong>
             </div>
             <div className="fact-item">
-              <span className="fact-title">Mức đáp ứng</span>
-              <strong>{risk ? percentage(risk.fillRate) : "100%"}</strong>
+              <span className="fact-title">Hàng về</span>
+              <strong className={dailyRisk?.isArrival ? "text-success" : ""}>
+                {dailyRisk?.isArrival ? `+${quantity(dailyRisk.incomingQuantity, unit)}` : "Không có"}
+              </strong>
             </div>
             <div className="fact-item">
-              <span className="fact-title">Có thể thiếu từ</span>
-              <strong className={risk?.stockoutDate ? "text-danger" : ""}>
-                {risk?.stockoutDate ? formatDate(risk.stockoutDate) : "Không dự báo thiếu"}
+              <span className="fact-title">Tồn cuối ngày</span>
+              <strong className={dailyRisk?.closingStock != null && dailyRisk.closingStock <= 0 ? "text-danger" : ""}>
+                {dailyRisk?.closingStock != null ? quantity(dailyRisk.closingStock, unit) : "—"}
               </strong>
             </div>
             <div className="fact-item">
               <span className="fact-title">Thiếu dự kiến</span>
-              <strong className={risk?.shortageQuantity ? "text-danger" : ""}>
-                {risk?.shortageQuantity != null && risk.shortageQuantity > 0
-                  ? quantity(risk.shortageQuantity, unit)
+              <strong className={dailyRisk?.shortageQuantity && dailyRisk.shortageQuantity > 0 ? "text-danger" : ""}>
+                {dailyRisk?.shortageQuantity != null && dailyRisk.shortageQuantity > 0
+                  ? quantity(dailyRisk.shortageQuantity, unit)
                   : "0"}
               </strong>
             </div>
@@ -1383,6 +1265,8 @@ function FuturePlanningView({
             dates={view.dates}
             demand={view.demand}
             risks={view.risks}
+            data={data}
+            decision={decision}
             selectedDate={activeDate}
             selectedIngredientId={activeIngredientId}
             onSelectDate={(date) => setSelectedDate(date)}
@@ -1395,10 +1279,13 @@ function FuturePlanningView({
 
       {/* ── SECTION ③: CHI TIẾT ĐANG CHỌN (MERGES DEMAND + INVENTORY RISK + SOURCES) ── */}
       <SelectedIngredientDetail
+        dates={view.dates}
         demand={view.demand}
+        risks={view.risks}
+        data={data}
+        decision={decision}
         onExplain={(row) => setExplaining(row)}
         onOpenForecastDrilldown={(row) => setDrilldownRow(row)}
-        risks={view.risks}
         selectedDate={activeDate}
         selectedIngredientId={activeIngredientId}
       />

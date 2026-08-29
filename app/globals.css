@@ -3565,12 +3565,12 @@ tbody tr.selected {
   background: #ffffff;
   border: 1px solid #cfe0d8;
   border-radius: 10px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  min-width: 210px;
-  padding: 10px 14px;
+  gap: 6px;
+  min-width: 235px;
+  padding: 11px 15px;
 }
 
 .tooltip-title {
@@ -3578,16 +3578,18 @@ tbody tr.selected {
   color: var(--ink, #1c2724);
   font-size: 0.82rem;
   font-weight: 700;
-  padding-bottom: 4px;
+  padding-bottom: 5px;
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: baseline;
+  gap: 12px;
 }
 
-.tooltip-title small {
+.tooltip-fulldate {
   color: #64748b;
   font-weight: 500;
   font-size: 0.72rem;
+  white-space: nowrap;
 }
 
 .tooltip-row {
@@ -6506,16 +6508,24 @@ td > small {
   font-weight: 600;
 }
 
-.tooltip-metrics {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 0.78rem;
-  color: #cbd5e1;
+.cell-arrival-mark {
+  font-size: 0.72rem;
+  margin-right: 2px;
 }
 
-.tooltip-metrics strong {
-  color: #ffffff;
+.tooltip-reason-text {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.35;
+}
+
+.tooltip-arrival-info {
+  color: #4ade80;
+}
+
+.tooltip-shortage-info {
+  color: #f87171;
 }
 
 /* 3. SECTION ③: Selected Ingredient Detail (Merged Demand + Inventory Risk + Sources) */

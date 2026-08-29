@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { DecisionCenter } from "../app/components/DecisionCenter.tsx";
 import { DecisionCenterWorkspace } from "../app/components/DecisionCenterWorkspace.tsx";
 import { adaptDecisionRunView } from "../lib/decision-view.ts";
+import { projectIngredientDailyRisks } from "../lib/risk-engine.ts";
 import type { BootstrapData, DecisionPackage, PlanResponse } from "../lib/types.ts";
 
 const data = {
@@ -109,3 +110,99 @@ test("Decision Center seven-day view focuses cleanly on demand and risk without 
   assert.match(markup, /Heatmap rủi ro/);
   assert.match(markup, /Chi tiết đang chọn/);
 });
+
+test("Single Groundtruth Risk Engine accurately keeps safe ingredients stable (Cà phê hạt) across all days", () => {
+  const dates = ["2026-08-13", "2026-08-14", "2026-08-15", "2026-08-16", "2026-08-17", "2026-08-18", "2026-08-19"];
+  const coffeeDemand = dates.map((date) => ({
+    ingredientId: "coffee-beans",
+    ingredientName: "Cà phê hạt",
+    targetDate: date,
+    p25: 0.07,
+    p50: 0.09,
+    p75: 0.12,
+    unit: "kg",
+    contributions: [],
+  }));
+
+  const coffeeRisk = {
+    ingredientId: "coffee-beans",
+    ingredientName: "Cà phê hạt",
+    stockoutDate: "",
+    shortageQuantity: 0,
+    beginningInventory: 3.9,
+    fillRate: 1.0,
+    daysOfSupply: 30,
+    unit: "kg",
+  };
+
+  const projection = projectIngredientDailyRisks(
+    "coffee-beans",
+    "Cà phê hạt",
+    "kg",
+    dates,
+    coffeeDemand,
+    coffeeRisk,
+    undefined,
+    []
+  );
+
+  assert.equal(projection.maxSeverity, 0);
+  assert.equal(projection.hasAlert, false);
+  assert.equal(projection.dailyRisks.length, 7);
+  for (const day of projection.dailyRisks) {
+    assert.equal(day.severity, "stable");
+    assert.equal(day.severityLevel, 0);
+    assert.equal(day.severityLabel, "Ổn định");
+    assert.equal(day.hasStockout, false);
+  }
+});
+
+test("Single Groundtruth Risk Engine accurately computes Sugar (Đường) arrival on 16/08 and closing balance", () => {
+  const dates = ["2026-08-13", "2026-08-14", "2026-08-15", "2026-08-16", "2026-08-17", "2026-08-18", "2026-08-19"];
+  const sugarDemand = [
+    { ingredientId: "sugar", ingredientName: "Đường", targetDate: "2026-08-13", p25: 2.1, p50: 2.3, p75: 2.5, unit: "kg", contributions: [] },
+    { ingredientId: "sugar", ingredientName: "Đường", targetDate: "2026-08-14", p25: 2.2, p50: 2.4, p75: 2.6, unit: "kg", contributions: [] },
+    { ingredientId: "sugar", ingredientName: "Đường", targetDate: "2026-08-15", p25: 2.7, p50: 3.0, p75: 3.3, unit: "kg", contributions: [] },
+    { ingredientId: "sugar", ingredientName: "Đường", targetDate: "2026-08-16", p25: 2.62, p50: 2.81, p75: 2.98, unit: "kg", contributions: [] },
+    { ingredientId: "sugar", ingredientName: "Đường", targetDate: "2026-08-17", p25: 2.2, p50: 2.4, p75: 2.6, unit: "kg", contributions: [] },
+    { ingredientId: "sugar", ingredientName: "Đường", targetDate: "2026-08-18", p25: 2.1, p50: 2.3, p75: 2.5, unit: "kg", contributions: [] },
+    { ingredientId: "sugar", ingredientName: "Đường", targetDate: "2026-08-19", p25: 2.1, p50: 2.3, p75: 2.5, unit: "kg", contributions: [] },
+  ];
+
+  const sugarRisk = {
+    ingredientId: "sugar",
+    ingredientName: "Đường",
+    stockoutDate: "2026-08-16",
+    shortageQuantity: 0,
+    beginningInventory: 8.0,
+    fillRate: 1.0,
+    daysOfSupply: 3.2,
+    unit: "kg",
+  };
+
+  const procurementRows = [
+    { ingredientId: "sugar", quantity: 10, arrivalDate: "2026-08-16" },
+  ];
+
+  const projection = projectIngredientDailyRisks(
+    "sugar",
+    "Đường",
+    "kg",
+    dates,
+    sugarDemand,
+    sugarRisk,
+    undefined,
+    procurementRows
+  );
+
+  const day16 = projection.dailyRisks.find((d) => d.targetDate === "2026-08-16");
+  assert.ok(day16);
+  assert.equal(day16.isArrival, true);
+  assert.equal(day16.incomingQuantity, 10);
+  assert.equal(day16.demandP50, 2.81);
+  assert.equal(day16.openingStock, 0.3);
+  assert.equal(day16.closingStock, 7.49);
+  assert.equal(day16.severity, "watch");
+});
+
+

@@ -46,6 +46,9 @@ export type DecisionRiskView = {
   shortageQuantity: number | null;
   beginningInventory: number | null;
   fillRate: number | null;
+  stockoutProbability?: number | null;
+  daysOfSupply?: number | null;
+  riskCategory?: string | null;
   unit: string;
 };
 
@@ -328,38 +331,55 @@ export function adaptDecisionRunView(
     }
   }
 
-  const inventoryRisk = record(raw.inventory_risk);
-  const p50Design = list(inventoryRisk.results).find(
-    (value) => text(record(value), ["scenario_id"]) === "p50_design",
-  );
-  const riskSummary = record(record(p50Design).summary);
-  const risks = list(riskSummary.by_key)
+  let rawRiskItems: any[] = [];
+  if (Array.isArray(raw.inventory_risk)) {
+    rawRiskItems = raw.inventory_risk;
+  } else if (raw.inventory_risk && typeof raw.inventory_risk === "object") {
+    const ir = raw.inventory_risk as any;
+    if (Array.isArray(ir.results)) {
+      const p50Design = ir.results.find((v: any) => v?.scenario_id === "p50_design") ?? ir.results[0];
+      const byKey = p50Design?.summary?.by_key ?? p50Design?.by_key ?? p50Design?.summary;
+      if (Array.isArray(byKey)) {
+        rawRiskItems = byKey;
+      }
+    } else {
+      rawRiskItems = Object.values(raw.inventory_risk);
+    }
+  }
+
+  const risks: DecisionRiskView[] = rawRiskItems
     .map((value) => {
       const source = record(value);
-      const ingredientId = text(source, ["ingredient_id", "key"]);
+      const ingredientId = text(source, ["ingredient_id", "ingredientId", "key"]);
       const demandItem = demandByIngredient.get(ingredientId);
+      const invRecord = data?.inventory?.find((i) => i.ingredientId === ingredientId);
+      const daysOfSupply = numeric(source, ["days_of_supply", "days_supply", "daysOfSupply"]);
+      const stockoutProb = numeric(source, ["stockout_probability", "stockout_prob", "stockoutProbability"]);
+      const begInv = numeric(source, ["beginning_inventory", "begin_inventory", "beginningInventory", "onHand"]) ?? invRecord?.onHand ?? null;
+
       return {
         ingredientId,
         ingredientName: ingredientName(ingredientId, source, data),
         stockoutDate: text(source, [
           "projected_stockout_date",
           "stockout_date",
+          "risk_date",
+          "stockoutDate",
         ]),
         shortageQuantity: numeric(source, [
           "shortage_quantity",
           "expected_shortage",
+          "shortageQuantity",
         ]),
-        beginningInventory: numeric(source, [
-          "beginning_inventory",
-          "begin_inventory",
-        ]),
-        fillRate: numeric(source, ["fill_rate"]),
-        unit: text(source, ["unit"]) || demandItem?.unit || "",
+        beginningInventory: begInv,
+        fillRate: numeric(source, ["fill_rate", "expected_fill_rate", "fillRate"]),
+        stockoutProbability: stockoutProb,
+        daysOfSupply,
+        riskCategory: text(source, ["risk_category", "riskCategory", "risk_level"]),
+        unit: text(source, ["unit"]) || demandItem?.unit || invRecord?.unit || "",
       };
     })
-    .filter(
-      (item) => Boolean(item.stockoutDate) || (item.shortageQuantity ?? 0) > 0,
-    );
+    .filter((item) => Boolean(item.ingredientId));
 
   const strategies = strategyEntries(raw).map(([key, source]) => {
     const plan = record(source.recommended_plan);
