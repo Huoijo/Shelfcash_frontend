@@ -153,23 +153,47 @@ function findIngredientRisk(
   return null;
 }
 
-/** Generate synthetic daily timeline with demand quantiles and projected inventory */
-function generateDailyTimeline(
+export interface TimelineDataPoint {
+  date: string;
+  fullDate: string;
+  isoDate: string;
+  p50: number;
+  bandLow: number;
+  bandHigh: number;
+  dayBeginningInv: number;
+  dayEndingInv: number;
+  isArrival: boolean;
+  arrivalQty: number;
+  isStockoutDanger: boolean;
+  isStockout: boolean;
+  shortageQty: number;
+  status: "safe" | "watch" | "danger" | "stockout";
+}
+
+/**
+ * Normalize and derive daily timeline with groundtruth inventory steps, delivery events,
+ * and demand quantiles.
+ */
+function normalizeProcurementTimelineData(
   row: IngredientDemandRow,
   procurement: ProcurementRow | null,
   startDate: string,
-  horizonDays = 7
-) {
+  horizonDays = 7,
+  initialInventoryOverride?: number | null
+): TimelineDataPoint[] {
   const p50Total = row.p50 ?? 0;
   const p25Total = row.p25 ?? row.p50 ?? 0;
   const p75Total = row.p75 ?? row.p50 ?? 0;
-  const dailyP50 = p50Total / horizonDays;
+  const dailyP50 = horizonDays > 0 ? p50Total / horizonDays : 0;
 
-  const initialStock = procurement
-    ? Math.max(dailyP50 * 1.5, dailyP50 * horizonDays - procurement.quantity * 0.8)
-    : dailyP50 * (horizonDays + 2);
+  // Initial stock: prioritize real inventory on-hand or risk beginning stock
+  let currentInv =
+    initialInventoryOverride != null && initialInventoryOverride >= 0
+      ? initialInventoryOverride
+      : procurement
+        ? Math.max(dailyP50 * 1.5, dailyP50 * horizonDays - procurement.quantity * 0.8)
+        : dailyP50 * (horizonDays + 2);
 
-  let currentInv = initialStock;
   const arrivalDateKey = procurement?.arrival_date
     ? (procurement.arrival_date.includes("T")
         ? procurement.arrival_date.slice(0, 10)
@@ -209,78 +233,238 @@ function generateDailyTimeline(
         arrivalDateKey &&
         (arrivalDateKey === dateStr || arrivalDateKey.endsWith(d.replace("/", "-")))
     );
-    const shipmentIn = isArrival && procurement ? procurement.quantity : 0;
-    currentInv = Math.max(0, currentInv - p50 + shipmentIn);
+    const arrivalQty = isArrival && procurement ? procurement.quantity : 0;
+    const dayBeginningInv = currentInv;
+    const dayEndingInv = Math.max(0, dayBeginningInv - p50 + arrivalQty);
+    const isStockout = dayEndingInv <= 0.001;
+    const isStockoutDanger = isStockout || dayEndingInv <= dailyP50 * 0.75;
+    const shortageQty = dayBeginningInv + arrivalQty < p50 ? p50 - (dayBeginningInv + arrivalQty) : 0;
+
+    let status: "safe" | "watch" | "danger" | "stockout" = "safe";
+    if (isStockout) status = "stockout";
+    else if (isStockoutDanger) status = "danger";
+    else if (dayEndingInv <= dailyP50 * 1.5) status = "watch";
+
+    currentInv = dayEndingInv;
 
     return {
       date: d,
       fullDate,
-      p50: Number(p50.toFixed(1)),
-      bandLow: Number(bandLow.toFixed(1)),
-      bandHigh: Number(bandHigh.toFixed(1)),
-      projectedInventory: Number(currentInv.toFixed(1)),
+      isoDate: dateStr,
+      p50: Number(p50.toFixed(2)),
+      bandLow: Number(bandLow.toFixed(2)),
+      bandHigh: Number(bandHigh.toFixed(2)),
+      dayBeginningInv: Number(dayBeginningInv.toFixed(2)),
+      dayEndingInv: Number(dayEndingInv.toFixed(2)),
       isArrival,
-      isStockoutDanger: currentInv <= dailyP50 * 0.5,
+      arrivalQty: Number(arrivalQty.toFixed(2)),
+      isStockoutDanger,
+      isStockout,
+      shortageQty: Number(shortageQty.toFixed(2)),
+      status,
     };
   });
 }
 
-/** Rich Decision Timeline Chart with P25-P75 confidence band, P50, and Projected Inventory */
-function IngredientDecisionChart({
-  item,
-  startDate,
-  horizonDays = 7,
+/**
+ * Chart 1 (Upper): Tồn kho dự kiến
+ * Renders discrete daily inventory steps, arrival events, and stockout danger lines.
+ */
+function ProcurementInventoryChart({
+  data,
+  unit,
+  syncId,
+  gradientId,
+  arrivalPoint,
+  dangerPoint,
 }: {
-  item: IngredientItemData;
-  startDate: string;
-  horizonDays?: number;
+  data: TimelineDataPoint[];
+  unit: string;
+  syncId: string;
+  gradientId: string;
+  arrivalPoint?: TimelineDataPoint;
+  dangerPoint?: TimelineDataPoint;
 }) {
-  const chartId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
-  const gradientId = "demand-band-" + chartId;
-  const unit = item.demand.unit ? ` ${item.demand.unit}` : "";
-  const data = useMemo(
-    () => generateDailyTimeline(item.demand, item.procurement, startDate, horizonDays),
-    [item, startDate, horizonDays]
-  );
-
-  const allValues = data.flatMap((d) => [d.bandLow, d.bandHigh, d.p50, d.projectedInventory]);
-  const yMax = Math.ceil(Math.max(5, ...allValues) * 1.2);
-
-  const arrivalPoint = data.find((d) => d.isArrival);
-  const dangerPoint = data.find((d) => d.isStockoutDanger && !d.isArrival);
+  const invValues = data.flatMap((d) => [d.dayBeginningInv, d.dayEndingInv, d.arrivalQty > 0 ? d.dayBeginningInv + d.arrivalQty : 0]);
+  const yInvMax = Math.ceil(Math.max(5, ...invValues) * 1.2);
+  const hasShortage = data.some((d) => d.isStockout);
 
   return (
-    <div
-      className="cockpit-chart-wrapper"
-      aria-label={`Biểu đồ nhu cầu và tồn kho dự kiến của ${item.demand.ingredient_name ?? "nguyên liệu"}`}
-    >
-      <div className="cockpit-chart-header">
-        <div>
-          <span className="cockpit-chart-eyebrow">DỰ BÁO NHU CẦU & DIỄN BIẾN TỒN KHO</span>
-          <h4 className="cockpit-chart-title">
-            {item.demand.ingredient_name ?? "Nguyên liệu"}
-            {unit ? <span className="cockpit-chart-unit">({unit.trim()})</span> : null}
-          </h4>
+    <div className="dual-chart-pane pane-inventory">
+      <div className="pane-header">
+        <div className="pane-header-left">
+          <span className="pane-dot dot-inventory" />
+          <span className="pane-label">TỒN KHO DỰ KIẾN CUỐI NGÀY</span>
         </div>
-        <div className="cockpit-chart-legends">
-          <span className="chart-legend-item">
-            <span className="legend-indicator legend-p50" />
-            Nhu cầu P50
-          </span>
-          <span className="chart-legend-item">
-            <span className="legend-indicator legend-band" />
-            Khoảng P25–P75
-          </span>
-          <span className="chart-legend-item">
-            <span className="legend-indicator legend-inv" />
-            Tồn kho dự kiến
-          </span>
-        </div>
+        {hasShortage ? (
+          <span className="pane-status-tag tag-danger">Cảnh báo thiếu hàng</span>
+        ) : dangerPoint ? (
+          <span className="pane-status-tag tag-warning">Cần theo dõi tồn</span>
+        ) : (
+          <span className="pane-status-tag tag-safe">Tồn an toàn</span>
+        )}
       </div>
 
-      <div className="cockpit-chart-body">
-        <ResponsiveContainer width="100%" height={230}>
-          <ComposedChart data={data} margin={{ top: 16, right: 16, left: -8, bottom: 4 }}>
+      <div className="pane-chart-body">
+        <ResponsiveContainer width="100%" height={145}>
+          <ComposedChart syncId={syncId} data={data} margin={{ top: 12, right: 16, left: -6, bottom: 2 }}>
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#0284c7" stopOpacity={0.22} />
+                <stop offset="100%" stopColor="#0284c7" stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid stroke="var(--line, #e2e8e4)" strokeDasharray="3 4" vertical={false} />
+            <XAxis dataKey="date" axisLine={false} tickLine={false} tick={false} height={0} />
+            <YAxis
+              axisLine={false}
+              tickLine={false}
+              tick={{ fill: "var(--muted, #607066)", fontSize: 11 }}
+              domain={[0, yInvMax]}
+              width={42}
+            />
+            <Tooltip
+              cursor={{ stroke: "var(--line-strong, #cbd4d0)", strokeWidth: 1, strokeDasharray: "2 2" }}
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null;
+                const p = payload[0]?.payload as TimelineDataPoint | undefined;
+                if (!p) return null;
+                return (
+                  <div className="cockpit-chart-tooltip synced-inventory-tooltip">
+                    <div className="tooltip-title">
+                      <span>Tồn kho ngày {label}</span>
+                      <small>{p.fullDate}</small>
+                    </div>
+                    <div className="tooltip-row">
+                      <span>Tồn đầu ngày:</span>
+                      <strong>
+                        {formatQuantity(p.dayBeginningInv)}
+                        {unit}
+                      </strong>
+                    </div>
+                    {p.isArrival ? (
+                      <div className="tooltip-row text-success">
+                        <span>📦 Hàng mới về:</span>
+                        <strong>
+                          +{formatQuantity(p.arrivalQty)}
+                          {unit}
+                        </strong>
+                      </div>
+                    ) : null}
+                    <div className="tooltip-row">
+                      <span>Tiêu thụ P50:</span>
+                      <span>
+                        -{formatQuantity(p.p50)}
+                        {unit}
+                      </span>
+                    </div>
+                    <div className="tooltip-row tooltip-row-highlight">
+                      <span>Tồn cuối ngày:</span>
+                      <strong className={p.isStockout ? "text-danger" : p.isStockoutDanger ? "text-warning" : ""}>
+                        {formatQuantity(p.dayEndingInv)}
+                        {unit}
+                      </strong>
+                    </div>
+                    {p.isStockout ? (
+                      <div className="tooltip-badge danger-badge">
+                        <AlertTriangle size={12} /> Cạn kho (Thiếu {formatQuantity(p.shortageQty)}{unit})
+                      </div>
+                    ) : p.isArrival ? (
+                      <div className="tooltip-badge arrival-badge">
+                        <Truck size={12} /> Lô hàng bổ sung sẵn sàng
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              }}
+            />
+
+            {/* Inventory step-after area & line */}
+            <Area
+              type="stepAfter"
+              dataKey="dayEndingInv"
+              stroke="#0284c7"
+              strokeWidth={2.4}
+              fill={`url(#${gradientId})`}
+              fillOpacity={1}
+              dot={{ r: 3.5, fill: "#0284c7", stroke: "#ffffff", strokeWidth: 1.5 }}
+              activeDot={{ r: 5.5, fill: "#0284c7" }}
+            />
+
+            {/* Event Markers */}
+            {arrivalPoint ? (
+              <ReferenceLine
+                x={arrivalPoint.date}
+                stroke="#059669"
+                strokeDasharray="3 3"
+                strokeWidth={1.5}
+                label={{
+                  value: `📦 Hàng về (+${formatQuantity(arrivalPoint.arrivalQty)}${unit})`,
+                  position: "top",
+                  fill: "#059669",
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              />
+            ) : null}
+
+            {dangerPoint ? (
+              <ReferenceLine
+                x={dangerPoint.date}
+                stroke="#dc2626"
+                strokeDasharray="2 2"
+                strokeWidth={1.5}
+                label={{
+                  value: dangerPoint.isStockout ? "🚫 Cạn kho" : "⚠️ Nguy cơ cạn",
+                  position: "insideBottomLeft",
+                  fill: "#dc2626",
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              />
+            ) : null}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Chart 2 (Lower): Nhu cầu theo ngày
+ * Renders P50 demand curve and P25-P75 confidence interval band.
+ */
+function ProcurementDemandChart({
+  data,
+  unit,
+  syncId,
+  gradientId,
+  totalP50,
+}: {
+  data: TimelineDataPoint[];
+  unit: string;
+  syncId: string;
+  gradientId: string;
+  totalP50: number;
+}) {
+  const demandValues = data.flatMap((d) => [d.bandLow, d.bandHigh, d.p50]);
+  const yDemandMax = Math.ceil(Math.max(1, ...demandValues) * 1.25 * 10) / 10;
+
+  return (
+    <div className="dual-chart-pane pane-demand">
+      <div className="pane-header">
+        <div className="pane-header-left">
+          <span className="pane-dot dot-demand" />
+          <span className="pane-label">NHU CẦU THEO NGÀY (P50 & KHOẢNG P25–P75)</span>
+        </div>
+        <span className="pane-meta-info">
+          Tổng 7 ngày: <strong>{formatQuantity(totalP50)}{unit}</strong>
+        </span>
+      </div>
+
+      <div className="pane-chart-body">
+        <ResponsiveContainer width="100%" height={140}>
+          <ComposedChart syncId={syncId} data={data} margin={{ top: 8, right: 16, left: -6, bottom: 4 }}>
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#147a62" stopOpacity={0.25} />
@@ -292,25 +476,28 @@ function IngredientDecisionChart({
               dataKey="date"
               axisLine={false}
               tickLine={false}
-              tick={{ fill: "var(--muted, #607066)", fontSize: 11, fontWeight: 500 }}
+              tick={{ fill: "var(--muted, #607066)", fontSize: 11, fontWeight: 600 }}
               minTickGap={16}
             />
             <YAxis
               axisLine={false}
               tickLine={false}
               tick={{ fill: "var(--muted, #607066)", fontSize: 11 }}
-              domain={[0, yMax]}
-              width={36}
+              domain={[0, yDemandMax]}
+              width={42}
             />
             <Tooltip
               cursor={{ stroke: "var(--line-strong, #cbd4d0)", strokeWidth: 1, strokeDasharray: "2 2" }}
               content={({ active, payload, label }) => {
                 if (!active || !payload?.length) return null;
-                const p = payload[0]?.payload as (typeof data)[0] | undefined;
+                const p = payload[0]?.payload as TimelineDataPoint | undefined;
                 if (!p) return null;
                 return (
-                  <div className="cockpit-chart-tooltip">
-                    <div className="tooltip-title">Ngày {label}</div>
+                  <div className="cockpit-chart-tooltip synced-demand-tooltip">
+                    <div className="tooltip-title">
+                      <span>Nhu cầu ngày {label}</span>
+                      <small>{p.fullDate}</small>
+                    </div>
                     <div className="tooltip-row">
                       <span className="tooltip-dot p50-dot" />
                       <span>Nhu cầu P50:</span>
@@ -327,21 +514,6 @@ function IngredientDecisionChart({
                         {unit}
                       </span>
                     </div>
-                    <div className="tooltip-row">
-                      <span className="tooltip-dot inv-dot" />
-                      <span>Tồn kho ước tính:</span>
-                      <strong className={p.isStockoutDanger ? "text-danger" : ""}>
-                        {formatQuantity(p.projectedInventory)}
-                        {unit}
-                      </strong>
-                    </div>
-                    {p.isArrival ? (
-                      <div className="tooltip-badge arrival-badge">
-                        <Truck size={12} /> Hàng mới về: +
-                        {formatQuantity(item.procurement?.quantity ?? 0)}
-                        {unit}
-                      </div>
-                    ) : null}
                   </div>
                 );
               }}
@@ -370,59 +542,113 @@ function IngredientDecisionChart({
               activeDot={false}
             />
 
-            {/* Projected Inventory line */}
-            <Line
-              type="monotone"
-              dataKey="projectedInventory"
-              stroke="#64748b"
-              strokeWidth={1.8}
-              strokeDasharray="4 4"
-              dot={false}
-              activeDot={{ r: 4, fill: "#64748b" }}
-            />
-
             {/* P50 main demand curve */}
             <Line
               type="monotone"
               dataKey="p50"
-              stroke="var(--accent, #147a62)"
+              stroke="#147a62"
               strokeWidth={2.8}
-              dot={{ r: 3.5, fill: "var(--accent, #147a62)", stroke: "#ffffff", strokeWidth: 2 }}
-              activeDot={{ r: 6, fill: "var(--accent, #147a62)" }}
+              dot={{ r: 3.5, fill: "#147a62", stroke: "#ffffff", strokeWidth: 1.5 }}
+              activeDot={{ r: 6, fill: "#147a62" }}
             />
-
-            {/* Event Markers */}
-            {arrivalPoint ? (
-              <ReferenceLine
-                x={arrivalPoint.date}
-                stroke="#147a62"
-                strokeDasharray="3 3"
-                label={{
-                  value: "📦 Hàng về",
-                  position: "top",
-                  fill: "#147a62",
-                  fontSize: 10,
-                  fontWeight: 600,
-                }}
-              />
-            ) : null}
-            {dangerPoint ? (
-              <ReferenceLine
-                x={dangerPoint.date}
-                stroke="#dc2626"
-                strokeDasharray="2 2"
-                label={{
-                  value: "⚠️ Nguy cơ cạn",
-                  position: "insideBottomLeft",
-                  fill: "#dc2626",
-                  fontSize: 10,
-                  fontWeight: 600,
-                }}
-              />
-            ) : null}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Rich Two-Tier Synchronized Decision Chart
+ * Tier 1 (Upper): Projected Inventory step progression with arrival & stockout markers
+ * Tier 2 (Lower): Daily Demand P50 & P25-P75 uncertainty band
+ */
+function IngredientDecisionChart({
+  item,
+  startDate,
+  horizonDays = 7,
+}: {
+  item: IngredientItemData;
+  startDate: string;
+  horizonDays?: number;
+}) {
+  const chartId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const syncId = `procurement-timeline-${chartId}`;
+  const invGradientId = `inv-step-gradient-${chartId}`;
+  const demandGradientId = `demand-band-gradient-${chartId}`;
+  const unit = item.demand.unit ? ` ${item.demand.unit}` : "";
+
+  const data = useMemo(
+    () =>
+      normalizeProcurementTimelineData(
+        item.demand,
+        item.procurement,
+        startDate,
+        horizonDays,
+        item.currentStock
+      ),
+    [item, startDate, horizonDays]
+  );
+
+  const arrivalPoint = data.find((d) => d.isArrival);
+  const dangerPoint = data.find((d) => d.isStockoutDanger && !d.isArrival);
+
+  return (
+    <div
+      className="procurement-dual-chart-card"
+      aria-label={`Biểu đồ diễn biến tồn kho và nhu cầu dự báo của ${item.demand.ingredient_name ?? "nguyên liệu"}`}
+    >
+      {/* ── UNIFIED CARD HEADER ── */}
+      <div className="dual-chart-header">
+        <div className="dual-chart-title-group">
+          <span className="eyebrow">DỰ BÁO NHU CẦU & DIỄN BIẾN TỒN KHO</span>
+          <h4 className="dual-chart-title">
+            {item.demand.ingredient_name ?? "Nguyên liệu"}
+            {unit ? <span className="chart-unit-tag">({unit.trim()})</span> : null}
+          </h4>
+        </div>
+
+        <div className="dual-chart-legends">
+          <span className="chart-legend-item">
+            <span className="legend-indicator legend-inv-step" />
+            Tồn kho dự kiến (Step line)
+          </span>
+          <span className="chart-legend-item">
+            <span className="legend-indicator legend-arrival" />
+            📦 Hàng về
+          </span>
+          <span className="chart-legend-item">
+            <span className="legend-indicator legend-p50" />
+            Nhu cầu P50
+          </span>
+          <span className="chart-legend-item">
+            <span className="legend-indicator legend-band" />
+            Khoảng P25–P75
+          </span>
+        </div>
+      </div>
+
+      {/* ── TIER 1: TỒN KHO DỰ KIẾN ── */}
+      <ProcurementInventoryChart
+        data={data}
+        unit={unit}
+        syncId={syncId}
+        gradientId={invGradientId}
+        arrivalPoint={arrivalPoint}
+        dangerPoint={dangerPoint}
+      />
+
+      {/* ── SUBTLE SYNCED TIMELINE DIVIDER ── */}
+      <div className="dual-chart-divider" aria-hidden="true" />
+
+      {/* ── TIER 2: NHU CẦU THEO NGÀY ── */}
+      <ProcurementDemandChart
+        data={data}
+        unit={unit}
+        syncId={syncId}
+        gradientId={demandGradientId}
+        totalP50={item.demand.p50 ?? 0}
+      />
     </div>
   );
 }
@@ -1616,8 +1842,12 @@ export function DecisionBriefWorkspace({
 
   // Filter items
   const filteredItems = useMemo(() => {
-    if (filterMode === "urgent") return sortedItems.filter((item) => item.statusType !== "safe");
-    if (filterMode === "safe") return sortedItems.filter((item) => item.statusType === "safe");
+    if (filterMode === "urgent") {
+      return sortedItems.filter((item) => item.orderNeeded || item.statusType === "urgent");
+    }
+    if (filterMode === "safe") {
+      return sortedItems.filter((item) => !item.orderNeeded && item.statusType !== "urgent");
+    }
     return sortedItems;
   }, [sortedItems, filterMode]);
 
@@ -1720,8 +1950,12 @@ export function DecisionBriefWorkspace({
   const selectedItem =
     enrichedItems.find((item) => item.demand.ingredient_id === currentSelectedId) ?? null;
 
-  const urgentCount = enrichedItems.filter((item) => item.statusType !== "safe").length;
-  const safeCount = enrichedItems.filter((item) => item.statusType === "safe").length;
+  const orderCount = brief.procurement_rows.length;
+  const criticalRiskCount = enrichedItems.filter(
+    (item) => item.stockoutRisk === "high" || (item.daysOfSupply != null && item.daysOfSupply <= 2)
+  ).length;
+  const urgentCount = orderCount > 0 ? orderCount : criticalRiskCount;
+  const safeCount = Math.max(0, uniqueDemand.length - urgentCount);
 
   return (
     <div className="decision-cockpit-root">
@@ -1796,16 +2030,20 @@ export function DecisionBriefWorkspace({
             <div className="hero-kpi-card">
               <span className="kpi-label">NGUYÊN LIỆU CẦN NHẬP</span>
               <div className="kpi-value-row">
-                <strong className="kpi-value-large">{brief.procurement_rows.length}</strong>
+                <strong className="kpi-value-large">{orderCount}</strong>
                 <span className="kpi-total-ref">/ {uniqueDemand.length} mặt hàng</span>
               </div>
-              {urgentCount > 0 ? (
+              {orderCount > 0 ? (
                 <span className="kpi-status-badge urgent">
-                  <AlertTriangle size={12} /> {urgentCount} nguyên liệu cần đặt sớm
+                  <AlertTriangle size={12} /> {orderCount} nguyên liệu cần đặt sớm
+                </span>
+              ) : criticalRiskCount > 0 ? (
+                <span className="kpi-status-badge urgent">
+                  <AlertTriangle size={12} /> {criticalRiskCount} nguyên liệu có nguy cơ cạn kho
                 </span>
               ) : (
                 <span className="kpi-status-badge ok">
-                  <CheckCircle2 size={12} /> Tất cả an toàn
+                  <CheckCircle2 size={12} /> Tất cả an toàn (Đủ hàng)
                 </span>
               )}
             </div>

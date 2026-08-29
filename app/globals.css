@@ -3386,45 +3386,48 @@ tbody tr.selected {
   padding: 20px 22px;
 }
 
-/* Chart block */
-.cockpit-chart-wrapper {
+/* Dual-Tier Synchronized Chart Card for Procurement */
+.procurement-dual-chart-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
-.cockpit-chart-header {
-  align-items: flex-start;
+.dual-chart-header {
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-  justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line, #e2e8e4);
 }
 
-.cockpit-chart-eyebrow {
-  color: #147a62;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.cockpit-chart-title {
-  color: var(--ink, #1c2724);
-  font-size: 1.1rem;
-  font-weight: 750;
-  margin: 2px 0 0;
-}
-
-.cockpit-chart-unit {
-  color: var(--muted, #5e6b67);
-  font-size: 0.88rem;
-  font-weight: 500;
-  margin-left: 6px;
-}
-
-.cockpit-chart-legends {
-  align-items: center;
+.dual-chart-title-group {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dual-chart-title {
+  color: var(--ink, #1c2724);
+  font-size: 1.12rem;
+  font-weight: 800;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-unit-tag {
+  color: var(--muted, #5e6b67);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.dual-chart-legends {
+  display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 12px;
 }
@@ -3445,6 +3448,18 @@ tbody tr.selected {
   width: 18px;
 }
 
+.legend-indicator.legend-inv-step {
+  background: #0284c7;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.legend-indicator.legend-arrival {
+  background: #059669;
+  height: 0;
+  border-top: 2px dashed #059669;
+}
+
 .legend-indicator.legend-p50 {
   background: #147a62;
   height: 3px;
@@ -3457,17 +3472,95 @@ tbody tr.selected {
   width: 16px;
 }
 
-.legend-indicator.legend-inv {
-  background: #64748b;
-  border-top: 2px dashed #64748b;
-  height: 0;
+/* Panes */
+.dual-chart-pane {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 6px 4px 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.cockpit-chart-body {
-  margin-top: 8px;
+.pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
 }
 
-/* Custom Tooltip */
+.pane-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pane-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.pane-dot.dot-inventory {
+  background: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2);
+}
+
+.pane-dot.dot-demand {
+  background: #147a62;
+  box-shadow: 0 0 0 2px rgba(20, 122, 98, 0.2);
+}
+
+.pane-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #475569;
+  text-transform: uppercase;
+}
+
+.pane-status-tag {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.pane-status-tag.tag-safe {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.pane-status-tag.tag-warning {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.pane-status-tag.tag-danger {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.pane-meta-info {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.pane-meta-info strong {
+  color: #0f172a;
+}
+
+.dual-chart-divider {
+  height: 1px;
+  background: #f1f5f9;
+  margin: 2px 8px;
+  border-top: 1px dashed #cbd5e1;
+}
+
+/* Tooltips */
 .cockpit-chart-tooltip {
   background: #ffffff;
   border: 1px solid #cfe0d8;
@@ -3476,8 +3569,8 @@ tbody tr.selected {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  min-width: 200px;
-  padding: 12px 14px;
+  min-width: 210px;
+  padding: 10px 14px;
 }
 
 .tooltip-title {
@@ -3486,6 +3579,15 @@ tbody tr.selected {
   font-size: 0.82rem;
   font-weight: 700;
   padding-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tooltip-title small {
+  color: #64748b;
+  font-weight: 500;
+  font-size: 0.72rem;
 }
 
 .tooltip-row {
@@ -3504,6 +3606,13 @@ tbody tr.selected {
   color: var(--ink, #1c2724);
 }
 
+.tooltip-row.tooltip-row-highlight {
+  background: #f8fafc;
+  padding: 3px 6px;
+  border-radius: 4px;
+  margin-top: 2px;
+}
+
 .tooltip-dot {
   border-radius: 999px;
   height: 6px;
@@ -3519,20 +3628,30 @@ tbody tr.selected {
 }
 
 .tooltip-dot.inv-dot {
-  background: #64748b;
+  background: #0284c7;
 }
 
 .tooltip-badge {
   align-items: center;
-  background: #edf7f3;
   border-radius: 6px;
-  color: #147a62;
   display: flex;
-  font-size: 0.75rem;
+  font-size: 0.74rem;
   font-weight: 700;
   gap: 5px;
   margin-top: 4px;
   padding: 4px 8px;
+}
+
+.tooltip-badge.arrival-badge {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.tooltip-badge.danger-badge {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
 }
 
 /* Plan Executive Summary & Assistant Narrative Card */

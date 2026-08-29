@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowRight, CircleAlert, Clock3, PackageSearch, ScanSearch } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ArrowRight, CircleAlert, Clock3, PackageSearch, ScanSearch, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { adaptDecisionRunView, type DecisionDemandView } from "../../lib/decision-view";
 import type { BootstrapData, DecisionPackage, PlanResponse } from "../../lib/types";
 import { DemandChart } from "./DemandChart";
