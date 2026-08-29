@@ -5491,6 +5491,34 @@ td > small {
   flex-direction: column;
 }
 
+/* 1. Top Overview Cards */
+.today-overview-cards {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 860px) {
+  .today-overview-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+.today-overview-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.today-card-eyebrow {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .today-attention-summary-bar {
   display: flex;
   align-items: center;
@@ -5500,6 +5528,7 @@ td > small {
   border-radius: 10px;
   padding: 12px 20px;
   box-shadow: 0 2px 8px rgba(234, 88, 12, 0.03);
+  min-height: 52px;
 }
 
 .attention-kpi-item {
@@ -5534,14 +5563,15 @@ td > small {
   background: #fed7aa;
 }
 
-/* 3. The Two Semantic Lanes Grid */
+/* 2. The Two Semantic Lanes Grid */
 .today-lanes-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1.15fr 0.85fr;
   gap: 20px;
+  align-items: start;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 960px) {
   .today-lanes-grid {
     grid-template-columns: 1fr;
   }
@@ -5598,6 +5628,30 @@ td > small {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.lane-content-scrollable {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.lane-content-scrollable::-webkit-scrollbar {
+  width: 5px;
+}
+
+.lane-content-scrollable::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.lane-content-stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 /* Operational Alert Row (Lane A) */
@@ -5744,6 +5798,85 @@ td > small {
   font-size: 1.05rem;
   font-weight: 800;
   color: #0f172a;
+}
+
+.today-plan-preview-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.today-preview-heading {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.today-preview-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.today-preview-items-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.today-preview-items-list::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.today-preview-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  padding: 4px 0;
+  border-bottom: 1px dashed #e2e8f0;
+}
+
+.today-preview-item-row:last-child {
+  border-bottom: none;
+}
+
+.today-preview-item-name {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.today-preview-item-qty {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.today-preview-item-qty strong {
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.today-preview-item-qty small {
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.today-preview-more {
+  font-size: 0.78rem;
+  color: #64748b;
+  font-style: italic;
+  padding-top: 4px;
+  text-align: center;
 }
 
 .plan-card-action {

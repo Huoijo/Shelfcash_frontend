@@ -237,57 +237,60 @@ function TodayOperationalView({
 
   return (
     <div className="today-briefing-wrap">
-      {/* ── 1. TRẠNG THÁI QUYẾT ĐỊNH (Pipeline Strip) ── */}
-      <section className="today-pipeline-section" aria-labelledby="today-pipeline-title">
-        <span id="today-pipeline-title" className="today-section-eyebrow">Trạng thái quyết định</span>
-        <div className="today-pipeline-strip">
-          <div className="pipeline-stage">
-            <span className={`pipeline-dot ${hasForecast ? "is-ready" : isRunning ? "is-running" : "is-pending"}`} />
-            <div className="pipeline-stage-info">
-              <span className="pipeline-stage-label">Dự báo</span>
-              <strong className="pipeline-stage-status">{forecastStatusText}</strong>
+      {/* ── 1. TOP OVERVIEW CARDS (Balanced 2-cards strip) ── */}
+      <div className="today-overview-cards">
+        {/* Card 1: Pipeline Strip */}
+        <section className="today-overview-card" aria-labelledby="today-pipeline-title">
+          <span id="today-pipeline-title" className="today-card-eyebrow">Trạng thái quyết định</span>
+          <div className="today-pipeline-strip">
+            <div className="pipeline-stage">
+              <span className={`pipeline-dot ${hasForecast ? "is-ready" : isRunning ? "is-running" : "is-pending"}`} />
+              <div className="pipeline-stage-info">
+                <span className="pipeline-stage-label">Dự báo</span>
+                <strong className="pipeline-stage-status">{forecastStatusText}</strong>
+              </div>
+            </div>
+
+            <span className="pipeline-connector" aria-hidden="true">→</span>
+
+            <div className="pipeline-stage">
+              <span className={`pipeline-dot ${hasDemand ? "is-ready" : isRunning ? "is-running" : "is-pending"}`} />
+              <div className="pipeline-stage-info">
+                <span className="pipeline-stage-label">Nhu cầu</span>
+                <strong className="pipeline-stage-status">{demandStatusText}</strong>
+              </div>
+            </div>
+
+            <span className="pipeline-connector" aria-hidden="true">→</span>
+
+            <div className="pipeline-stage">
+              <span className={`pipeline-dot ${hasFeasiblePlan ? "is-ready" : isRunning ? "is-running" : "is-pending"}`} />
+              <div className="pipeline-stage-info">
+                <span className="pipeline-stage-label">Kế hoạch</span>
+                <strong className="pipeline-stage-status">{planStatusText}</strong>
+              </div>
             </div>
           </div>
+        </section>
 
-          <span className="pipeline-connector" aria-hidden="true">→</span>
-
-          <div className="pipeline-stage">
-            <span className={`pipeline-dot ${hasDemand ? "is-ready" : isRunning ? "is-running" : "is-pending"}`} />
-            <div className="pipeline-stage-info">
-              <span className="pipeline-stage-label">Nhu cầu</span>
-              <strong className="pipeline-stage-status">{demandStatusText}</strong>
+        {/* Card 2: Attention Summary Strip */}
+        <section className="today-overview-card">
+          <span className="today-card-eyebrow">Hôm nay cần chú ý</span>
+          <div className="today-attention-summary-bar">
+            <div className="attention-kpi-item">
+              <span className="attention-kpi-num is-warning">{expiringLotsCount}</span>
+              <span className="attention-kpi-label">lô gần hạn</span>
+            </div>
+            <div className="attention-kpi-divider" aria-hidden="true" />
+            <div className="attention-kpi-item">
+              <span className="attention-kpi-num is-primary">{purchaseItemCount}</span>
+              <span className="attention-kpi-label">dòng mua cần xử lý</span>
             </div>
           </div>
+        </section>
+      </div>
 
-          <span className="pipeline-connector" aria-hidden="true">→</span>
-
-          <div className="pipeline-stage">
-            <span className={`pipeline-dot ${hasFeasiblePlan ? "is-ready" : isRunning ? "is-running" : "is-pending"}`} />
-            <div className="pipeline-stage-info">
-              <span className="pipeline-stage-label">Kế hoạch</span>
-              <strong className="pipeline-stage-status">{planStatusText}</strong>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── 2. HÔM NAY CẦN CHÚ Ý (Attention Summary Strip) ── */}
-      <section className="today-attention-section">
-        <span className="today-section-eyebrow">Hôm nay cần chú ý</span>
-        <div className="today-attention-summary-bar">
-          <div className="attention-kpi-item">
-            <span className="attention-kpi-num is-warning">{expiringLotsCount}</span>
-            <span className="attention-kpi-label">lô gần hạn</span>
-          </div>
-          <div className="attention-kpi-divider" aria-hidden="true" />
-          <div className="attention-kpi-item">
-            <span className="attention-kpi-num is-primary">{purchaseItemCount}</span>
-            <span className="attention-kpi-label">dòng mua cần xử lý</span>
-          </div>
-        </div>
-      </section>
-
-      {/* ── 3. TWO SEMANTIC LANES (Desktop 2-columns / Mobile Stack) ── */}
+      {/* ── 2. TWO BALANCED SEMANTIC LANES ── */}
       <div className="today-lanes-grid">
         {/* Lane A: RỦI RO VẬN HÀNH / ƯU TIÊN HÔM NAY */}
         <section className="today-lane lane-operational-risks">
@@ -298,7 +301,7 @@ function TodayOperationalView({
             ) : null}
           </div>
 
-          <div className="lane-content-rows">
+          <div className="lane-content-scrollable">
             {operationalAlerts.length > 0 ? (
               operationalAlerts.map((alert) => (
                 <div className="operational-alert-row" key={alert.key}>
@@ -336,7 +339,7 @@ function TodayOperationalView({
           </div>
         </section>
 
-        {/* Lane B: QUYẾT ĐỊNH ĐANG CHỜ */}
+        {/* Lane B: QUYẾT ĐỊNH ĐANG CHỜ & CHI TIẾT NHẬP HÀNG */}
         <section className="today-lane lane-pending-decisions">
           <div className="lane-header">
             <h3 className="lane-title">Quyết định đang chờ</h3>
@@ -345,7 +348,7 @@ function TodayOperationalView({
             ) : null}
           </div>
 
-          <div className="lane-content-rows">
+          <div className="lane-content-stacked">
             {hasFeasiblePlan ? (
               <div className="pending-plan-card">
                 <div className="plan-summary-top">
@@ -366,13 +369,42 @@ function TodayOperationalView({
                   </div>
                 </div>
 
+                {purchasePlanItems.length > 0 ? (
+                  <div className="today-plan-preview-box">
+                    <span className="today-preview-heading">Danh mục đề xuất nhập:</span>
+                    <div className="today-preview-items-list">
+                      {purchasePlanItems.slice(0, 5).map((item, idx) => (
+                        <div
+                          key={`${item.ingredient_id ?? item.ingredient_name ?? idx}`}
+                          className="today-preview-item-row"
+                        >
+                          <div className="today-preview-item-name">
+                            <span>{item.ingredient_name || item.ingredient || "Nguyên liệu"}</span>
+                          </div>
+                          <div className="today-preview-item-qty">
+                            <strong>{quantity(item.order_quantity ?? item.quantity, item.unit)}</strong>
+                            {item.estimated_cost != null && item.estimated_cost > 0 ? (
+                              <small>{formatVnd(item.estimated_cost)}</small>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                      {purchasePlanItems.length > 5 ? (
+                        <div className="today-preview-more">
+                          và {purchasePlanItems.length - 5} nguyên liệu khác…
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="plan-card-action">
                   <button
                     type="button"
                     className="lane-action-cta is-primary"
                     onClick={() => onNavigate("plan")}
                   >
-                    Xem kế hoạch →
+                    Xem toàn bộ kế hoạch →
                   </button>
                 </div>
               </div>
