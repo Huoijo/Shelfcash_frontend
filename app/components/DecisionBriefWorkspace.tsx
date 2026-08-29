@@ -36,6 +36,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { addDaysToDateOnly } from "../../lib/api-contract";
 import type {
   DecisionBriefFacts,
   DecisionExplanationResponse,
@@ -151,11 +152,11 @@ function findIngredientRisk(
   return null;
 }
 
-/** Generate synthetic 7-day daily timeline with demand quantiles and projected inventory */
+/** Generate synthetic daily timeline with demand quantiles and projected inventory */
 function generateDailyTimeline(
   row: IngredientDemandRow,
   procurement: ProcurementRow | null,
-  today: string,
+  startDate: string,
   horizonDays = 7
 ) {
   const p50Total = row.p50 ?? 0;
@@ -168,34 +169,56 @@ function generateDailyTimeline(
     : dailyP50 * (horizonDays + 2);
 
   let currentInv = initialStock;
-  const arrivalDateStr = procurement?.arrival_date
-    ? new Date(procurement.arrival_date).toISOString().slice(5, 10).replace("-", "/")
+  const arrivalDateKey = procurement?.arrival_date
+    ? (procurement.arrival_date.includes("T")
+        ? procurement.arrival_date.slice(0, 10)
+        : procurement.arrival_date)
     : null;
+
+  const baseDateStr = startDate.includes("T") ? startDate.slice(0, 10) : startDate;
 
   return Array.from({ length: horizonDays }, (_, i) => {
     const wave = Math.sin(i * 1.1 + 0.5) * 0.12;
-    const dateObj = new Date(today + "T00:00:00Z");
-    dateObj.setUTCDate(dateObj.getUTCDate() + i);
+    let dateStr = baseDateStr;
+    try {
+      dateStr = addDaysToDateOnly(baseDateStr, i);
+    } catch {
+      const parts = baseDateStr.split("-").map(Number);
+      if (parts.length === 3 && parts.every((n) => !isNaN(n))) {
+        const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + i));
+        dateStr = d.toISOString().slice(0, 10);
+      }
+    }
+
+    const [year, month, day] = dateStr.split("-");
+    const d = `${month}/${day}`;
+    const fullDate = `${day}/${month}/${year}`;
+
+    const dateObj = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
     const dow = dateObj.getUTCDay();
     const weekendBoost = dow === 0 || dow === 6 ? 0.2 : 0;
     const factor = Math.max(0.6, 1 + wave + weekendBoost);
 
-    const d = dateObj.toISOString().slice(5, 10).replace("-", "/");
     const p50 = Math.max(0, dailyP50 * factor);
     const bandLow = Math.max(0, (p25Total / horizonDays) * factor * 0.88);
     const bandHigh = Math.max(0, (p75Total / horizonDays) * factor * 1.12);
 
-    const shipmentIn = procurement && d === arrivalDateStr ? procurement.quantity : 0;
+    const isArrival = Boolean(
+      procurement &&
+        arrivalDateKey &&
+        (arrivalDateKey === dateStr || arrivalDateKey.endsWith(d.replace("/", "-")))
+    );
+    const shipmentIn = isArrival && procurement ? procurement.quantity : 0;
     currentInv = Math.max(0, currentInv - p50 + shipmentIn);
 
     return {
       date: d,
-      fullDate: dateObj.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" }),
+      fullDate,
       p50: Number(p50.toFixed(1)),
       bandLow: Number(bandLow.toFixed(1)),
       bandHigh: Number(bandHigh.toFixed(1)),
       projectedInventory: Number(currentInv.toFixed(1)),
-      isArrival: shipmentIn > 0,
+      isArrival,
       isStockoutDanger: currentInv <= dailyP50 * 0.5,
     };
   });
@@ -204,17 +227,19 @@ function generateDailyTimeline(
 /** Rich Decision Timeline Chart with P25-P75 confidence band, P50, and Projected Inventory */
 function IngredientDecisionChart({
   item,
-  today,
+  startDate,
+  horizonDays = 7,
 }: {
   item: IngredientItemData;
-  today: string;
+  startDate: string;
+  horizonDays?: number;
 }) {
   const chartId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const gradientId = "demand-band-" + chartId;
   const unit = item.demand.unit ? ` ${item.demand.unit}` : "";
   const data = useMemo(
-    () => generateDailyTimeline(item.demand, item.procurement, today),
-    [item, today]
+    () => generateDailyTimeline(item.demand, item.procurement, startDate, horizonDays),
+    [item, startDate, horizonDays]
   );
 
   const allValues = data.flatMap((d) => [d.bandLow, d.bandHigh, d.p50, d.projectedInventory]);
@@ -1637,9 +1662,29 @@ export function DecisionBriefWorkspace({
   const selectedItem =
     enrichedItems.find((item) => item.demand.ingredient_id === currentSelectedId) ?? null;
 
-  const today = brief.generated_at
-    ? new Date(brief.generated_at).toISOString().slice(0, 10)
-    : new Date().toISOString().slice(0, 10);
+  const forecastDate = useMemo(() => {
+    if (brief.forecast?.cutoff_date && /^\d{4}-\d{2}-\d{2}/.test(brief.forecast.cutoff_date)) {
+      return brief.forecast.cutoff_date.slice(0, 10);
+    }
+    if (decision?.as_of_date && /^\d{4}-\d{2}-\d{2}/.test(decision.as_of_date)) {
+      return decision.as_of_date.slice(0, 10);
+    }
+    if (brief.procurement_rows?.[0]?.order_date && /^\d{4}-\d{2}-\d{2}/.test(brief.procurement_rows[0].order_date)) {
+      return brief.procurement_rows[0].order_date.slice(0, 10);
+    }
+    if (data?.today && /^\d{4}-\d{2}-\d{2}/.test(data.today)) {
+      return data.today.slice(0, 10);
+    }
+    if (brief.generated_at && /^\d{4}-\d{2}-\d{2}/.test(brief.generated_at)) {
+      return brief.generated_at.slice(0, 10);
+    }
+    return new Date().toISOString().slice(0, 10);
+  }, [brief.forecast?.cutoff_date, decision?.as_of_date, brief.procurement_rows, data?.today, brief.generated_at]);
+
+  const horizonDays = useMemo(() => {
+    const raw = brief.forecast?.horizon_days ?? decision?.horizon_days;
+    return typeof raw === "number" && raw >= 1 && raw <= 30 ? raw : 7;
+  }, [brief.forecast?.horizon_days, decision?.horizon_days]);
 
   const urgentCount = enrichedItems.filter((item) => item.orderNeeded).length;
 
@@ -1934,7 +1979,11 @@ export function DecisionBriefWorkspace({
               <div className="decision-view-split">
                 {/* Column 1: Timeline & Quantiles Chart */}
                 <div className="decision-view-col-chart">
-                  <IngredientDecisionChart item={selectedItem} today={today} />
+                  <IngredientDecisionChart
+                    item={selectedItem}
+                    startDate={forecastDate}
+                    horizonDays={horizonDays}
+                  />
                 </div>
 
                 {/* Column 2: AI Narrative & Procurement Specs */}
