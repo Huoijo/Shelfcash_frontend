@@ -525,8 +525,10 @@ function supportedImportFile(file: File): boolean {
 }
 
 export function validateImportFiles(files: File[]): string[] {
+  if (!Array.isArray(files)) return [];
   const errors: string[] = [];
   files.forEach((file) => {
+    if (!file || typeof file !== "object") return;
     if (!supportedImportFile(file)) {
       errors.push(
         `“${file.name}” không được hỗ trợ. Chọn tệp .xlsx, .xls, .xlsm hoặc .csv.`,
@@ -541,7 +543,7 @@ export function validateImportFiles(files: File[]): string[] {
       `Đã chọn ${files.length} tệp; mỗi lần nhập chỉ nhận tối đa 10 tệp.`,
     );
   }
-  const totalBytes = files.reduce((total, file) => total + file.size, 0);
+  const totalBytes = files.reduce((total, file) => total + (file?.size || 0), 0);
   if (totalBytes > importFileLimits.maxTotalBytes) {
     errors.push("Tổng dung lượng tệp vượt quá giới hạn 50 MB mỗi lần nhập.");
   }

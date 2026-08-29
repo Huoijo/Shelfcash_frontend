@@ -376,16 +376,19 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
 
   function addFiles(incoming: FileList | File[]) {
     const list = Array.from(incoming);
-    const next = mergeImportFiles(files, list);
-    const errors = validateImportFiles(next);
-    if (errors.length) {
+    const selection = mergeImportFiles(files, list);
+    const validationErrors = validateImportFiles(selection.files);
+    const allErrors = [...selection.errors, ...validationErrors];
+
+    setFiles(selection.files);
+    resetImport();
+
+    if (allErrors.length) {
       const key = actionKey("upload");
       const attemptId = actionAttempts.begin(key);
-      actionAttempts.fail(key, attemptId, errors.join(" "));
-      return;
+      actionAttempts.fail(key, attemptId, allErrors.join(" "));
+      setErrors(allErrors);
     }
-    setFiles(next);
-    resetImport();
   }
 
   function removeFile(targetIndex: number) {
@@ -828,6 +831,7 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
                 hidden
                 onChange={(event) => {
                   if (event.target.files) addFiles(event.target.files);
+                  event.target.value = "";
                 }}
               />
               <UploadCloud size={21} />
@@ -850,7 +854,7 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
           {files.length ? (
             <>
               <div className="file-list">
-                {files.map((file) => (
+                {files.map((file, fileIdx) => (
                   <div key={`${file.name}:${file.lastModified}`} title={file.name}>
                     <FileSpreadsheet size={15} />
                     <span title={file.name}>
@@ -859,11 +863,7 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
                     </span>
                     <button
                       aria-label={`Bỏ ${file.name}`}
-                      onClick={() =>
-                        setFiles((current) =>
-                          current.filter((item) => item !== file),
-                        )
-                      }
+                      onClick={() => removeFile(fileIdx)}
                     >
                       <X size={14} />
                     </button>

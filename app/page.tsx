@@ -8,7 +8,7 @@ export default async function Home({
   searchParams: Promise<{ decision_view?: string; ingredient?: string }>;
 }) {
   const query = await searchParams;
-  const storeId = process.env.SHELFCASH_STORE_ID?.trim() || "STORE_001";
+  const storeId = process.env.SHELFCASH_STORE_ID?.trim() || "";
   const data = buildEmptyBootstrapData(storeId);
   const plan = emptyBackendPlan(data, "Cân bằng");
   return <ShelfCashApp
