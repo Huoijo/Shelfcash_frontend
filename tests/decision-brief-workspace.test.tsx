@@ -111,3 +111,53 @@ test("DecisionBriefWorkspace renders assistant_summary, ingredient_synthesis and
   assert.match(markup, /Nguy cấp/);
 });
 
+test("Decision Brief chart renders signed inventory balance and separates consumption from shortage", () => {
+  const briefWithShortage: DecisionBriefFacts = {
+    ...brief,
+    procurement_rows: [
+      { ingredient_id: "black-tea", ingredient_name: "Trà đen", supplier_id: "s1", supplier_name: "NCC Trà", quantity: 1, unit: "kg", order_date: "2026-08-13", arrival_date: "2026-08-18", purchase_cost: 120_000, reason_codes: ["DEMAND_EXCEEDS_AVAILABLE_SUPPLY"] },
+    ],
+    ingredient_demand: [
+      { ingredient_id: "black-tea", ingredient_name: "Trà đen", unit: "kg", p25: 0.35, p50: 0.43, p75: 0.5 },
+    ],
+  };
+
+  const decisionPayload = {
+    decision_run_id: "run-tea",
+    status: "completed",
+    as_of_date: "2026-08-12",
+    horizon_days: 7,
+    recommended_strategy: "protected",
+    recommended_plan: { items: [{ ingredient_id: "black-tea", order_quantity: 1, unit: "kg", expected_arrival_date: "2026-08-18" }] },
+    ingredient_demand: [
+      { ingredient_id: "black-tea", target_date: "2026-08-13", p25: 0.35, p50: 0.43, p75: 0.5, unit: "kg", contributions: [] },
+      { ingredient_id: "black-tea", target_date: "2026-08-14", p25: 0.35, p50: 0.43, p75: 0.5, unit: "kg", contributions: [] },
+      { ingredient_id: "black-tea", target_date: "2026-08-15", p25: 0.35, p50: 0.43, p75: 0.5, unit: "kg", contributions: [] },
+      { ingredient_id: "black-tea", target_date: "2026-08-16", p25: 0.35, p50: 0.43, p75: 0.5, unit: "kg", contributions: [] },
+      { ingredient_id: "black-tea", target_date: "2026-08-17", p25: 0.35, p50: 0.43, p75: 0.5, unit: "kg", contributions: [] },
+      { ingredient_id: "black-tea", target_date: "2026-08-18", p25: 0.35, p50: 0.43, p75: 0.5, unit: "kg", contributions: [] },
+      { ingredient_id: "black-tea", target_date: "2026-08-19", p25: 0.35, p50: 0.43, p75: 0.5, unit: "kg", contributions: [] },
+    ],
+    inventory_risk: [{ ingredient_id: "black-tea", beginning_inventory: 0.86, days_of_supply: 2 }],
+  } as any;
+
+  const markup = renderToStaticMarkup(
+    <DecisionBriefWorkspace
+      brief={briefWithShortage}
+      decision={decisionPayload}
+      error={null}
+      explanation={null}
+      explanationError={null}
+      explanationLoading={false}
+      loading={false}
+      onExplain={() => undefined}
+      onRetry={() => undefined}
+    />
+  );
+
+  assert.match(markup, /DỰ BÁO NHU CẦU &amp; DIỄN BIẾN TỒN KHO|DỰ BÁO NHU CẦU & DIỄN BIẾN TỒN KHO/);
+  assert.match(markup, /TỒN KHO DỰ KIẾN CUỐI NGÀY/);
+  assert.match(markup, /NHU CẦU THEO NGÀY/);
+});
+
+

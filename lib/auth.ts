@@ -1,14 +1,26 @@
 /**
  * Authentication and Session Management for ShelfCash
- * Supports both Mock API (Demo/Testing) and Real Backend (Live Production).
+ * Supports both Manager Portal and Staff/Branch Portal in Mock API and Real Backend.
  */
+
+export type PortalMode = "manager" | "staff";
+
+export type UserRole =
+  | "store_manager"
+  | "store_staff"
+  | "procurement_specialist"
+  | "barista"
+  | "admin";
 
 export interface UserSession {
   userId: string;
   name: string;
   email: string;
-  role: "store_manager" | "procurement_specialist" | "barista" | "admin";
+  role: UserRole;
   roleLabel: string;
+  portal?: PortalMode;
+  allowedPortals?: PortalMode[];
+  permissions?: string[];
   storeId: string;
   storeName: string;
   mode: "mock" | "real";
@@ -21,8 +33,9 @@ export const DEMO_USERS: Array<{
   id: string;
   name: string;
   email: string;
-  role: UserSession["role"];
+  role: UserRole;
   roleLabel: string;
+  portal: PortalMode;
   storeId: string;
   storeName: string;
   avatarBg: string;
@@ -34,10 +47,23 @@ export const DEMO_USERS: Array<{
     email: "tuan.nguyen@shelfcash.vn",
     role: "store_manager",
     roleLabel: "Quản lý cửa hàng (Toàn quyền)",
+    portal: "manager",
     storeId: "STORE_001",
     storeName: "ShelfCash Flagship Coffee & Tea",
     avatarBg: "linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)",
     description: "Xem toàn bộ dashboard, dự báo nhu cầu, duyệt đơn mua và quản lý danh mục menu.",
+  },
+  {
+    id: "user-staff-01",
+    name: "Nguyễn Văn A",
+    email: "staff01@shelfcash.vn",
+    role: "store_staff",
+    roleLabel: "Nhân viên chi nhánh",
+    portal: "staff",
+    storeId: "STORE_001",
+    storeName: "ShelfCash Flagship Coffee & Tea",
+    avatarBg: "linear-gradient(135deg, #10b981 0%, #047857 100%)",
+    description: "Thực thi công việc trong ca: nhận hàng theo PO, kiểm kho thực tế và báo cáo vấn đề phát sinh.",
   },
   {
     id: "user-procurement-02",
@@ -45,6 +71,7 @@ export const DEMO_USERS: Array<{
     email: "maianh.tran@shelfcash.vn",
     role: "procurement_specialist",
     roleLabel: "Chuyên viên Mua hàng & Cung ứng",
+    portal: "manager",
     storeId: "STORE_001",
     storeName: "ShelfCash Flagship Coffee & Tea",
     avatarBg: "linear-gradient(135deg, #10b981 0%, #047857 100%)",
@@ -56,6 +83,7 @@ export const DEMO_USERS: Array<{
     email: "quan.le@shelfcash.vn",
     role: "barista",
     roleLabel: "Trưởng ca / Barista Lead",
+    portal: "staff",
     storeId: "STORE_001",
     storeName: "ShelfCash Flagship Coffee & Tea",
     avatarBg: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",

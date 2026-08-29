@@ -111,6 +111,7 @@ import { PlanView, type SimulationRunInput } from "./views/PlanView";
 import { RecipesView, type ComboComponentsSaveResult, type RecipeSaveOptions } from "./views/RecipesView";
 import { SettingsView } from "./views/SettingsView";
 import { LoginView } from "./views/LoginView";
+import { StaffShell } from "./components/staff/StaffShell";
 import { SubscriptionModal } from "./components/SubscriptionModal";
 import {
   type PlanId,
@@ -1814,6 +1815,18 @@ export function ShelfCashApp({
               },
             }));
           }
+        }}
+      />
+    );
+  }
+
+  if (isMounted && session?.portal === "staff") {
+    return (
+      <StaffShell
+        session={session}
+        onLogout={() => {
+          clearSession();
+          setSession(null);
         }}
       />
     );

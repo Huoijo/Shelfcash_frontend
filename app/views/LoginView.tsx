@@ -8,13 +8,14 @@ import {
   User,
 } from "lucide-react";
 import { useState } from "react";
-import type { UserSession } from "../../lib/auth";
+import type { PortalMode, UserSession } from "../../lib/auth";
 
 interface LoginViewProps {
   onLogin: (session: UserSession) => void;
 }
 
 export function LoginView({ onLogin }: LoginViewProps) {
+  const [portalMode, setPortalMode] = useState<PortalMode>("manager");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("••••••••");
   const [showPassword, setShowPassword] = useState(false);
@@ -36,17 +37,42 @@ export function LoginView({ onLogin }: LoginViewProps) {
     setErrorMessage(null);
 
     setTimeout(() => {
-      onLogin({
-        userId: "user-01",
-        name: username === "admin" ? "Nguyễn Minh Tuấn" : (username.includes("@") ? username.split("@")[0] : username),
-        email: username.includes("@") ? username : `${username}@shelfcash.vn`,
-        role: "store_manager",
-        roleLabel: "Quản lý cửa hàng",
-        storeId: "STORE_001",
-        storeName: "ShelfCash Flagship Coffee & Tea",
-        mode: "mock",
-        loggedInAt: new Date().toISOString(),
-      });
+      if (portalMode === "staff") {
+        onLogin({
+          userId: "user-staff-01",
+          name: username === "staff" || username === "admin" ? "Nguyễn Văn A" : (username.includes("@") ? username.split("@")[0] : username),
+          email: username.includes("@") ? username : `${username}@shelfcash.vn`,
+          role: "store_staff",
+          roleLabel: "Nhân viên chi nhánh",
+          portal: "staff",
+          allowedPortals: ["staff"],
+          permissions: [
+            "STAFF_VIEW_TASKS",
+            "STAFF_RECEIVE_GOODS",
+            "STAFF_COUNT_INVENTORY",
+            "STAFF_REPORT_ISSUE",
+          ],
+          storeId: "STORE_001",
+          storeName: "ShelfCash Flagship Coffee & Tea",
+          mode: "mock",
+          loggedInAt: new Date().toISOString(),
+        });
+      } else {
+        onLogin({
+          userId: "user-01",
+          name: username === "admin" ? "Nguyễn Minh Tuấn" : (username.includes("@") ? username.split("@")[0] : username),
+          email: username.includes("@") ? username : `${username}@shelfcash.vn`,
+          role: "store_manager",
+          roleLabel: "Quản lý cửa hàng",
+          portal: "manager",
+          allowedPortals: ["manager"],
+          permissions: ["ALL"],
+          storeId: "STORE_001",
+          storeName: "ShelfCash Flagship Coffee & Tea",
+          mode: "mock",
+          loggedInAt: new Date().toISOString(),
+        });
+      }
       setBusy(false);
     }, 200);
   };
@@ -65,6 +91,36 @@ export function LoginView({ onLogin }: LoginViewProps) {
           </p>
         </div>
 
+        {/* Portal Switch */}
+        <div className="login-portal-switch-container">
+          <div className="login-portal-switch" role="tablist" aria-label="Chọn giao diện đăng nhập">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={portalMode === "manager"}
+              className={`portal-switch-btn ${portalMode === "manager" ? "active" : ""}`}
+              onClick={() => {
+                setPortalMode("manager");
+                if (username === "staff") setUsername("admin");
+              }}
+            >
+              Quản lý
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={portalMode === "staff"}
+              className={`portal-switch-btn ${portalMode === "staff" ? "active" : ""}`}
+              onClick={() => {
+                setPortalMode("staff");
+                if (username === "admin") setUsername("staff");
+              }}
+            >
+              Nhân viên
+            </button>
+          </div>
+        </div>
+
         {/* Login Form */}
         <form onSubmit={handleSubmit} className="login-form">
           {errorMessage && (
@@ -78,7 +134,7 @@ export function LoginView({ onLogin }: LoginViewProps) {
               <input
                 type="text"
                 className="login-text-input"
-                placeholder="admin"
+                placeholder={portalMode === "staff" ? "staff" : "admin"}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoFocus
@@ -119,7 +175,9 @@ export function LoginView({ onLogin }: LoginViewProps) {
               <span>Đang đăng nhập...</span>
             ) : (
               <>
-                <span>Đăng nhập</span>
+                <span>
+                  {portalMode === "staff" ? "Đăng nhập Chi nhánh" : "Đăng nhập Quản lý"}
+                </span>
                 <ArrowRight size={16} />
               </>
             )}

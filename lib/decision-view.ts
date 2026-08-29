@@ -176,14 +176,14 @@ function boolean(source: RecordValue, keys: string[]): boolean | null {
 function ingredientName(
   ingredientId: string,
   source: RecordValue,
-  data: BootstrapData,
+  data?: BootstrapData | null,
 ): string {
   const direct = text(source, ["ingredient_name", "ingredient"]);
   if (direct) return direct;
   return (
-    data.ingredients.find((item) => item.ingredientId === ingredientId)
+    data?.ingredients?.find((item) => item.ingredientId === ingredientId)
       ?.ingredient ||
-    data.inventory.find((item) => item.ingredientId === ingredientId)
+    data?.inventory?.find((item) => item.ingredientId === ingredientId)
       ?.ingredient ||
     "Nguyên liệu chưa xác định"
   );
@@ -192,13 +192,13 @@ function ingredientName(
 function productName(
   productId: string,
   source: RecordValue,
-  data: BootstrapData,
+  data?: BootstrapData | null,
 ): string {
   const direct = text(source, ["product_name", "product"]);
   if (direct) return direct;
   return (
-    data.products.find((item) => item.productId === productId)?.product ||
-    data.menu.find((item) => item.productId === productId)?.product ||
+    data?.products?.find((item) => item.productId === productId)?.product ||
+    data?.menu?.find((item) => item.productId === productId)?.product ||
     "Món chưa xác định"
   );
 }

@@ -1,7 +1,7 @@
 # SHELFCASH BACKEND API CONTRACT — ĐẶC TẢ CHI TIẾT CHO ĐỘI BACKEND
 
-**Phiên bản:** 2.0 · **Ngày tạo:** 20/08/2026  
-**Mục đích:** Tài liệu này mô tả **chính xác** từng API endpoint mà Frontend ShelfCash đang gọi, **kèm example response đầy đủ** lấy trực tiếp từ mock-data hiện tại. Backend cần tái tạo chính xác các response này để Frontend hoạt động đúng.
+**Phiên bản:** 2.1 · **Ngày cập nhật:** 29/08/2026  
+**Mục đích:** Tài liệu này mô tả **chính xác** từng API endpoint mà Frontend ShelfCash đang sử dụng (Manager Portal) và đặc tả hợp đồng tương lai cho Chi nhánh (Staff / Branch Operations Portal). Backend cần đối chiếu tài liệu này để triển khai API đồng bộ.
 
 ---
 
@@ -23,7 +23,8 @@
 | 12 | [Decision Runs (Trung tâm quyết định)](#12-decision-runs) | Hôm nay + Kế hoạch nhập |
 | 13 | [Decision Brief](#13-decision-brief) | Hôm nay + Kế hoạch nhập |
 | 14 | [Explanation & What-If](#14-explanation--what-if) | Kế hoạch nhập |
-| 15 | [Purchase Orders](#15-purchase-orders) | (Dự trữ cho tương lai) |
+| 15 | [Purchase Orders](#15-purchase-orders) | Kế hoạch nhập + Nhận hàng |
+| 16 | [Staff / Branch Operations API](#16-staff--branch-operations-api) | Staff Portal (Chi nhánh) — Proposed |
 
 ---
 
@@ -1121,10 +1122,332 @@ Response giống `settings` trong Bootstrap.
 ## 15. PURCHASE ORDERS
 
 ### `GET /api/v1/stores/{store_id}/purchase-orders`
-### `POST /api/v1/stores/{store_id}/purchase-orders`
-### `POST /api/v1/stores/{store_id}/purchase-orders/{po_id}/receive`
+**Trang FE:** Kế hoạch nhập → Lịch sử đơn hàng  
+**FE mong đợi:** Danh sách các đơn đặt hàng đã tạo từ Decision Run.
 
-(Dự trữ cho tương lai — Mock hiện tại trả `[]`)
+### `POST /api/v1/stores/{store_id}/purchase-orders`
+**Trang FE:** Kế hoạch nhập → Tạo đơn đặt hàng từ kịch bản chọn  
+**Headers:** `Idempotency-Key: <UUID>`
+
+### `POST /api/v1/stores/{store_id}/purchase-orders/{po_id}/receive`
+**Trang FE:** Chi nhánh / Nhân viên (Nhận hàng)  
+**Mục đích:** Xác nhận hàng thực nhận từ PO đã duyệt, tạo lô hàng (lots) mới vào kho và hỗ trợ nhận một phần (partial receipt).  
+**Headers:** `Idempotency-Key: <UUID>`
+
+#### Request Payload:
+```json
+{
+  "received_at": "2026-08-29T10:30:00+07:00",
+  "received_by": "user-staff-001",
+  "lines": [
+    {
+      "line_id": "POL_001",
+      "ingredient_id": "black-tea",
+      "received_quantity": 0.95,
+      "unit": "kg",
+      "lots": [
+        {
+          "batch_id": "LOT-TRA-20260829-01",
+          "quantity": 0.95,
+          "expiry_date": "2027-02-28",
+          "storage_location": "Kho khô A",
+          "condition": "accepted"
+        }
+      ],
+      "note": "Giao thiếu 0.05kg do hao hụt bao bì nhà xe"
+    }
+  ]
+}
+```
+
+*Supported `condition`:* `accepted`, `damaged`, `short_delivery`, `wrong_item`, `rejected`.
+
+#### Expected Response `200`:
+```json
+{
+  "po_id": "PO_001",
+  "status": "partially_received",
+  "received_at": "2026-08-29T10:30:00+07:00",
+  "created_lots": [
+    {
+      "lot_id": "lot-generated-001",
+      "batch_id": "LOT-TRA-20260829-01",
+      "ingredient_id": "black-tea",
+      "quantity": 0.95,
+      "unit": "kg"
+    }
+  ]
+}
+```
+
+---
+
+## 16. STAFF / BRANCH OPERATIONS API
+> ⚠️ **STATUS: PROPOSED — BACKEND NOT IMPLEMENTED**  
+> Frontend hiện đang sử dụng UI shell rỗng với feature flags để sẵn sàng kết nối khi Backend hoàn thiện.
+
+### Nguyên tắc thiết kế:
+1. **Không tạo endpoint song song:** Tái sử dụng `POST .../inventory-counts` và `POST .../purchase-orders/{po_id}/receive` cho nghiệp vụ kho và nhận hàng.
+2. **Bảo mật phân quyền:** Frontend Portal Mode (`requested_portal`) chỉ là UI Intent. Backend phải là thẩm quyền bảo mật duy nhất xác thực `role`, `permissions` và `allowed_portals`.
+3. **Idempotency:** Mọi mutation (nhận hàng, kiểm kho, gửi báo cáo) bắt buộc có header `Idempotency-Key`.
+
+---
+
+### 16.1. Authentication & Portal Context
+
+#### `POST /api/v1/auth/login`
+**Mục đích:** Xác thực người dùng và phân quyền portal truy cập.
+
+#### Request:
+```json
+{
+  "username": "staff01",
+  "password": "••••••••",
+  "requested_portal": "staff"
+}
+```
+
+#### Expected Response `200` (Staff):
+```json
+{
+  "session": {
+    "user_id": "user-staff-001",
+    "name": "Nguyễn Văn A",
+    "email": "staff01@shelfcash.vn",
+    "role": "store_staff",
+    "role_label": "Nhân viên chi nhánh",
+    "store_id": "STORE_001",
+    "store_name": "ShelfCash Flagship Coffee & Tea",
+    "allowed_portals": ["staff"],
+    "permissions": [
+      "STAFF_VIEW_TASKS",
+      "STAFF_RECEIVE_GOODS",
+      "STAFF_COUNT_INVENTORY",
+      "STAFF_REPORT_ISSUE"
+    ]
+  }
+}
+```
+
+#### Expected Response `200` (Manager):
+```json
+{
+  "session": {
+    "user_id": "user-01",
+    "name": "Nguyễn Minh Tuấn",
+    "email": "admin@shelfcash.vn",
+    "role": "store_manager",
+    "role_label": "Quản lý cửa hàng",
+    "store_id": "STORE_001",
+    "store_name": "ShelfCash Flagship Coffee & Tea",
+    "allowed_portals": ["manager", "staff"],
+    "permissions": ["ALL"]
+  }
+}
+```
+
+---
+
+### 16.2. Staff Bootstrap
+
+#### `GET /api/v1/stores/{store_id}/staff/bootstrap`
+**Mục đích:** Tải cấu hình và số liệu tổng quan nhẹ cho ca làm việc của chi nhánh.
+
+#### Expected Response `200`:
+```json
+{
+  "today": "2026-08-29",
+  "store": {
+    "store_id": "STORE_001",
+    "store_name": "ShelfCash Flagship Coffee & Tea",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staff": {
+    "user_id": "user-staff-001",
+    "name": "Nguyễn Văn A",
+    "role": "store_staff"
+  },
+  "summary": {
+    "pending_tasks": 0,
+    "receipts_due_today": 0,
+    "inventory_counts_due": 0,
+    "open_issues": 0
+  }
+}
+```
+
+---
+
+### 16.3. Staff Tasks (Hôm nay)
+
+#### `GET /api/v1/stores/{store_id}/staff/tasks`
+**Query params:** `date=2026-08-29`, `status=pending`  
+**Mục đích:** Danh sách công việc cần làm trong ca (WHAT, WHEN, ACTION). Không chứa analytics phức tạp.
+
+#### Expected Response `200`:
+```json
+{
+  "date": "2026-08-29",
+  "summary": {
+    "pending": 2,
+    "in_progress": 1,
+    "completed": 3
+  },
+  "tasks": [
+    {
+      "task_id": "TASK_001",
+      "task_type": "receive_goods",
+      "title": "Nhận hàng Tea Source VN (1 kg Trà đen)",
+      "status": "pending",
+      "priority": "normal",
+      "due_at": "2026-08-29T10:00:00+07:00",
+      "source_type": "purchase_order",
+      "source_id": "PO_001",
+      "action": {
+        "destination": "receiving",
+        "resource_id": "PO_001"
+      }
+    }
+  ]
+}
+```
+
+#### `PATCH /api/v1/stores/{store_id}/staff/tasks/{task_id}`
+**Headers:** `Idempotency-Key: <UUID>`  
+**Request:**
+```json
+{
+  "status": "completed",
+  "completed_at": "2026-08-29T10:42:00+07:00"
+}
+```
+
+---
+
+### 16.4. Staff Receipts (Nhận hàng)
+
+#### `GET /api/v1/stores/{store_id}/staff/receipts`
+**Query params:** `date=2026-08-29`, `status=due`  
+**Expected Response `200`:**
+```json
+{
+  "items": [
+    {
+      "po_id": "PO_001",
+      "supplier_id": "sup-tra-viet",
+      "supplier_name": "Nguyên liệu Trà Việt",
+      "expected_delivery_date": "2026-08-29",
+      "status": "due",
+      "lines": [
+        {
+          "line_id": "POL_001",
+          "ingredient_id": "black-tea",
+          "ingredient_name": "Trà đen",
+          "ordered_quantity": 1,
+          "unit": "kg"
+        }
+      ]
+    }
+  ]
+}
+```
+
+*(Mutation xác nhận nhận hàng sử dụng canonical endpoint `POST /api/v1/stores/{store_id}/purchase-orders/{po_id}/receive` tại Section 15).*
+
+---
+
+### 16.5. Staff Inventory Count Sessions (Kiểm kho)
+
+#### `GET /api/v1/stores/{store_id}/staff/inventory-counts`
+**Query params:** `date=2026-08-29`, `status=pending`  
+**Expected Response `200`:**
+```json
+{
+  "sessions": [
+    {
+      "count_session_id": "COUNT_001",
+      "title": "Kiểm kho cuối ca",
+      "due_at": "2026-08-29T22:00:00+07:00",
+      "status": "pending",
+      "items": [
+        {
+          "lot_id": "lot-sua-01",
+          "ingredient_id": "milk-fresh",
+          "ingredient_name": "Sữa tươi",
+          "system_quantity": 18,
+          "unit": "L",
+          "expected_version": 1
+        }
+      ]
+    }
+  ]
+}
+```
+
+*(Mutation gửi kết quả kiểm kho sử dụng canonical endpoint `POST /api/v1/stores/{store_id}/inventory-counts` tại Section 5).*
+
+---
+
+### 16.6. Operational Issues (Báo vấn đề)
+
+#### `GET /api/v1/stores/{store_id}/operational-issues`
+**Query params:** `status=open`, `reported_by=user-staff-001`  
+**Expected Response `200`:**
+```json
+{
+  "items": []
+}
+```
+
+#### `POST /api/v1/stores/{store_id}/operational-issues`
+**Headers:** `Idempotency-Key: <UUID>`  
+**Request:**
+```json
+{
+  "issue_type": "stock_mismatch",
+  "reported_at": "2026-08-29T14:20:00+07:00",
+  "reported_by": "user-staff-001",
+  "ingredient_id": "milk-fresh",
+  "lot_id": "lot-sua-01",
+  "po_id": null,
+  "system_quantity": 8,
+  "observed_quantity": 0,
+  "unit": "L",
+  "note": "Không còn hàng thực tế tại kho lạnh."
+}
+```
+
+*Supported `issue_type`:* `stock_mismatch`, `damaged_goods`, `expired_goods`, `delivery_shortage`, `wrong_item`, `stockout`, `other`.
+
+#### Expected Response `201`:
+```json
+{
+  "issue_id": "ISSUE_001",
+  "status": "open",
+  "issue_type": "stock_mismatch",
+  "reported_at": "2026-08-29T14:20:00+07:00",
+  "reported_by": "user-staff-001",
+  "store_id": "STORE_001"
+}
+```
+
+---
+
+### 16.7. Staff Error Codes (Tương lai)
+Khi Backend xử lý các mutation của Staff, bổ sung các mã lỗi chuẩn:
+* `STAFF_PERMISSION_DENIED`
+* `TASK_NOT_FOUND`
+* `TASK_ALREADY_COMPLETED`
+* `TASK_STATE_CONFLICT`
+* `RECEIPT_NOT_FOUND`
+* `RECEIPT_ALREADY_COMPLETED`
+* `RECEIVED_QUANTITY_INVALID`
+* `LOT_METADATA_REQUIRED`
+* `COUNT_SESSION_NOT_FOUND`
+* `COUNT_SESSION_ALREADY_COMPLETED`
+* `COUNT_VARIANCE_REVIEW_REQUIRED`
+* `OPERATIONAL_ISSUE_NOT_FOUND`
+* `OPERATIONAL_ISSUE_INVALID`
 
 ---
 

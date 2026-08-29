@@ -12160,6 +12160,562 @@ html:has(.procurement-planning-workspace) {
   padding: 6px;
 }
 
+/* ==================================================
+   PORTAL SWITCH (LOGIN VIEW)
+   ================================================== */
+.login-portal-switch-container {
+  margin-bottom: 20px;
+}
+
+.login-portal-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: #f1f5f3;
+  border: 1px solid #dce7e1;
+  border-radius: 10px;
+  padding: 3px;
+  gap: 4px;
+}
+
+.portal-switch-btn {
+  border: none;
+  background: transparent;
+  padding: 8px 14px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--muted, #5e6b67);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.portal-switch-btn:hover {
+  color: var(--ink, #1c2724);
+}
+
+.portal-switch-btn.active {
+  background: #ffffff;
+  color: #147a62;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* ==================================================
+   STAFF / BRANCH PORTAL SHELL & VIEWS
+   ================================================== */
+.staff-shell-root {
+  display: flex;
+  min-height: 100vh;
+  background: var(--bg, #f7faf8);
+  color: var(--ink, #1c2724);
+}
+
+/* Staff Desktop Sidebar */
+.staff-sidebar {
+  width: 260px;
+  background: var(--surface, #ffffff);
+  border-right: 1px solid var(--line, #e2e8e4);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  padding: 24px 16px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.staff-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 0 4px;
+}
+
+.staff-brand-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #147a62 0%, #0f5c4a 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-weight: 900;
+  font-size: 0.95rem;
+}
+
+.staff-brand-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.staff-brand-title {
+  font-weight: 800;
+  font-size: 1.1rem;
+  color: var(--ink, #1c2724);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.staff-brand-sub {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #147a62;
+  letter-spacing: 0.06em;
+}
+
+.staff-store-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f1f6f3;
+  border: 1px solid #dbe6e0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 20px;
+}
+
+.staff-store-icon {
+  color: #147a62;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.staff-store-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.staff-store-label {
+  font-size: 0.7rem;
+  color: var(--muted, #5e6b67);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.staff-store-name {
+  font-size: 0.82rem;
+  color: var(--ink, #1c2724);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.staff-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.staff-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted, #5e6b67);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+  width: 100%;
+}
+
+.staff-nav-btn:hover {
+  background: #f1f5f3;
+  color: var(--ink, #1c2724);
+}
+
+.staff-nav-btn.active {
+  background: #e7f3ef;
+  color: #147a62;
+  font-weight: 700;
+}
+
+.staff-nav-btn.active .staff-nav-icon {
+  color: #147a62;
+}
+
+.staff-footer-section {
+  padding-top: 16px;
+  border-top: 1px solid var(--line, #e2e8e4);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.staff-user-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px;
+}
+
+.staff-user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #e2e8e4;
+  color: #4b5563;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.staff-user-details {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.staff-user-name {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--ink, #1c2724);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.staff-user-role {
+  font-size: 0.72rem;
+  color: var(--muted, #5e6b67);
+}
+
+.staff-logout-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #dce7e1;
+  background: #ffffff;
+  border-radius: 7px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #dc2626;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.staff-logout-btn:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+/* Staff Main Content Workspace */
+.staff-main-content {
+  flex: 1;
+  padding: 32px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.staff-view-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.staff-view-header {
+  margin-bottom: 4px;
+}
+
+.staff-header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.staff-date-badge {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #147a62;
+  text-transform: capitalize;
+}
+
+.staff-view-title {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--ink, #1c2724);
+  margin: 0;
+}
+
+.staff-view-subtitle {
+  font-size: 0.85rem;
+  color: var(--muted, #5e6b67);
+  margin: 2px 0 0;
+}
+
+.staff-content-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line, #e2e8e4);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.staff-section-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--ink, #1c2724);
+  margin: 0 0 16px;
+}
+
+/* Staff Empty States */
+.staff-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--muted, #5e6b67);
+}
+
+.staff-empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: #f1f5f3;
+  color: #147a62;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.staff-empty-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--ink, #1c2724);
+  margin: 0 0 6px;
+}
+
+.staff-empty-description {
+  font-size: 0.86rem;
+  color: var(--muted, #5e6b67);
+  max-width: 380px;
+  margin: 0;
+  line-height: 1.45;
+}
+
+/* Staff Issue Form */
+.staff-issue-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.staff-form-row {
+  display: flex;
+  flex-direction: column;
+}
+
+.staff-form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.staff-form-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--ink, #1c2724);
+}
+
+.staff-select-input,
+.staff-text-input,
+.staff-textarea-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid #dce7e1;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  color: var(--ink, #1c2724);
+  background: #ffffff;
+  font-family: inherit;
+  transition: border-color 0.15s ease;
+}
+
+.staff-select-input:focus,
+.staff-text-input:focus,
+.staff-textarea-input:focus {
+  outline: none;
+  border-color: #147a62;
+  box-shadow: 0 0 0 3px rgba(20, 122, 98, 0.12);
+}
+
+.staff-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 4px;
+}
+
+.staff-submit-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: #147a62;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.staff-submit-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.staff-form-hint {
+  font-size: 0.78rem;
+  color: var(--muted, #5e6b67);
+}
+
+/* Mobile Top Header & Bottom Nav */
+.staff-mobile-top-header {
+  display: none;
+}
+
+.staff-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .staff-shell-root {
+    flex-direction: column;
+    padding-bottom: 72px;
+  }
+
+  .staff-sidebar {
+    display: none;
+  }
+
+  .staff-mobile-top-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    background: var(--surface, #ffffff);
+    border-bottom: 1px solid var(--line, #e2e8e4);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+
+  .staff-mobile-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .staff-brand-badge-small {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    background: linear-gradient(135deg, #147a62 0%, #0f5c4a 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    font-weight: 900;
+    font-size: 0.75rem;
+  }
+
+  .staff-mobile-title-wrap {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .staff-mobile-title {
+    font-size: 0.9rem;
+    font-weight: 800;
+    color: var(--ink, #1c2724);
+  }
+
+  .staff-mobile-store {
+    font-size: 0.72rem;
+    color: var(--muted, #5e6b67);
+  }
+
+  .staff-mobile-logout {
+    border: none;
+    background: transparent;
+    color: #dc2626;
+    padding: 6px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+  }
+
+  .staff-main-content {
+    padding: 16px;
+  }
+
+  .staff-form-grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .staff-bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--surface, #ffffff);
+    border-top: 1px solid var(--line, #e2e8e4);
+    height: 60px;
+    z-index: 30;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.03);
+  }
+
+  .staff-bottom-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    border: none;
+    background: transparent;
+    color: var(--muted, #5e6b67);
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 6px 0;
+    transition: color 0.15s ease;
+  }
+
+  .staff-bottom-btn.active {
+    color: #147a62;
+    font-weight: 700;
+  }
+
+  .staff-bottom-icon {
+    flex-shrink: 0;
+  }
+}
+
+
 
 
 

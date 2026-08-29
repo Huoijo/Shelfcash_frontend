@@ -30,6 +30,7 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -164,13 +165,17 @@ export interface TimelineDataPoint {
   bandLow: number;
   bandHigh: number;
   dayBeginningInv: number;
+  availableStock: number;
   dayEndingInv: number;
+  projectedBalance: number;
   isArrival: boolean;
   arrivalQty: number;
   isStockoutDanger: boolean;
   isStockout: boolean;
   shortageQty: number;
+  shortageP75: number;
   status: "safe" | "watch" | "danger" | "stockout";
+  severityLabel?: string;
 }
 
 /**
@@ -242,14 +247,20 @@ function normalizeProcurementTimelineData(
     );
     const arrivalQty = isArrival && procurement ? procurement.quantity : 0;
     const dayBeginningInv = currentInv;
-    const dayEndingInv = Math.max(0, dayBeginningInv - p50 + arrivalQty);
-    const isStockout = dayEndingInv <= 0.001;
-    const isStockoutDanger = isStockout || dayEndingInv <= dailyP50 * 0.75;
-    const shortageQty = dayBeginningInv + arrivalQty < p50 ? p50 - (dayBeginningInv + arrivalQty) : 0;
+    const availableStock = dayBeginningInv + arrivalQty;
+    const rawBalanceP50 = availableStock - p50;
+    const dayEndingInv = Math.max(0, rawBalanceP50);
+    const shortageQty = Math.max(0, -rawBalanceP50);
+
+    const rawBalanceP75 = availableStock - bandHigh;
+    const shortageP75 = Math.max(0, -rawBalanceP75);
+
+    const isStockout = shortageQty > 0 || rawBalanceP50 <= 0;
+    const isStockoutDanger = isStockout || shortageP75 > 0 || dayEndingInv <= dailyP50 * 0.75;
 
     let status: "safe" | "watch" | "danger" | "stockout" = "safe";
-    if (isStockout) status = "stockout";
-    else if (isStockoutDanger) status = "danger";
+    if (shortageQty > 0 || rawBalanceP50 <= 0) status = "stockout";
+    else if (shortageP75 > 0) status = "danger";
     else if (dayEndingInv <= dailyP50 * 1.5) status = "watch";
 
     currentInv = dayEndingInv;
@@ -262,13 +273,17 @@ function normalizeProcurementTimelineData(
       bandLow: Number(bandLow.toFixed(2)),
       bandHigh: Number(bandHigh.toFixed(2)),
       dayBeginningInv: Number(dayBeginningInv.toFixed(2)),
+      availableStock: Number(availableStock.toFixed(2)),
       dayEndingInv: Number(dayEndingInv.toFixed(2)),
+      projectedBalance: Number(rawBalanceP50.toFixed(2)),
       isArrival,
       arrivalQty: Number(arrivalQty.toFixed(2)),
       isStockoutDanger,
       isStockout,
       shortageQty: Number(shortageQty.toFixed(2)),
+      shortageP75: Number(shortageP75.toFixed(2)),
       status,
+      severityLabel: status === "stockout" ? "Cảnh báo cao" : status === "danger" ? "Nguy cơ thiếu" : status === "watch" ? "Cần theo dõi" : "Ổn định",
     };
   });
 }
@@ -292,9 +307,22 @@ function ProcurementInventoryChart({
   arrivalPoint?: TimelineDataPoint;
   dangerPoint?: TimelineDataPoint;
 }) {
-  const invValues = data.flatMap((d) => [d.dayBeginningInv, d.dayEndingInv, d.arrivalQty > 0 ? d.dayBeginningInv + d.arrivalQty : 0]);
-  const yInvMax = Math.ceil(Math.max(5, ...invValues) * 1.2);
-  const hasShortage = data.some((d) => d.isStockout);
+  const allBalances = data.flatMap((d) => [
+    d.dayBeginningInv,
+    d.availableStock,
+    d.projectedBalance,
+    d.dayEndingInv,
+  ]);
+  const minBalance = Math.min(0, ...allBalances);
+  const maxBalance = Math.max(1, ...allBalances);
+
+  const yInvMin = minBalance < 0 ? Math.floor(minBalance * 1.25 * 10) / 10 : 0;
+  const yInvMax = Math.ceil(maxBalance * 1.25 * 10) / 10;
+  const hasNegativeShortage = minBalance < 0;
+
+  const hasShortage = data.some((d) => d.shortageQty > 0 || d.isStockout);
+  const hasP75Risk = data.some((d) => d.shortageP75 > 0);
+  const hasWatch = data.some((d) => d.status === "watch");
 
   return (
     <div className="dual-chart-pane pane-inventory">
@@ -305,7 +333,9 @@ function ProcurementInventoryChart({
         </div>
         {hasShortage ? (
           <span className="pane-status-tag tag-danger">Cảnh báo thiếu hàng</span>
-        ) : dangerPoint ? (
+        ) : hasP75Risk ? (
+          <span className="pane-status-tag tag-warning">Nguy cơ thiếu</span>
+        ) : hasWatch ? (
           <span className="pane-status-tag tag-warning">Cần theo dõi tồn</span>
         ) : (
           <span className="pane-status-tag tag-safe">Tồn an toàn</span>
@@ -313,11 +343,11 @@ function ProcurementInventoryChart({
       </div>
 
       <div className="pane-chart-body">
-        <ResponsiveContainer width="100%" height={155}>
-          <ComposedChart syncId={syncId} data={data} margin={{ top: 24, right: 20, left: -6, bottom: 2 }}>
+        <ResponsiveContainer width="100%" height={165}>
+          <ComposedChart syncId={syncId} data={data} margin={{ top: 24, right: 20, left: -6, bottom: 4 }}>
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#0284c7" stopOpacity={0.22} />
+                <stop offset="0%" stopColor="#0284c7" stopOpacity={0.25} />
                 <stop offset="100%" stopColor="#0284c7" stopOpacity={0.02} />
               </linearGradient>
             </defs>
@@ -327,9 +357,29 @@ function ProcurementInventoryChart({
               axisLine={false}
               tickLine={false}
               tick={{ fill: "var(--muted, #607066)", fontSize: 11 }}
-              domain={[0, yInvMax]}
-              width={42}
+              domain={[yInvMin, yInvMax]}
+              width={44}
             />
+
+            {/* Subtle Shortage Zone Background when balance goes negative */}
+            {hasNegativeShortage ? (
+              <ReferenceArea
+                y1={yInvMin}
+                y2={0}
+                fill="#fee2e2"
+                fillOpacity={0.4}
+                stroke="none"
+              />
+            ) : null}
+
+            {/* Zero Baseline */}
+            <ReferenceLine
+              y={0}
+              stroke="var(--line-strong, #94a3b8)"
+              strokeWidth={hasNegativeShortage ? 1.5 : 1}
+              strokeDasharray={hasNegativeShortage ? "none" : "2 2"}
+            />
+
             <Tooltip
               cursor={{ stroke: "var(--line-strong, #cbd4d0)", strokeWidth: 1, strokeDasharray: "2 2" }}
               content={({ active, payload, label }) => {
@@ -361,35 +411,57 @@ function ProcurementInventoryChart({
                     <div className="tooltip-row">
                       <span>Tiêu thụ P50:</span>
                       <span>
-                        -{formatQuantity(p.p50)}
+                        {formatQuantity(p.p50)}
                         {unit}
                       </span>
                     </div>
                     <div className="tooltip-row tooltip-row-highlight">
-                      <span>Tồn cuối ngày:</span>
-                      <strong className={p.isStockout ? "text-danger" : p.isStockoutDanger ? "text-warning" : ""}>
+                      <span>Tồn thực cuối ngày:</span>
+                      <strong className={p.dayEndingInv <= 0 ? "text-danger" : ""}>
                         {formatQuantity(p.dayEndingInv)}
                         {unit}
                       </strong>
                     </div>
-                    {p.isStockout ? (
+                    {p.shortageQty > 0 ? (
+                      <div className="tooltip-row text-danger font-semibold">
+                        <span>Thiếu dự kiến:</span>
+                        <strong>
+                          {formatQuantity(p.shortageQty)}
+                          {unit}
+                        </strong>
+                      </div>
+                    ) : null}
+                    {p.projectedBalance < 0 ? (
+                      <div className="tooltip-row text-danger">
+                        <span>Số dư dự kiến:</span>
+                        <strong>
+                          {formatQuantity(p.projectedBalance)}
+                          {unit}
+                        </strong>
+                      </div>
+                    ) : null}
+                    {p.shortageQty > 0 ? (
                       <div className="tooltip-badge danger-badge">
-                        <AlertTriangle size={12} /> Cạn kho (Thiếu {formatQuantity(p.shortageQty)}{unit})
+                        <AlertTriangle size={12} /> Thiếu hàng ({formatQuantity(p.shortageQty)}{unit})
                       </div>
                     ) : p.isArrival ? (
                       <div className="tooltip-badge arrival-badge">
                         <Truck size={12} /> Lô hàng bổ sung sẵn sàng
                       </div>
-                    ) : null}
+                    ) : (
+                      <div className="tooltip-badge safe-badge">
+                        <CheckCircle2 size={12} /> Tồn an toàn
+                      </div>
+                    )}
                   </div>
                 );
               }}
             />
 
-            {/* Inventory step-after area & line */}
+            {/* Inventory step-after area & line plotting projected signed balance */}
             <Area
               type="stepAfter"
-              dataKey="dayEndingInv"
+              dataKey="projectedBalance"
               stroke="#0284c7"
               strokeWidth={2.4}
               fill={`url(#${gradientId})`}
@@ -456,8 +528,12 @@ function ProcurementInventoryChart({
                 label={(props: any) => {
                   const { viewBox } = props;
                   if (!viewBox) return null;
-                  const labelText = dangerPoint.isStockout ? "🚫 Cạn kho" : "⚠️ Nguy cơ cạn";
-                  const width = Math.max(82, labelText.length * 6.8 + 16);
+                  const labelText = dangerPoint.shortageQty > 0
+                    ? `🚫 Thiếu ${formatQuantity(dangerPoint.shortageQty)}${unit}`
+                    : dangerPoint.projectedBalance === 0
+                      ? "⚠️ Cạn kho cuối ngày"
+                      : "⚠️ Nguy cơ cạn";
+                  const width = Math.max(84, labelText.length * 6.8 + 16);
                   const dangerIndex = data.findIndex((d) => d.date === dangerPoint.date);
                   const isRightEdge = dangerIndex >= data.length - 2;
                   const isLeftEdge = dangerIndex <= 0;
@@ -686,12 +762,15 @@ function IngredientDecisionChart({
             bandLow: dr.demandP25 ?? (dr.demandP50 ? dr.demandP50 * 0.8 : 0),
             bandHigh: dr.demandP75 ?? (dr.demandP50 ? dr.demandP50 * 1.2 : 0),
             dayBeginningInv: dr.openingStock ?? 0,
+            availableStock: dr.availableStock ?? (dr.openingStock ?? 0) + (dr.incomingQuantity ?? 0),
             dayEndingInv: dr.closingStock ?? 0,
+            projectedBalance: dr.rawBalanceP50 ?? (dr.closingStock ?? 0),
             isArrival: dr.isArrival,
             arrivalQty: dr.incomingQuantity,
             isStockoutDanger: dr.severityLevel >= 2,
             isStockout: dr.severityLevel === 3 || dr.hasStockout,
             shortageQty: dr.shortageQuantity,
+            shortageP75: dr.shortageP75 ?? 0,
             status:
               dr.severityLevel === 3
                 ? "stockout"
@@ -700,6 +779,7 @@ function IngredientDecisionChart({
                   : dr.severityLevel === 1
                     ? "watch"
                     : "safe",
+            severityLabel: dr.severityLabel,
           };
         });
       }
@@ -715,8 +795,10 @@ function IngredientDecisionChart({
   }, [decision, bootstrapData, briefProcurementRows, item, startDate, horizonDays]);
 
   const totalP50 = data.reduce((s, d) => s + (d.p50 ?? 0), 0) || (item.demand.p50 ?? 0);
-  const arrivalPoint = data.find((d) => d.isArrival);
-  const dangerPoint = data.find((d) => d.isStockoutDanger && !d.isArrival);
+  const arrivalPoint = data.find((d) => d.isArrival && d.arrivalQty > 0);
+  const dangerPoint =
+    data.find((d) => d.shortageQty > 0 || (d.isStockout && d.dayEndingInv <= 0)) ??
+    (data.some((d) => d.shortageP75 > 0) ? data.find((d) => d.shortageP75 > 0) : undefined);
 
   return (
     <div
@@ -736,7 +818,7 @@ function IngredientDecisionChart({
         <div className="dual-chart-legends">
           <span className="chart-legend-item">
             <span className="legend-indicator legend-inv-step" />
-            Tồn kho dự kiến (Step line)
+            Tồn kho dự kiến
           </span>
           <span className="chart-legend-item">
             <span className="legend-indicator legend-arrival" />
