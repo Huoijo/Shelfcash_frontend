@@ -106,6 +106,7 @@ interface IngredientItemData {
   currentStock: number | null;
   stockoutRisk: "high" | "medium" | "safe";
   orderNeeded: boolean;
+  statusType: "urgent" | "watch" | "safe";
   cost: number;
 }
 
@@ -447,7 +448,11 @@ function IngredientDecisionNarrative({
 
   const importance =
     synthesis?.importance ??
-    (item.orderNeeded ? (item.daysOfSupply != null && item.daysOfSupply <= 2 ? "critical" : "watch") : "normal");
+    (item.statusType === "urgent"
+      ? "critical"
+      : item.statusType === "watch"
+        ? "watch"
+        : "normal");
 
   return (
     <div className="cockpit-decision-narrative">
@@ -483,13 +488,19 @@ function IngredientDecisionNarrative({
           {synthesis?.headline ||
             (p
               ? `Cần nhập ${formatQuantity(p.quantity, p.unit ?? "")} để đảm bảo tồn kho an toàn`
-              : "Lượng tồn kho hiện tại an toàn, chưa cần tạo đơn")}
+              : item.statusType === "urgent"
+                ? "Cần ưu tiên theo dõi rủi ro thiếu hàng trong kỳ kế hoạch"
+                : item.statusType === "watch"
+                  ? "Lượng tồn kho đang ở mức cảnh báo, cần theo dõi sát"
+                  : "Lượng tồn kho hiện tại an toàn, chưa cần tạo đơn")}
         </h4>
         <p className="synthesis-summary-text">
           {synthesis?.summary ||
             (p
               ? `Nhu cầu 7 ngày tới ước tính ${metric(d.p50, unit)} (P50). Đề xuất đặt hàng để đảm bảo lượng tồn an toàn theo chu kỳ giao.`
-              : `Nhu cầu 7 ngày tới ước tính ${metric(d.p50, unit)} (P50). Lượng tồn kho sẵn có đáp ứng đủ chu kỳ kế hoạch.`)}
+              : item.statusType === "urgent"
+                ? `Nhu cầu 7 ngày tới ước tính ${metric(d.p50, unit)} (P50). Tồn kho còn rất thấp (${item.daysOfSupply != null ? `~${item.daysOfSupply} ngày` : "thiếu dữ liệu"}), có nguy cơ thiếu hàng.`
+                : `Nhu cầu 7 ngày tới ước tính ${metric(d.p50, unit)} (P50). Lượng tồn kho sẵn có đáp ứng đủ chu kỳ kế hoạch.`)}
         </p>
       </div>
 
@@ -1524,6 +1535,7 @@ export function DecisionBriefWorkspace({
       const p = brief.procurement_rows.find((row) => row.ingredient_id === d.ingredient_id) ?? null;
       const inv = data?.inventory?.find((i) => i.ingredientId === d.ingredient_id);
       const risk = findIngredientRisk(decision, d.ingredient_id);
+      const synthesis = brief.ingredient_synthesis?.find((s) => s.ingredient_id === d.ingredient_id);
       const p50 = d.p50 ?? 0;
       const dailyP50 = p50 > 0 ? p50 / 7 : 0;
 
@@ -1558,31 +1570,54 @@ export function DecisionBriefWorkspace({
               ? "high"
               : "safe";
 
+      const orderNeeded = p != null && p.quantity > 0;
+
+      const isCritical =
+        orderNeeded ||
+        synthesis?.importance === "critical" ||
+        stockoutRisk === "high" ||
+        (daysOfSupply != null && daysOfSupply <= 2);
+
+      const isWatch =
+        !isCritical &&
+        (synthesis?.importance === "watch" ||
+          stockoutRisk === "medium" ||
+          (daysOfSupply != null && daysOfSupply <= 4));
+
+      const statusType: "urgent" | "watch" | "safe" = isCritical
+        ? "urgent"
+        : isWatch
+          ? "watch"
+          : "safe";
+
       return {
         demand: d,
         procurement: p,
         daysOfSupply,
         currentStock,
         stockoutRisk,
-        orderNeeded: p != null && p.quantity > 0,
+        orderNeeded,
+        statusType,
         cost: p?.purchase_cost ?? 0,
       };
     });
   }, [uniqueDemand, brief, data, decision]);
 
-  // Sort items: High risk / Urgent reorder first, then safe
+  // Sort items: High risk / Urgent reorder first, then watch, then safe
   const sortedItems = useMemo(() => {
     return [...enrichedItems].sort((a, b) => {
-      if (a.orderNeeded && !b.orderNeeded) return -1;
-      if (!a.orderNeeded && b.orderNeeded) return 1;
+      const order = { urgent: 0, watch: 1, safe: 2 };
+      if (order[a.statusType] !== order[b.statusType]) {
+        return order[a.statusType] - order[b.statusType];
+      }
       return (a.daysOfSupply ?? 999) - (b.daysOfSupply ?? 999);
     });
   }, [enrichedItems]);
 
   // Filter items
   const filteredItems = useMemo(() => {
-    if (filterMode === "urgent") return sortedItems.filter((item) => item.orderNeeded);
-    if (filterMode === "safe") return sortedItems.filter((item) => !item.orderNeeded);
+    if (filterMode === "urgent") return sortedItems.filter((item) => item.statusType !== "safe");
+    if (filterMode === "safe") return sortedItems.filter((item) => item.statusType === "safe");
     return sortedItems;
   }, [sortedItems, filterMode]);
 
@@ -1678,14 +1713,15 @@ export function DecisionBriefWorkspace({
   // Selected item state (default to first urgent item or first item)
   const currentSelectedId =
     selectedIngredientId ||
-    (sortedItems.find((item) => item.orderNeeded)?.demand.ingredient_id ??
+    (sortedItems.find((item) => item.statusType === "urgent")?.demand.ingredient_id ??
       sortedItems[0]?.demand.ingredient_id ??
       "");
 
   const selectedItem =
     enrichedItems.find((item) => item.demand.ingredient_id === currentSelectedId) ?? null;
 
-  const urgentCount = enrichedItems.filter((item) => item.orderNeeded).length;
+  const urgentCount = enrichedItems.filter((item) => item.statusType !== "safe").length;
+  const safeCount = enrichedItems.filter((item) => item.statusType === "safe").length;
 
   return (
     <div className="decision-cockpit-root">
@@ -1897,14 +1933,14 @@ export function DecisionBriefWorkspace({
                 onClick={() => setFilterMode("urgent")}
                 type="button"
               >
-                Cần đặt ngay ({urgentCount})
+                Cần đặt / Cảnh báo ({urgentCount})
               </button>
               <button
                 className={`filter-pill ${filterMode === "safe" ? "active" : ""}`}
                 onClick={() => setFilterMode("safe")}
                 type="button"
               >
-                Đủ hàng ({uniqueDemand.length - urgentCount})
+                Đủ hàng ({safeCount})
               </button>
             </div>
           </div>
@@ -1921,7 +1957,11 @@ export function DecisionBriefWorkspace({
                   role="listitem"
                   aria-pressed={active}
                   className={`cockpit-ingredient-card ${active ? "active" : ""} ${
-                    item.orderNeeded ? "needs-order" : "safe"
+                    item.statusType === "urgent"
+                      ? "needs-order"
+                      : item.statusType === "watch"
+                        ? "watch"
+                        : "safe"
                   }`}
                   onClick={() => setSelectedIngredientId(item.demand.ingredient_id)}
                 >
@@ -1929,9 +1969,13 @@ export function DecisionBriefWorkspace({
                     <strong className="card-title">
                       {item.demand.ingredient_name ?? "Nguyên liệu"}
                     </strong>
-                    {item.orderNeeded ? (
+                    {item.statusType === "urgent" ? (
                       <span className="card-risk-pill urgent">
-                        <AlertTriangle size={11} /> Cần đặt
+                        <AlertTriangle size={11} /> {item.orderNeeded ? "Cần đặt" : "Nguy cấp"}
+                      </span>
+                    ) : item.statusType === "watch" ? (
+                      <span className="card-risk-pill watch">
+                        <Clock size={11} /> Cần theo dõi
                       </span>
                     ) : (
                       <span className="card-risk-pill safe">
@@ -1947,7 +1991,15 @@ export function DecisionBriefWorkspace({
                     </div>
                     <div className="card-metric">
                       <span>Tồn kho còn</span>
-                      <strong className={item.daysOfSupply != null && item.daysOfSupply <= 2 ? "text-danger" : ""}>
+                      <strong
+                        className={
+                          item.daysOfSupply != null && item.daysOfSupply <= 2
+                            ? "text-danger"
+                            : item.daysOfSupply != null && item.daysOfSupply <= 4
+                              ? "text-warning"
+                              : ""
+                        }
+                      >
                         {item.daysOfSupply != null ? `~${item.daysOfSupply.toFixed(1)} ngày` : "Chưa có dữ liệu tồn"}
                       </strong>
                     </div>
@@ -1958,6 +2010,10 @@ export function DecisionBriefWorkspace({
                       <span className="card-order-action">
                         Mua {formatQuantity(item.procurement.quantity, item.procurement.unit ?? "")}
                       </span>
+                    ) : item.statusType === "urgent" ? (
+                      <span className="card-order-action text-danger">Nguy cơ thiếu</span>
+                    ) : item.statusType === "watch" ? (
+                      <span className="card-order-action text-warning">Theo dõi tồn</span>
                     ) : (
                       <span className="card-order-action safe">Không cần nhập</span>
                     )}
