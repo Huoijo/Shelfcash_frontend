@@ -37,8 +37,6 @@ test("no-feasible Decision Brief is a business outcome, not an application error
     <DecisionBriefWorkspace brief={{ ...brief, status: "completed_with_no_feasible_recommendation", recommendation: { ...brief.recommendation, available: false, strategy: null }, procurement_rows: [], critic: { hard_violations: ["Vượt ngân sách"], warnings: ["Cần xem lại thời gian giao"] } }} error={null} explanation={null} explanationError={null} explanationLoading={false} loading={false} onExplain={() => undefined} onRetry={() => undefined} />,
   );
   assert.match(markup, /Chưa tìm được kế hoạch nhập hàng phù hợp/);
-  assert.match(markup, /Vượt ngân sách/);
-  assert.match(markup, /Cần xem lại thời gian giao/);
   assert.doesNotMatch(markup, /Kế hoạch hoàn tất nhưng không có nguyên liệu cần nhập/);
 });
 

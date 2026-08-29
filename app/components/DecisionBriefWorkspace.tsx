@@ -98,17 +98,6 @@ function percentage(value: number | null | undefined): string | null {
   return `${(value * 100).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`;
 }
 
-function findingText(value: unknown, fallback: string): string {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    for (const key of ["message", "label", "title", "code"]) {
-      if (typeof record[key] === "string" && record[key].trim()) return record[key];
-    }
-  }
-  return fallback;
-}
-
 interface IngredientItemData {
   demand: IngredientDemandRow;
   procurement: ProcurementRow | null;
@@ -1967,23 +1956,6 @@ export function DecisionBriefWorkspace({
 
       {!noFeasible && !brief.procurement_rows.length ? (
         <Notice tone="info">Kế hoạch hoàn tất nhưng không có nguyên liệu cần nhập.</Notice>
-      ) : null}
-
-      {/* Critic Findings / Warnings */}
-      {brief.critic.hard_violations.length || brief.critic.warnings.length ? (
-        <section className="decision-brief-critic" aria-labelledby="critic-title">
-          <h2 id="critic-title">Điểm cần lưu ý từ hệ thống</h2>
-          {brief.critic.hard_violations.map((item, i) => (
-            <Notice key={`hard-${i}`} tone="error">
-              {findingText(item, "Có ràng buộc chưa được đáp ứng.")}
-            </Notice>
-          ))}
-          {brief.critic.warnings.map((item, i) => (
-            <Notice key={`warn-${i}`} tone="warning">
-              {findingText(item, "Có một yếu tố cần theo dõi.")}
-            </Notice>
-          ))}
-        </section>
       ) : null}
 
       {/* ═══════════════════════════════════════════════════════════════
