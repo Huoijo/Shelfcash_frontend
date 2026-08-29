@@ -1,5 +1,6 @@
 import type { DecisionDemandView, DecisionRiskView } from "./decision-view";
 import type { BootstrapData, DecisionPackage, ProcurementRow } from "./types";
+
 function formatQuantity(value: number | null | undefined, unit = ""): string {
   if (value == null) return "—";
   const formatted = value.toLocaleString("vi-VN", { maximumFractionDigits: 2 });
@@ -8,6 +9,15 @@ function formatQuantity(value: number | null | undefined, unit = ""): string {
 
 export type RiskSeverity = "stable" | "watch" | "shortage_risk" | "critical" | "unknown";
 export type HeatmapSeverityLevel = 0 | 1 | 2 | 3;
+
+export type RiskEvaluationBasis =
+  | "p50_shortage"
+  | "p75_shortage"
+  | "safety_stock"
+  | "replenishment_buffer"
+  | "fallback_coverage"
+  | "stable"
+  | "unknown";
 
 export interface DailyIngredientRiskState {
   ingredientId: string;
@@ -18,21 +28,34 @@ export interface DailyIngredientRiskState {
   severity: RiskSeverity;
   severityLevel: HeatmapSeverityLevel;
   severityLabel: string;
+  basis: RiskEvaluationBasis;
 
   demandP25: number | null;
   demandP50: number | null;
   demandP75: number | null;
 
   openingStock: number | null;
+  availableStock: number | null;
   closingStock: number | null;
+  rawBalanceP50: number | null;
+  rawBalanceP75: number | null;
   closingStockP75: number | null;
 
   incomingQuantity: number;
   isArrival: boolean;
 
   shortageQuantity: number;
+  shortageP75: number;
   hasStockout: boolean;
   stockoutDate?: string | null;
+
+  safetyThreshold: number | null;
+  forwardCoverageDays: number | null;
+  replenishmentHorizon: number | null;
+
+  isDemandSpike: boolean;
+  demandSpikeRatio: number | null;
+  demandSpikeLabel: string | null;
 
   daysOfSupply: number | null;
   reason?: string;
@@ -52,6 +75,10 @@ export interface IngredientRiskProjection {
   stockoutDate?: string | null;
 }
 
+/** Fallback heuristic constants used ONLY when replenishment lead times and receipts are absent */
+export const FALLBACK_WATCH_COVERAGE_DAYS = 3;
+export const FALLBACK_REPLENISHMENT_DAYS = 2;
+
 function normalizeDateStr(d?: string | null): string {
   if (!d) return "";
   const s = String(d).trim().split("T")[0];
@@ -63,6 +90,20 @@ function normalizeDateStr(d?: string | null): string {
     }
   }
   return s;
+}
+
+/**
+ * Calculate difference in days between two ISO date strings (target - base)
+ */
+function daysDifference(targetDate: string, baseDate: string): number {
+  try {
+    const t = new Date(`${targetDate.slice(0, 10)}T00:00:00Z`).getTime();
+    const b = new Date(`${baseDate.slice(0, 10)}T00:00:00Z`).getTime();
+    if (isNaN(t) || isNaN(b)) return 0;
+    return Math.round((t - b) / (1000 * 60 * 60 * 24));
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -124,7 +165,9 @@ export function extractProcurementRows(
 }
 
 /**
- * Single Authoritative Groundtruth Risk Projection for an ingredient over the planning horizon.
+ * Single Authoritative Groundtruth Risk Engine.
+ * Simulates daily available stock, raw balances, forward coverage trajectories,
+ * replenishment horizons, and evaluates risk using a strict precedence hierarchy.
  */
 export function projectIngredientDailyRisks(
   ingredientId: string,
@@ -140,21 +183,28 @@ export function projectIngredientDailyRisks(
   const totalP50Demand = matchingDemand.reduce((s, d) => s + (d.p50 ?? 0), 0);
   const dailyAvgDemand = dates.length > 0 ? totalP50Demand / dates.length : 0;
 
-  // 1. Resolve true starting inventory
+  // 1. Resolve true starting inventory & inventory configuration
   const invRecord = data?.inventory?.find((i) => i.ingredientId === ingredientId);
   let initialStock: number | null = null;
   if (risk?.beginningInventory != null && risk.beginningInventory >= 0) {
     initialStock = risk.beginningInventory;
+  } else if (invRecord?.usableQuantity != null && invRecord.usableQuantity >= 0) {
+    initialStock = invRecord.usableQuantity;
   } else if (invRecord?.onHand != null && invRecord.onHand >= 0) {
     initialStock = invRecord.onHand;
   } else if (risk?.daysOfSupply != null && dailyAvgDemand > 0) {
     initialStock = Math.round(dailyAvgDemand * risk.daysOfSupply);
   }
 
-  // 2. Resolve incoming shipment for this ingredient
-  const incoming = procurementRows?.find((p) => p.ingredientId === ingredientId && p.quantity > 0) ?? null;
+  const safetyThreshold = invRecord?.safetyStock != null && invRecord.safetyStock > 0 ? invRecord.safetyStock : null;
+  const supplierLeadTime = invRecord?.leadTimeDays != null && invRecord.leadTimeDays > 0 ? invRecord.leadTimeDays : null;
 
-  // 3. Simulate day-by-day progression
+  // 2. Incoming shipments for this ingredient
+  const ingredientReceipts = (procurementRows ?? []).filter(
+    (p) => p.ingredientId === ingredientId && p.quantity > 0 && Boolean(p.arrivalDate)
+  );
+
+  // 3. Day-by-Day Simulation
   let currentStock = initialStock;
   const dailyRisks: DailyIngredientRiskState[] = [];
   let maxSeverity: HeatmapSeverityLevel = 0;
@@ -167,15 +217,37 @@ export function projectIngredientDailyRisks(
     const p25 = demandRow?.p25 ?? (p50 * 0.8);
     const p75 = demandRow?.p75 ?? (p50 * 1.2);
 
-    const isArrival = Boolean(
-      incoming &&
-        incoming.arrivalDate &&
-        normalizeDateStr(incoming.arrivalDate) === normDate
+    // Identify receipts on this day
+    const dayArrivals = ingredientReceipts.filter(
+      (p) => p.arrivalDate && normalizeDateStr(p.arrivalDate) === normDate
     );
-    const incomingQty = isArrival && incoming ? incoming.quantity : 0;
+    const isArrival = dayArrivals.length > 0;
+    const incomingQty = dayArrivals.reduce((sum, p) => sum + p.quantity, 0);
 
-    // If starting inventory is completely unknown
-    if (currentStock == null) {
+    // Identify upcoming receipt after today
+    const nextReceipt = ingredientReceipts.find(
+      (p) => p.arrivalDate && normalizeDateStr(p.arrivalDate) > normDate
+    );
+    const daysUntilNextReceipt = nextReceipt && nextReceipt.arrivalDate
+      ? daysDifference(normalizeDateStr(nextReceipt.arrivalDate), normDate)
+      : null;
+
+    const replenishmentHorizon =
+      daysUntilNextReceipt != null
+        ? daysUntilNextReceipt
+        : supplierLeadTime != null
+          ? supplierLeadTime
+          : FALLBACK_REPLENISHMENT_DAYS;
+
+    // Detect demand spike metadata (does NOT dictate severity independently)
+    const isDemandSpike = dailyAvgDemand > 0 && p50 > 1.4 * dailyAvgDemand;
+    const demandSpikeRatio = dailyAvgDemand > 0 ? (p50 - dailyAvgDemand) / dailyAvgDemand : null;
+    const demandSpikeLabel = isDemandSpike && demandSpikeRatio != null
+      ? `↗ Nhu cầu cao hơn TB ${Math.round(demandSpikeRatio * 100)}%`
+      : null;
+
+    // Handle Unknown Data
+    if (currentStock == null || isNaN(currentStock)) {
       dailyRisks.push({
         ingredientId,
         ingredientName,
@@ -184,74 +256,142 @@ export function projectIngredientDailyRisks(
         severity: "unknown",
         severityLevel: 0,
         severityLabel: "Không đủ dữ liệu",
+        basis: "unknown",
         demandP25: p25,
         demandP50: p50,
         demandP75: p75,
         openingStock: null,
+        availableStock: null,
         closingStock: null,
+        rawBalanceP50: null,
+        rawBalanceP75: null,
         closingStockP75: null,
         incomingQuantity: incomingQty,
         isArrival,
         shortageQuantity: 0,
+        shortageP75: 0,
         hasStockout: false,
+        stockoutDate: null,
+        safetyThreshold,
+        forwardCoverageDays: null,
+        replenishmentHorizon,
+        isDemandSpike,
+        demandSpikeRatio,
+        demandSpikeLabel,
         daysOfSupply: null,
+        reason: "Thiếu dữ liệu tồn kho",
         contributionsCount: demandRow?.contributions.length ?? 0,
         demandRow: demandRow ?? null,
       });
       continue;
     }
 
+    // Chronology: Opening Stock -> Arrival -> Consumption
     const openingStock = currentStock;
-    const availableToday = openingStock + incomingQty;
-    const closingStock = Math.max(0, availableToday - p50);
-    const closingStockP75 = Math.max(0, availableToday - p75);
+    const availableStock = openingStock + incomingQty;
 
-    const shortageQty = availableToday < p50 ? p50 - availableToday : 0;
-    const hasStockout = shortageQty > 0 || (closingStock <= 0 && incomingQty === 0);
-    const daysRemaining = dailyAvgDemand > 0 ? closingStock / dailyAvgDemand : (closingStock > 0 ? 99 : 0);
+    // P50 Scenario Balances
+    const rawBalanceP50 = availableStock - p50;
+    const closingStockP50 = Math.max(0, rawBalanceP50);
+    const shortageP50 = Math.max(0, -rawBalanceP50);
 
+    // P75 Scenario Balances
+    const rawBalanceP75 = availableStock - p75;
+    const closingStockP75 = Math.max(0, rawBalanceP75);
+    const shortageP75 = Math.max(0, -rawBalanceP75);
+
+    // Forward coverage simulation from tomorrow onward
+    let simStock = closingStockP50;
+    let forwardCoverageDays = 0;
+    let stockoutBeforeReceipt = false;
+
+    for (let f = i + 1; f < dates.length; f++) {
+      const fDate = dates[f];
+      const fNormDate = normalizeDateStr(fDate);
+      const fIncoming = ingredientReceipts
+        .filter((p) => p.arrivalDate && normalizeDateStr(p.arrivalDate) === fNormDate)
+        .reduce((sum, p) => sum + p.quantity, 0);
+
+      const fDemand = matchingDemand.find(
+        (d) => normalizeDateStr(d.targetDate) === fNormDate
+      )?.p50 ?? dailyAvgDemand;
+
+      simStock += fIncoming;
+      if (simStock < fDemand) {
+        forwardCoverageDays += fDemand > 0 ? Math.max(0, simStock / fDemand) : 0;
+        if (nextReceipt && nextReceipt.arrivalDate && fNormDate < normalizeDateStr(nextReceipt.arrivalDate)) {
+          stockoutBeforeReceipt = true;
+        }
+        simStock = 0;
+        break;
+      }
+      simStock -= fDemand;
+      forwardCoverageDays += 1;
+    }
+
+    if (simStock > 0 && dailyAvgDemand > 0) {
+      forwardCoverageDays += simStock / dailyAvgDemand;
+    }
+
+    // ── STRICT PRECEDENCE EVALUATION ──
     let severity: RiskSeverity = "stable";
     let severityLevel: HeatmapSeverityLevel = 0;
     let severityLabel = "Ổn định";
-    let reason = "Tồn kho đủ đáp ứng";
+    let basis: RiskEvaluationBasis = "stable";
+    let reason = "Tồn kho an toàn, đủ đáp ứng kịch bản P50 & P75";
 
-    // Level 3 (Critical - Cảnh báo cao): Real shortage or empty stock
-    if (hasStockout || closingStock <= 0) {
+    // Level 3 (Critical - 🟥): Real shortage on P50, zero balance, or cạn trước khi hàng về
+    if (shortageP50 > 0 || (closingStockP50 <= 0 && incomingQty === 0) || stockoutBeforeReceipt) {
       severity = "critical";
       severityLevel = 3;
-      severityLabel = shortageQty > 0
-        ? `Cảnh báo cao (Thiếu ${formatQuantity(shortageQty, unit)})`
-        : "Cảnh báo cao (Hết tồn kho)";
-      reason = "Tồn kho không đủ đáp ứng nhu cầu P50";
+      severityLabel = shortageP50 > 0
+        ? `Cảnh báo cao (Thiếu ${formatQuantity(shortageP50, unit)})`
+        : stockoutBeforeReceipt
+          ? "Cảnh báo cao (Cạn trước khi hàng về)"
+          : "Cảnh báo cao (Hết tồn kho)";
+      basis = "p50_shortage";
+      reason = shortageP50 > 0
+        ? `Nhu cầu P50 (${formatQuantity(p50, unit)}) vượt lượng hàng khả dụng (${formatQuantity(availableStock, unit)})`
+        : "Tồn kho dự kiến cạn kiệt trong ngày";
     }
-    // Level 2 (Shortage Risk - Nguy cơ thiếu): Danger under P75 or days remaining <= 1.5 days
-    else if (closingStockP75 <= 0 || daysRemaining <= 1.5) {
+    // Level 2 (Shortage Risk - 🟧): P50 safe, but P75 causes shortage
+    else if (shortageP75 > 0 || rawBalanceP75 < 0) {
       severity = "shortage_risk";
       severityLevel = 2;
-      severityLabel = "Nguy cơ thiếu";
-      reason = "Nguy cơ thiếu nếu nhu cầu chạm ngưỡng P75";
+      severityLabel = `Nguy cơ thiếu (P75 thiếu ${formatQuantity(shortageP75, unit)})`;
+      basis = "p75_shortage";
+      reason = `Nhu cầu cao P75 (${formatQuantity(p75, unit)}) có thể làm thiếu ${formatQuantity(shortageP75, unit)}`;
     }
-    // Level 1 (Watch - Cần theo dõi): Days remaining <= 3 days, or demand spike > 40%
+    // Level 1 (Watch - 🟨): P50/P75 safe, but buffer is thin (below safety stock or forward coverage <= replenishment requirement)
     else if (
-      daysRemaining <= 3 ||
-      (dailyAvgDemand > 0 && p50 > 1.4 * dailyAvgDemand)
+      (safetyThreshold != null && closingStockP50 <= safetyThreshold) ||
+      forwardCoverageDays <= replenishmentHorizon ||
+      forwardCoverageDays <= FALLBACK_WATCH_COVERAGE_DAYS
     ) {
       severity = "watch";
       severityLevel = 1;
       severityLabel = "Cần theo dõi";
-      reason = daysRemaining <= 3 ? "Tồn kho dưới ngưỡng an toàn 3 ngày" : "Nhu cầu dự báo tăng đột biến";
+      basis = safetyThreshold != null && closingStockP50 <= safetyThreshold
+        ? "safety_stock"
+        : "replenishment_buffer";
+      reason = safetyThreshold != null && closingStockP50 <= safetyThreshold
+        ? `Tồn cuối ngày (${formatQuantity(closingStockP50, unit)}) chạm ngưỡng an toàn (${formatQuantity(safetyThreshold, unit)})`
+        : `Lượng tồn còn đủ ${forwardCoverageDays.toFixed(1)} ngày, sát thời gian bổ sung (${replenishmentHorizon} ngày)`;
     }
-    // Level 0 (Stable - Ổn định): Safe stock
+    // Level 0 (Stable - 🟩): Safe stock
     else {
       severity = "stable";
       severityLevel = 0;
       severityLabel = "Ổn định";
-      reason = "Tồn kho an toàn";
+      basis = "stable";
+      reason = "Tồn kho an toàn, đủ đáp ứng kịch bản P50 & P75";
     }
 
     if (severityLevel > maxSeverity) {
       maxSeverity = severityLevel;
     }
+
+    const daysOfSupply = dailyAvgDemand > 0 ? closingStockP50 / dailyAvgDemand : (closingStockP50 > 0 ? 99 : 0);
 
     dailyRisks.push({
       ingredientId,
@@ -261,24 +401,35 @@ export function projectIngredientDailyRisks(
       severity,
       severityLevel,
       severityLabel,
+      basis,
       demandP25: Number(p25.toFixed(2)),
       demandP50: Number(p50.toFixed(2)),
       demandP75: Number(p75.toFixed(2)),
       openingStock: Number(openingStock.toFixed(2)),
-      closingStock: Number(closingStock.toFixed(2)),
+      availableStock: Number(availableStock.toFixed(2)),
+      closingStock: Number(closingStockP50.toFixed(2)),
+      rawBalanceP50: Number(rawBalanceP50.toFixed(2)),
+      rawBalanceP75: Number(rawBalanceP75.toFixed(2)),
       closingStockP75: Number(closingStockP75.toFixed(2)),
       incomingQuantity: Number(incomingQty.toFixed(2)),
       isArrival,
-      shortageQuantity: Number(shortageQty.toFixed(2)),
-      hasStockout,
-      stockoutDate: hasStockout ? date : null,
-      daysOfSupply: Number(daysRemaining.toFixed(1)),
+      shortageQuantity: Number(shortageP50.toFixed(2)),
+      shortageP75: Number(shortageP75.toFixed(2)),
+      hasStockout: shortageP50 > 0 || closingStockP50 <= 0,
+      stockoutDate: shortageP50 > 0 || closingStockP50 <= 0 ? date : null,
+      safetyThreshold: safetyThreshold != null ? Number(safetyThreshold.toFixed(2)) : null,
+      forwardCoverageDays: Number(forwardCoverageDays.toFixed(1)),
+      replenishmentHorizon: Number(replenishmentHorizon.toFixed(1)),
+      isDemandSpike,
+      demandSpikeRatio: demandSpikeRatio != null ? Number(demandSpikeRatio.toFixed(2)) : null,
+      demandSpikeLabel,
+      daysOfSupply: Number(daysOfSupply.toFixed(1)),
       reason,
       contributionsCount: demandRow?.contributions.length ?? 0,
       demandRow: demandRow ?? null,
     });
 
-    currentStock = closingStock;
+    currentStock = closingStockP50;
   }
 
   return {
@@ -289,7 +440,7 @@ export function projectIngredientDailyRisks(
     totalP50Demand: Number(totalP50Demand.toFixed(2)),
     dailyRisks,
     maxSeverity,
-    hasAlert: maxSeverity >= 2,
-    stockoutDate: risk?.stockoutDate ?? null,
+    hasAlert: maxSeverity >= 1,
+    stockoutDate: dailyRisks.find((d) => d.hasStockout)?.targetDate ?? null,
   };
 }

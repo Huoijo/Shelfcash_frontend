@@ -738,6 +738,9 @@ function DemandRiskHeatmap({
                 <span className={`tooltip-level-pill level-${hoveredCell.level}`}>
                   {hoveredCell.severityLabel}
                 </span>
+                {hoveredCell.demandSpikeLabel ? (
+                  <span className="tooltip-spike-pill">{hoveredCell.demandSpikeLabel}</span>
+                ) : null}
                 {hoveredCell.hasStockout ? (
                   <span className="tooltip-stockout-note">Có nguy cơ cạn kho</span>
                 ) : null}

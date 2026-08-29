@@ -202,7 +202,80 @@ test("Single Groundtruth Risk Engine accurately computes Sugar (Đường) arriv
   assert.equal(day16.demandP50, 2.81);
   assert.equal(day16.openingStock, 0.3);
   assert.equal(day16.closingStock, 7.49);
-  assert.equal(day16.severity, "watch");
+  assert.equal(day16.severity, "stable");
 });
+
+test("Risk Engine Matrix: Case A (Safe) vs Case G (Demand spike with ample inventory)", () => {
+  const dates = ["2026-08-13", "2026-08-14"];
+  const demand = [
+    { ingredientId: "flour", ingredientName: "Bột mì", targetDate: "2026-08-13", p25: 0.8, p50: 1.0, p75: 1.2, unit: "kg", contributions: [] },
+    // Day 14 demand is 3.0 kg (average is (1+3)/2 = 2.0 kg; 3.0 > 1.4 * 2.0 = 2.8 kg -> 50% spike)
+    { ingredientId: "flour", ingredientName: "Bột mì", targetDate: "2026-08-14", p25: 2.5, p50: 3.0, p75: 3.5, unit: "kg", contributions: [] },
+  ];
+  const risk = { ingredientId: "flour", ingredientName: "Bột mì", beginningInventory: 100, unit: "kg" };
+
+  const projection = projectIngredientDailyRisks("flour", "Bột mì", "kg", dates, demand, risk, undefined, []);
+
+  // Ample stock ensures both days remain STABLE despite demand spike
+  assert.equal(projection.dailyRisks[0]?.severity, "stable");
+  assert.equal(projection.dailyRisks[1]?.severity, "stable");
+  assert.equal(projection.dailyRisks[1]?.isDemandSpike, true);
+  assert.match(projection.dailyRisks[1]?.demandSpikeLabel ?? "", /↗ Nhu cầu cao hơn TB/);
+});
+
+test("Risk Engine Matrix: Case B (Thin buffer / Safety Stock breach)", () => {
+  const dates = ["2026-08-13"];
+  const demand = [{ ingredientId: "tea", ingredientName: "Trà", targetDate: "2026-08-13", p25: 1.8, p50: 2.0, p75: 2.2, unit: "kg", contributions: [] }];
+  const risk = { ingredientId: "tea", ingredientName: "Trà", beginningInventory: 4.0, unit: "kg" };
+  const mockData = {
+    inventory: [{ ingredientId: "tea", ingredient: "Trà", sku: "TEA", unit: "kg", onHand: 4.0, safetyStock: 3.0, leadTimeDays: 1, unitCost: 100, expiryDate: "", expiringQty: 0, inbound: 0, supplier: "", moq: 0, packSize: 0, capacity: 0, lastCounted: "" }],
+  } as unknown as BootstrapData;
+
+  const projection = projectIngredientDailyRisks("tea", "Trà", "kg", dates, demand, risk, mockData, []);
+  // Ending stock is 4 - 2 = 2 kg <= safetyStock (3 kg) -> triggers WATCH
+  assert.equal(projection.dailyRisks[0]?.severity, "watch");
+  assert.equal(projection.dailyRisks[0]?.basis, "safety_stock");
+});
+
+test("Risk Engine Matrix: Case C (P75 shortage) vs Case D (P50 shortage)", () => {
+  const dates = ["2026-08-13"];
+  // Case C: available = 5kg, P50 = 4kg, P75 = 6kg -> P50 safe, P75 short by 1kg -> SHORTAGE_RISK
+  const demandC = [{ ingredientId: "c", ingredientName: "C", targetDate: "2026-08-13", p25: 3.0, p50: 4.0, p75: 6.0, unit: "kg", contributions: [] }];
+  const riskC = { ingredientId: "c", ingredientName: "C", beginningInventory: 5.0, unit: "kg" };
+  const projC = projectIngredientDailyRisks("c", "C", "kg", dates, demandC, riskC, undefined, []);
+  assert.equal(projC.dailyRisks[0]?.severity, "shortage_risk");
+  assert.equal(projC.dailyRisks[0]?.shortageP75, 1.0);
+  assert.equal(projC.dailyRisks[0]?.shortageQuantity, 0);
+
+  // Case D: available = 2kg, P50 = 5kg -> P50 short by 3kg -> CRITICAL
+  const demandD = [{ ingredientId: "d", ingredientName: "D", targetDate: "2026-08-13", p25: 4.0, p50: 5.0, p75: 6.0, unit: "kg", contributions: [] }];
+  const riskD = { ingredientId: "d", ingredientName: "D", beginningInventory: 2.0, unit: "kg" };
+  const projD = projectIngredientDailyRisks("d", "D", "kg", dates, demandD, riskD, undefined, []);
+  assert.equal(projD.dailyRisks[0]?.severity, "critical");
+  assert.equal(projD.dailyRisks[0]?.shortageQuantity, 3.0);
+});
+
+test("Risk Engine Matrix: Case E (Receipt recovery) and Case F (Missing data -> UNKNOWN)", () => {
+  // Case E: Day 1 short (CRITICAL), Day 2 receipt recovers stock (STABLE)
+  const dates = ["2026-08-13", "2026-08-14"];
+  const demand = [
+    { ingredientId: "syrup", ingredientName: "Siro", targetDate: "2026-08-13", p25: 1.5, p50: 2.0, p75: 2.5, unit: "L", contributions: [] },
+    { ingredientId: "syrup", ingredientName: "Siro", targetDate: "2026-08-14", p25: 1.5, p50: 2.0, p75: 2.5, unit: "L", contributions: [] },
+  ];
+  const risk = { ingredientId: "syrup", ingredientName: "Siro", beginningInventory: 0.5, unit: "L" };
+  const receipts = [{ ingredientId: "syrup", quantity: 20, arrivalDate: "2026-08-14" }];
+
+  const projE = projectIngredientDailyRisks("syrup", "Siro", "L", dates, demand, risk, undefined, receipts);
+  assert.equal(projE.dailyRisks[0]?.severity, "critical");
+  assert.equal(projE.dailyRisks[1]?.severity, "stable");
+  assert.equal(projE.dailyRisks[1]?.isArrival, true);
+
+  // Case F: No inventory record or risk -> UNKNOWN
+  const projF = projectIngredientDailyRisks("missing", "Ẩn", "kg", dates, demand, undefined, undefined, []);
+  assert.equal(projF.dailyRisks[0]?.severity, "unknown");
+  assert.equal(projF.dailyRisks[0]?.severityLevel, 0);
+  assert.equal(projF.dailyRisks[0]?.severityLabel, "Không đủ dữ liệu");
+});
+
 
 
