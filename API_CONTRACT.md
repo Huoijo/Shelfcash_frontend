@@ -25,6 +25,7 @@
 | 14 | [Explanation & What-If](#14-explanation--what-if) | Kế hoạch nhập |
 | 15 | [Purchase Orders](#15-purchase-orders) | Kế hoạch nhập + Nhận hàng |
 | 16 | [Staff / Branch Operations API](#16-staff--branch-operations-api) | Staff Portal (Chi nhánh) — Proposed |
+| 17 | [Opportunity Recommendation](#17-opportunity-recommendation) | Khám phá cơ hội (Manager) — Proposed |
 
 ---
 
@@ -1448,6 +1449,138 @@ Khi Backend xử lý các mutation của Staff, bổ sung các mã lỗi chuẩn
 * `COUNT_VARIANCE_REVIEW_REQUIRED`
 * `OPERATIONAL_ISSUE_NOT_FOUND`
 * `OPERATIONAL_ISSUE_INVALID`
+
+---
+
+## 17. OPPORTUNITY RECOMMENDATION
+
+> ⚠️ **TRẠNG THÁI: PROPOSED / BACKEND CHƯA TRIỂN KHAI**  
+> Frontend hiện đang sử dụng **Preview Mode (Dev Adapter)** độc lập. Khi Backend triển khai các endpoint dưới đây, frontend sẽ chuyển sang **Live Mode** thông qua biến môi trường `NEXT_PUBLIC_SHELFCASH_OPPORTUNITY_MODE=live`.
+
+### 17.1. Tạo phiên quét cơ hội (Create Opportunity Run)
+`POST /api/v1/stores/{store_id}/opportunity-runs`  
+**Headers:** `Content-Type: application/json`
+
+#### Request Body:
+```json
+{
+  "radius_km": 3,
+  "trial_budget": 2000000
+}
+```
+
+#### Expected Response `201`:
+```json
+{
+  "run_id": "opp-run-1725102000",
+  "store_id": "STORE_001",
+  "radius_km": 3,
+  "trial_budget": 2000000,
+  "status": "scanning",
+  "current_stage_index": 1,
+  "total_stages": 5,
+  "progress_percent": 20,
+  "stage_message": "Đang quét khu vực 3 km...",
+  "scanned_count": 12,
+  "total_pois_count": 31,
+  "created_at": "2026-08-31T19:30:00.000Z"
+}
+```
+
+---
+
+### 17.2. Lấy trạng thái phiên quét (Get Opportunity Run Status)
+`GET /api/v1/stores/{store_id}/opportunity-runs/{run_id}`
+
+#### Expected Response `200`:
+```json
+{
+  "run_id": "opp-run-1725102000",
+  "store_id": "STORE_001",
+  "status": "completed",
+  "progress_percent": 100,
+  "stage_message": "Hoàn tất phân tích cơ hội.",
+  "created_at": "2026-08-31T19:30:00.000Z",
+  "completed_at": "2026-08-31T19:30:04.000Z"
+}
+```
+
+---
+
+### 17.3. Lấy kết quả đề xuất & danh mục thử nghiệm (Get Opportunity Result)
+`GET /api/v1/stores/{store_id}/opportunity-runs/{run_id}/result`
+
+#### Expected Response `200`:
+```json
+{
+  "run_id": "opp-run-1725102000",
+  "store_id": "STORE_001",
+  "status": "completed",
+  "local_context": {
+    "radius_km": 3,
+    "total_pois": 31,
+    "scanned_pois": 31,
+    "metrics": [
+      { "key": "university", "label": "Trường / Đại học", "count": 6 },
+      { "key": "transit", "label": "Transit", "count": 4 },
+      { "key": "competition", "label": "Cạnh tranh", "count": 18 },
+      { "key": "retail", "label": "Retail bổ trợ", "count": 11 }
+    ],
+    "signals": [
+      { "key": "students", "label": "Sinh viên cao" },
+      { "key": "to_go", "label": "Mang đi mạnh" },
+      { "key": "rainy_season", "label": "Mùa mưa" }
+    ]
+  },
+  "ranked_candidates": [
+    {
+      "id": "cand-tra-lai",
+      "name": "Trà Lài",
+      "category": "Trà & Giải khát",
+      "domain": "same_domain",
+      "opportunity_score": 0.82,
+      "rank": 1,
+      "criteria": {
+        "area_fit": "Cao",
+        "ingredient_leverage": "Rất cao",
+        "menu_differentiation": "Tốt",
+        "complexity": "Thấp"
+      },
+      "price_range": { "min": 32000, "max": 38000 },
+      "trial_cost": 480000,
+      "key_highlights": [
+        "Dùng lại nguyên liệu hiện có",
+        "Phù hợp nhóm khách quanh khu vực"
+      ],
+      "why_path": [
+        "Đại học tập trung cao",
+        "Nhóm khách sinh viên",
+        "Ưu tiên nhanh / mang đi",
+        "Trà Lài",
+        "Tận dụng nguyên liệu hiện có",
+        "Chi phí thử thấp"
+      ],
+      "reusable_ingredients": ["Trà xanh hoa lài", "Đường mía", "Đá viên"],
+      "new_ingredients": ["Hoa lài sấy khô trang trí"]
+    }
+  ],
+  "trial_portfolio": {
+    "budget": 2000000,
+    "allocated_cost": 1620000,
+    "remaining_budget": 380000,
+    "candidate_count": 3,
+    "items": [
+      {
+        "candidate_id": "cand-tra-lai",
+        "candidate_name": "Trà Lài",
+        "trial_cost": 480000,
+        "score": 0.82,
+        "selected": true
+      }
+    ]
+  }
+}
+```
 
 ---
 

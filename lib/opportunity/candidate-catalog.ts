@@ -1,0 +1,237 @@
+import type {
+  LocalOpportunityContext,
+  OpportunityCandidate,
+  PoiPoint,
+} from "./types";
+
+export const PREVIEW_POI_POINTS: PoiPoint[] = [
+  // Universities (6)
+  { id: "poi-u1", label: "Đại học Bách Khoa", type: "university", angleDeg: 28, distanceNormalized: 0.35 },
+  { id: "poi-u2", label: "Đại học Kinh Tế", type: "university", angleDeg: 72, distanceNormalized: 0.52 },
+  { id: "poi-u3", label: "Đại học Y Dược", type: "university", angleDeg: 145, distanceNormalized: 0.7 },
+  { id: "poi-u4", label: "Đại học Sư Phạm", type: "university", angleDeg: 210, distanceNormalized: 0.44 },
+  { id: "poi-u5", label: "Đại học Khoa Học Tự Nhiên", type: "university", angleDeg: 285, distanceNormalized: 0.65 },
+  { id: "poi-u6", label: "Cao Đẳng Kỹ Thuật", type: "university", angleDeg: 330, distanceNormalized: 0.8 },
+
+  // Transit (4)
+  { id: "poi-t1", label: "Trạm Metro Số 1", type: "transit", angleDeg: 45, distanceNormalized: 0.28 },
+  { id: "poi-t2", label: "Trạm xe buýt Trung tâm", type: "transit", angleDeg: 120, distanceNormalized: 0.38 },
+  { id: "poi-t3", label: "Nút giao thông Vành Đai", type: "transit", angleDeg: 195, distanceNormalized: 0.78 },
+  { id: "poi-t4", label: "Bến đón trả khách liên quận", type: "transit", angleDeg: 310, distanceNormalized: 0.82 },
+
+  // Competition (12)
+  { id: "poi-c1", label: "Chuỗi cà phê A", type: "competition", angleDeg: 15, distanceNormalized: 0.22 },
+  { id: "poi-c2", label: "Quán trà sữa X", type: "competition", angleDeg: 40, distanceNormalized: 0.48 },
+  { id: "poi-c3", label: "Cà phê vỉa hè B", type: "competition", angleDeg: 60, distanceNormalized: 0.31 },
+  { id: "poi-c4", label: "Chuỗi đồ uống C", type: "competition", angleDeg: 85, distanceNormalized: 0.62 },
+  { id: "poi-c5", label: "Quán trà trái cây D", type: "competition", angleDeg: 105, distanceNormalized: 0.4 },
+  { id: "poi-c6", label: "Quán cà phê Specialty", type: "competition", angleDeg: 135, distanceNormalized: 0.55 },
+  { id: "poi-c7", label: "Tiệm trà sữa Y", type: "competition", angleDeg: 160, distanceNormalized: 0.75 },
+  { id: "poi-c8", label: "Chuỗi đồ uống E", type: "competition", angleDeg: 175, distanceNormalized: 0.33 },
+  { id: "poi-c9", label: "Cà phê máy tự động", type: "competition", angleDeg: 225, distanceNormalized: 0.58 },
+  { id: "poi-c10", label: "Quán nước ép F", type: "competition", angleDeg: 240, distanceNormalized: 0.42 },
+  { id: "poi-c11", label: "Quán cà phê rang xay", type: "competition", angleDeg: 270, distanceNormalized: 0.25 },
+  { id: "poi-c12", label: "Trà sữa nhà làm G", type: "competition", angleDeg: 340, distanceNormalized: 0.68 },
+
+  // Complementary Retail (9)
+  { id: "poi-r1", label: "Cửa hàng tiện lợi 24/7", type: "retail", angleDeg: 32, distanceNormalized: 0.2 },
+  { id: "poi-r2", label: "Nhà sách Fahasa", type: "retail", angleDeg: 68, distanceNormalized: 0.45 },
+  { id: "poi-r3", label: "Khu văn phòng Tech Hub", type: "retail", angleDeg: 110, distanceNormalized: 0.5 },
+  { id: "poi-r4", label: "Phòng gym California", type: "retail", angleDeg: 150, distanceNormalized: 0.6 },
+  { id: "poi-r5", label: "Cửa hàng bánh mì tươi", type: "retail", angleDeg: 165, distanceNormalized: 0.27 },
+  { id: "poi-r6", label: "Siêu thị mini WinMart", type: "retail", angleDeg: 200, distanceNormalized: 0.36 },
+  { id: "poi-r7", label: "Khu Co-working Space", type: "retail", angleDeg: 230, distanceNormalized: 0.53 },
+  { id: "poi-r8", label: "Tòa nhà Ngân hàng", type: "retail", angleDeg: 280, distanceNormalized: 0.72 },
+  { id: "poi-r9", label: "Cửa hàng phụ kiện số", type: "retail", angleDeg: 325, distanceNormalized: 0.6 },
+];
+
+export const PREVIEW_LOCAL_CONTEXT: LocalOpportunityContext = {
+  radiusKm: 3,
+  totalPois: 31,
+  scannedPois: 31,
+  metrics: [
+    { key: "university", label: "Trường / Đại học", count: 6 },
+    { key: "transit", label: "Transit", count: 4 },
+    { key: "competition", label: "Cạnh tranh", count: 12 },
+    { key: "retail", label: "Retail bổ trợ", count: 9 },
+  ],
+
+  signals: [
+    { key: "students", label: "Sinh viên cao", badgeType: "info" },
+    { key: "to_go", label: "Mang đi mạnh", badgeType: "success" },
+    { key: "rainy_season", label: "Mùa mưa", badgeType: "warning" },
+  ],
+  poiPoints: PREVIEW_POI_POINTS,
+};
+
+export const PREVIEW_CANDIDATE_CATALOG: OpportunityCandidate[] = [
+  {
+    id: "cand-tra-lai",
+    name: "Trà Lài",
+    category: "Trà & Giải khát",
+    domain: "same_domain",
+    opportunityScore: 0.82,
+    rank: 1,
+    criteria: {
+      areaFit: "Cao",
+      ingredientLeverage: "Rất cao",
+      menuDifferentiation: "Tốt",
+      complexity: "Thấp",
+    },
+    priceRange: {
+      min: 32000,
+      max: 38000,
+    },
+    trialCost: 480000,
+    keyHighlights: [
+      "Dùng lại nguyên liệu hiện có",
+      "Phù hợp nhóm khách quanh khu vực",
+    ],
+    whyPath: [
+      "Đại học tập trung cao",
+      "Nhóm khách sinh viên",
+      "Ưu tiên nhanh / mang đi",
+      "Trà Lài",
+      "Tận dụng nguyên liệu hiện có",
+      "Chi phí thử thấp",
+    ],
+    reusableIngredients: ["Trà xanh hoa lài", "Đường mía", "Đá viên"],
+    newIngredients: ["Hoa lài sấy khô trang trí"],
+    preparationTimeMinutes: 2,
+    constraints: ["Hương trà nhạy cảm với nhiệt độ ủ", "Bảo quản cốt trà trong 4 giờ"],
+  },
+  {
+    id: "cand-cf-muoi",
+    name: "Cà Phê Muối Biển",
+    category: "Cà phê",
+    domain: "same_domain",
+    opportunityScore: 0.76,
+    rank: 2,
+    criteria: {
+      areaFit: "Rất cao",
+      ingredientLeverage: "Cao",
+      menuDifferentiation: "Rất cao",
+      complexity: "Thấp",
+    },
+    priceRange: {
+      min: 35000,
+      max: 42000,
+    },
+    trialCost: 560000,
+    keyHighlights: [
+      "Món xu hướng có tỷ lệ gọi lặp lại cao",
+      "Tận dụng cốt cà phê Robusta pha sẵn",
+    ],
+    whyPath: [
+      "Mật độ văn phòng & transit cao",
+      "Nhu cầu thử vị mới buổi sáng",
+      "Cà Phê Muối Biển",
+      "Tận dụng hạt Robusta & sữa đặc sẵn có",
+      "Khác biệt với đối thủ lân cận",
+    ],
+    reusableIngredients: ["Cà phê Robusta", "Sữa đặc", "Sữa tươi"],
+    newIngredients: ["Bột kem muối biển", "Kem béo thực vật"],
+    preparationTimeMinutes: 3,
+    constraints: ["Kem muối cần đánh bọt lạnh", "Thời gian tách lớp bọt khoảng 20 phút"],
+  },
+  {
+    id: "cand-coldbrew-camsa",
+    name: "Cold Brew Cam Sả",
+    category: "Cold Brew",
+    domain: "same_domain",
+    opportunityScore: 0.71,
+    rank: 3,
+    criteria: {
+      areaFit: "Cao",
+      ingredientLeverage: "Trung bình",
+      menuDifferentiation: "Tốt",
+      complexity: "Trung bình",
+    },
+    priceRange: {
+      min: 45000,
+      max: 52000,
+    },
+    trialCost: 580000,
+    keyHighlights: [
+      "Thời gian bảo quản lạnh tốt trong ngày",
+      "Biên lợi nhuận gộp cao (>65%)",
+    ],
+    whyPath: [
+      "Khách hàng trẻ thích đồ uống giải nhiệt",
+      "Xu hướng thức uống ủ lạnh mang đi",
+      "Cold Brew Cam Sả",
+      "Thời gian bảo quản lạnh tốt trong ngày",
+      "Biên lợi nhuận cao",
+    ],
+    reusableIngredients: ["Hạt Arabica Cầu Đất", "Đường mía"],
+    newIngredients: ["Cam vàng tươi", "Syrup sả tự nhiên"],
+    preparationTimeMinutes: 2,
+    constraints: ["Cần ủ lạnh trước 14–16 giờ", "Hạn dùng mẻ ủ tối đa 48 giờ"],
+  },
+  {
+    id: "cand-tra-olong-nuong",
+    name: "Trà Sữa Ô Long Nướng",
+    category: "Trà sữa",
+    domain: "same_domain",
+    opportunityScore: 0.68,
+    rank: 4,
+    criteria: {
+      areaFit: "Cao",
+      ingredientLeverage: "Cao",
+      menuDifferentiation: "Khá",
+      complexity: "Trung bình",
+    },
+    priceRange: {
+      min: 38000,
+      max: 46000,
+    },
+    trialCost: 620000,
+    keyHighlights: [
+      "Tăng lượng đơn khung giờ 15h–18h",
+      "Dùng chung dụng cụ pha chế hiện tại",
+    ],
+    whyPath: [
+      "Lưu lượng sinh viên buổi chiều tối",
+      "Nhu cầu đồ uống ngọt giải tỏa năng lượng",
+      "Trà Sữa Ô Long Nướng",
+      "Dùng chung syrup và trân châu sẵn có",
+    ],
+    reusableIngredients: ["Sữa tươi", "Đường đen", "Trân châu hoàng kim"],
+    newIngredients: ["Trà Ô Long sấy than"],
+    preparationTimeMinutes: 4,
+    constraints: ["Cần kiểm soát độ đậm vị trà ủ"],
+  },
+  {
+    id: "cand-croissant-almond",
+    name: "Bánh Croissant Hạnh Nhân",
+    category: "Bánh & Ăn kèm",
+    domain: "cross_domain",
+    opportunityScore: 0.63,
+    rank: 5,
+    criteria: {
+      areaFit: "Trung bình",
+      ingredientLeverage: "Thấp",
+      menuDifferentiation: "Rất cao",
+      complexity: "Trung bình",
+    },
+    priceRange: {
+      min: 28000,
+      max: 35000,
+    },
+    trialCost: 750000,
+    keyHighlights: [
+      "Tăng giá trị trung bình trên đơn hàng (AOV)",
+      "Mở rộng danh mục ăn nhẹ buổi sáng",
+    ],
+    whyPath: [
+      "Nhu cầu combo ăn sáng kèm cà phê",
+      "Tăng giá trị trung bình trên mỗi đơn",
+      "Bánh Croissant Hạnh Nhân",
+      "Liên kết đối tác làm bánh giao sáng",
+    ],
+    reusableIngredients: [],
+    newIngredients: ["Bánh Croissant nướng sẵn", "Hạnh nhân lát", "Đường bột"],
+    preparationTimeMinutes: 3,
+    constraints: ["Cần tủ kính trưng bày bánh", "Hạn sử dụng trong ngày"],
+  },
+];

@@ -96,6 +96,20 @@ CORS_ORIGINS=http://localhost:5173,http://localhost:3000
 Do frontend dùng proxy server-to-server, API key không cần xuất hiện trong
 `NEXT_PUBLIC_*` hay mã React.
 
+## Cấu hình tính năng Khám phá cơ hội (Opportunity Recommendation)
+
+Biến môi trường điều khiển chế độ hiển thị và kết nối:
+
+```dotenv
+NEXT_PUBLIC_SHELFCASH_OPPORTUNITY_MODE=preview
+```
+
+Các giá trị hỗ trợ:
+- `disabled`: Tắt tính năng, không hiển thị mục trên thanh điều hướng.
+- `preview`: Bật tính năng với Dev/Preview Adapter cục bộ, mô phỏng radar scan, nhận diện bối cảnh và gợi ý danh mục thử nghiệm mà không gọi backend.
+- `live`: Kết nối trực tiếp đến Opportunity API backend thật.
+
+
 ## Kiểm tra
 
 ```bash

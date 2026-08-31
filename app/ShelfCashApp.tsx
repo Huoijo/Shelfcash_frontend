@@ -5,6 +5,7 @@ import {
   CalendarClock,
   ChevronRight,
   Coffee,
+  Compass,
   Home,
   LogOut,
   Menu as MenuIcon,
@@ -110,6 +111,7 @@ import { MenuView } from "./views/MenuView";
 import { PlanView, type SimulationRunInput } from "./views/PlanView";
 import { RecipesView, type ComboComponentsSaveResult, type RecipeSaveOptions } from "./views/RecipesView";
 import { SettingsView } from "./views/SettingsView";
+import { OpportunityView } from "./views/OpportunityView";
 import { LoginView } from "./views/LoginView";
 import { StaffShell } from "./components/staff/StaffShell";
 import { SubscriptionModal } from "./components/SubscriptionModal";
@@ -120,9 +122,11 @@ import {
   SUBSCRIPTION_PLANS,
 } from "../lib/subscriptions";
 import { getStoredSession, saveSession, clearSession, type UserSession } from "../lib/auth";
+import { getOpportunityMode } from "../lib/opportunity/config";
 
 type PageKey =
   | "today"
+  | "opportunity"
   | "future"
   | "simulator"
   | "import"
@@ -133,12 +137,15 @@ type PageKey =
   | "orders"
   | "settings";
 
+const opportunityMode = getOpportunityMode();
+
 const navigationGroups: Array<{
   label?: string;
   items: Array<{
     key: PageKey;
     label: string;
     icon: typeof Home;
+    badge?: string;
   }>;
 }> = [
   {
@@ -147,6 +154,21 @@ const navigationGroups: Array<{
       { key: "plan", label: "Kế hoạch nhập", icon: ShoppingCart },
     ],
   },
+  ...(opportunityMode !== "disabled"
+    ? [
+        {
+          label: "Khám phá",
+          items: [
+            {
+              key: "opportunity" as const,
+              label: "Khám phá cơ hội",
+              icon: Compass,
+              badge: opportunityMode === "preview" ? "MỚI" : undefined,
+            },
+          ],
+        },
+      ]
+    : []),
   {
     label: "Dữ liệu",
     items: [
@@ -196,7 +218,9 @@ function AppNavigation({
                 >
                   <Icon aria-hidden="true" size={18} strokeWidth={1.8} />
                   <span>{item.label}</span>
-                  {item.key === "import" && importDraftCount ? (
+                  {item.badge ? (
+                    <span className="nav-badge-new">{item.badge}</span>
+                  ) : item.key === "import" && importDraftCount ? (
                     <b className="nav-count">{importDraftCount}</b>
                   ) : null}
                 </button>
@@ -1780,6 +1804,13 @@ export function ShelfCashApp({
                   ? "orders"
                   : "plan"
             }
+          />
+        );
+      case "opportunity":
+        return (
+          <OpportunityView
+            storeId={data.settings.storeId}
+            storeName={data.settings.storeName}
           />
         );
       case "settings":
