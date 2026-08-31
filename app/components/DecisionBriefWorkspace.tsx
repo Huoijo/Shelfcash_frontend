@@ -324,6 +324,13 @@ function ProcurementInventoryChart({
   const hasP75Risk = data.some((d) => d.shortageP75 > 0);
   const hasWatch = data.some((d) => d.status === "watch");
 
+  const arrivalIndex = arrivalPoint ? data.findIndex((d) => d.date === arrivalPoint.date) : -1;
+  const dangerIndex = dangerPoint ? data.findIndex((d) => d.date === dangerPoint.date) : -1;
+  const bothMarkersExist = arrivalIndex >= 0 && dangerIndex >= 0;
+  const isCloseOrSame = bothMarkersExist && Math.abs(arrivalIndex - dangerIndex) <= 2;
+  const topMargin = isCloseOrSame ? 44 : 26;
+  const chartHeight = isCloseOrSame ? 180 : 165;
+
   return (
     <div className="dual-chart-pane pane-inventory">
       <div className="pane-header">
@@ -343,8 +350,8 @@ function ProcurementInventoryChart({
       </div>
 
       <div className="pane-chart-body">
-        <ResponsiveContainer width="100%" height={165}>
-          <ComposedChart syncId={syncId} data={data} margin={{ top: 24, right: 20, left: -6, bottom: 4 }}>
+        <ResponsiveContainer width="100%" height={chartHeight}>
+          <ComposedChart syncId={syncId} data={data} margin={{ top: topMargin, right: 20, left: -6, bottom: 4 }}>
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#0284c7" stopOpacity={0.25} />
@@ -482,15 +489,14 @@ function ProcurementInventoryChart({
                   if (!viewBox) return null;
                   const labelText = `📦 Hàng về (+${formatQuantity(arrivalPoint.arrivalQty)}${unit})`;
                   const width = Math.max(96, labelText.length * 6.5 + 18);
-                  const arrivalIndex = data.findIndex((d) => d.date === arrivalPoint.date);
-                  const isRightEdge = arrivalIndex >= data.length - 2;
-                  const isLeftEdge = arrivalIndex <= 0;
+                  const isRightEdge = arrivalIndex === data.length - 1;
+                  const isLeftEdge = arrivalIndex === 0;
                   const x = isRightEdge
-                    ? Math.max(4, viewBox.x - width - 4)
+                    ? Math.max(4, viewBox.x - width)
                     : isLeftEdge
-                      ? viewBox.x + 4
+                      ? Math.max(4, viewBox.x)
                       : Math.max(4, viewBox.x - width / 2);
-                  const y = 3;
+                  const y = 2;
                   return (
                     <g className="arrival-marker-pill">
                       <rect
@@ -534,16 +540,14 @@ function ProcurementInventoryChart({
                       ? "⚠️ Cạn kho cuối ngày"
                       : "⚠️ Nguy cơ cạn";
                   const width = Math.max(84, labelText.length * 6.8 + 16);
-                  const dangerIndex = data.findIndex((d) => d.date === dangerPoint.date);
-                  const isRightEdge = dangerIndex >= data.length - 2;
-                  const isLeftEdge = dangerIndex <= 0;
+                  const isRightEdge = dangerIndex === data.length - 1;
+                  const isLeftEdge = dangerIndex === 0;
                   const x = isRightEdge
-                    ? Math.max(4, viewBox.x - width - 4)
+                    ? Math.max(4, viewBox.x - width)
                     : isLeftEdge
-                      ? viewBox.x + 4
+                      ? Math.max(4, viewBox.x)
                       : Math.max(4, viewBox.x - width / 2);
-                  const isSameDateAsArrival = arrivalPoint && arrivalPoint.date === dangerPoint.date;
-                  const y = isSameDateAsArrival ? 23 : 3;
+                  const y = isCloseOrSame ? 22 : 2;
                   return (
                     <g className="danger-marker-pill">
                       <rect
