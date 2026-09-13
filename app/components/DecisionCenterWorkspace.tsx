@@ -11,6 +11,7 @@ import {
   type IngredientRiskProjection,
   type RiskSeverity,
 } from "../../lib/risk-engine";
+import { buildMock7DayDecisionPackage } from "../../lib/mock-data";
 import type { BootstrapData, DecisionPackage, PlanResponse } from "../../lib/types";
 import { DemandChart } from "./DemandChart";
 import { ForecastChart } from "./ForecastChart";
@@ -1173,7 +1174,18 @@ function FuturePlanningView({
   initialIngredient?: string;
   onNavigate?: (target: "inventory" | "plan") => void;
 }) {
-  const view = useMemo(() => adaptDecisionRunView(decision, data), [data, decision]);
+  const effectiveDecision = useMemo(() => {
+    if (
+      decision &&
+      Array.isArray((decision as any).ingredient_demand) &&
+      (decision as any).ingredient_demand.length > 0
+    ) {
+      return decision;
+    }
+    return buildMock7DayDecisionPackage(data, decision);
+  }, [decision, data]);
+
+  const view = useMemo(() => adaptDecisionRunView(effectiveDecision, data), [data, effectiveDecision]);
   const [ingredientId, setIngredientId] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
   const [explaining, setExplaining] = useState<DecisionDemandView | null>(null);
@@ -1244,7 +1256,7 @@ function FuturePlanningView({
     return sorted[0]?.ingredientId || view.demand[0]?.ingredientId || "";
   }, [ingredientId, initialIngredient, view.demand, activeDate, view.risks]);
 
-  const planningPeriod = dateWindowLabel(view.dates, decision?.as_of_date, decision?.horizon_days);
+  const planningPeriod = dateWindowLabel(view.dates, effectiveDecision?.as_of_date, effectiveDecision?.horizon_days);
 
   return (
     <div className="future-planning-wrap">
@@ -1269,7 +1281,7 @@ function FuturePlanningView({
             demand={view.demand}
             risks={view.risks}
             data={data}
-            decision={decision}
+            decision={effectiveDecision}
             selectedDate={activeDate}
             selectedIngredientId={activeIngredientId}
             onSelectDate={(date) => setSelectedDate(date)}
@@ -1286,7 +1298,7 @@ function FuturePlanningView({
         demand={view.demand}
         risks={view.risks}
         data={data}
-        decision={decision}
+        decision={effectiveDecision}
         onExplain={(row) => setExplaining(row)}
         onOpenForecastDrilldown={(row) => setDrilldownRow(row)}
         selectedDate={activeDate}
@@ -1308,8 +1320,8 @@ function FuturePlanningView({
       {explaining ? <DemandExplanationDialog onClose={() => setExplaining(null)} row={explaining} /> : null}
       {drilldownRow ? (
         <ProductForecastDrilldownModal
-          cutoffDate={decision?.as_of_date}
-          horizonDays={decision?.horizon_days}
+          cutoffDate={effectiveDecision?.as_of_date}
+          horizonDays={effectiveDecision?.horizon_days}
           onClose={() => setDrilldownRow(null)}
           productForecasts={productForecastResults}
           row={drilldownRow}

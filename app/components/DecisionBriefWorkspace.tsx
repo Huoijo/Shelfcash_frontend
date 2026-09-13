@@ -55,6 +55,7 @@ import {
   getDecisionDiagnosticsReport,
   type DiagnosticOrigin,
 } from "../../lib/decision-diagnostics";
+import { findStrategyAlternativesInBrief } from "../../lib/strategy-alternatives";
 import {
   Button,
   Notice,
@@ -1232,6 +1233,43 @@ function StrategyAnalysisDeepDive({
     },
   ];
 
+  const candidateStrategies = useMemo(
+    () => findStrategyAlternativesInBrief(brief),
+    [brief],
+  );
+
+  const displayStrategies = useMemo(() => {
+    if (candidateStrategies.length > 0) {
+      return candidateStrategies.map((cand, idx) => {
+        const standardDef = strategyDefinitions.find((s) => s.key === cand.strategy);
+        const quantile =
+          cand.strategy === "lean"
+            ? "P25"
+            : cand.strategy === "balanced"
+              ? "P50"
+              : cand.strategy === "protected"
+                ? "P75"
+                : ((cand as unknown as { quantile?: string }).quantile ?? null);
+
+        return {
+          key: cand.strategy || `strat_${idx}`,
+          label: cand.label || standardDef?.label || cand.strategy || `Phương án ${idx + 1}`,
+          quantile,
+          candidate: cand,
+          standardDef,
+        };
+      });
+    }
+
+    return strategyDefinitions.map((strat) => ({
+      key: strat.key,
+      label: strat.label,
+      quantile: strat.quantile,
+      candidate: null,
+      standardDef: strat,
+    }));
+  }, [candidateStrategies, strategyDefinitions]);
+
   // Build ingredient breakdown matrix
   const seen = new Set<string>();
   const uniqueDemand = brief.ingredient_demand.filter((row) => {
@@ -1317,26 +1355,72 @@ function StrategyAnalysisDeepDive({
       {activeTab === "comparison" ? (
         <div className="deepdive-tab-content">
           <div className="deepdive-strategy-grid">
-            {strategyDefinitions.map((strat) => {
-              const match = rawStrategies.find((s) => s.strategy === strat.key);
-              const isChosen = chosenStrategy === strat.key && brief.recommendation.available;
-              const isInfeasible = match?.feasible === false;
-              const cost = match?.business_metrics?.projected_purchase_cost ?? strat.defaultCost;
-              const fillRate = match?.business_metrics?.expected_fill_rate ?? strat.defaultFillRate;
-              const stockout = match?.business_metrics?.stockout_probability ?? strat.defaultStockout;
-              const violations = match?.violations ?? [];
-              const warnings = match?.warnings ?? [];
+            {displayStrategies.map((item) => {
+              const { key, label, quantile, candidate, standardDef } = item;
+              const match = rawStrategies.find((s) => s.strategy === key);
+
+              const isChosen =
+                candidate?.selected === true ||
+                candidate?.status === "selected" ||
+                (chosenStrategy === key && brief.recommendation.available);
+
+              const isInfeasible =
+                candidate?.feasible === false ||
+                candidate?.status === "infeasible" ||
+                match?.feasible === false;
+
+              const isFeasibleNotSelected =
+                !isChosen &&
+                !isInfeasible &&
+                (candidate?.status === "feasible_not_selected" || candidate?.feasible === true);
+
+              // Prioritize candidate data from brief.json; if candidate is present and property missing, show NULL
+              const cost =
+                candidate != null
+                  ? (candidate.purchase_cost ?? null)
+                  : (match?.business_metrics?.projected_purchase_cost ?? standardDef?.defaultCost ?? null);
+
+              const fillRate =
+                candidate != null
+                  ? (candidate.expected_fill_rate ?? candidate.fill_rate ?? null)
+                  : (match?.business_metrics?.expected_fill_rate ?? standardDef?.defaultFillRate ?? null);
+
+              const stockout =
+                candidate != null
+                  ? (candidate.stockout_probability ?? null)
+                  : (match?.business_metrics?.stockout_probability ?? standardDef?.defaultStockout ?? null);
+
+              const wasteText =
+                candidate != null
+                  ? (candidate.expected_waste != null
+                      ? `${candidate.expected_waste}`
+                      : candidate.waste_quantity != null
+                        ? `${candidate.waste_quantity}`
+                        : null)
+                  : (match?.business_metrics?.waste_percentage != null
+                      ? `${match.business_metrics.waste_percentage}%`
+                      : standardDef?.expectedWasteText ?? null);
+
+              const headline = candidate?.presentation?.headline ?? null;
+              const summary = candidate?.presentation?.summary ?? null;
+              const reasonMessages = candidate?.presentation?.reason_messages ?? [];
+              const reasons = candidate?.reasons ?? [];
+              const reasonStatus = candidate?.reason_status ?? null;
+              const violations = candidate?.violations ?? match?.violations ?? [];
+              const warnings = candidate?.warnings ?? match?.warnings ?? [];
 
               return (
                 <div
-                  key={strat.key}
+                  key={key}
                   className={`deepdive-card ${
                     isChosen ? "selected" : isInfeasible ? "infeasible" : "unselected"
                   }`}
                 >
                   <div className="deepdive-card-header">
                     <div className="deepdive-card-tag-row">
-                      <span className="deepdive-eyebrow">Kịch bản {strat.quantile}</span>
+                      <span className="deepdive-eyebrow">
+                        {quantile ? `Kịch bản ${quantile}` : label}
+                      </span>
                       {isChosen ? (
                         <span className="deepdive-badge selected">
                           <CheckCircle2 size={12} /> ĐÃ CHỌN TỐI ƯU
@@ -1345,61 +1429,151 @@ function StrategyAnalysisDeepDive({
                         <span className="deepdive-badge infeasible">
                           <AlertTriangle size={12} /> KHÔNG KHẢ THI
                         </span>
+                      ) : isFeasibleNotSelected ? (
+                        <span className="deepdive-badge feasible-not-selected">
+                          <Info size={12} /> HỢP LỆ (KHÔNG CHỌN)
+                        </span>
                       ) : (
                         <span className="deepdive-badge rejected">
                           ✕ BỊ LOẠI
                         </span>
                       )}
                     </div>
-                    <h2>{strat.label}</h2>
+                    <h2>{label}</h2>
+                    {headline ? (
+                      <div className="deepdive-card-headline">{headline}</div>
+                    ) : candidate ? (
+                      <div className="deepdive-card-headline null-text">NULL</div>
+                    ) : null}
                   </div>
 
                   <div className="deepdive-metrics-grid">
                     <div className="deepdive-metric">
                       <span className="metric-lbl">Tổng chi phí dự kiến</span>
-                      <strong className="metric-val text-primary">
-                        {cost != null ? formatVnd(cost) : "—"}
+                      <strong className={`metric-val ${cost != null ? "text-primary" : "null-val"}`}>
+                        {cost != null ? formatVnd(cost) : "NULL"}
                       </strong>
                     </div>
                     <div className="deepdive-metric">
                       <span className="metric-lbl">Tỉ lệ đáp ứng nhu cầu</span>
-                      <strong className="metric-val">
-                        {fillRate != null ? `${(fillRate * 100).toFixed(1)}%` : "—"}
+                      <strong className={`metric-val ${fillRate != null ? "" : "null-val"}`}>
+                        {fillRate != null ? `${(fillRate * 100).toFixed(1)}%` : "NULL"}
                       </strong>
                     </div>
                     <div className="deepdive-metric">
                       <span className="metric-lbl">Xác suất thiếu hàng</span>
-                      <strong className={`metric-val ${stockout > 0.05 ? "text-danger" : "text-success"}`}>
-                        {stockout != null ? `${(stockout * 100).toFixed(1)}%` : "—"}
+                      <strong
+                        className={`metric-val ${
+                          stockout != null
+                            ? stockout > 0.05
+                              ? "text-danger"
+                              : "text-success"
+                            : "null-val"
+                        }`}
+                      >
+                        {stockout != null ? `${(stockout * 100).toFixed(1)}%` : "NULL"}
                       </strong>
                     </div>
                     <div className="deepdive-metric">
                       <span className="metric-lbl">Hao hụt hết hạn (FEFO)</span>
-                      <strong className="metric-val">
-                        {strat.expectedWasteText}
+                      <strong className={`metric-val ${wasteText != null ? "" : "null-val"}`}>
+                        {wasteText != null ? wasteText : "NULL"}
                       </strong>
                     </div>
                   </div>
 
-                  <div className={`deepdive-reason-section ${isChosen ? "selected" : isInfeasible ? "infeasible" : "rejected"}`}>
+                  <div
+                    className={`deepdive-reason-section ${
+                      isChosen ? "selected" : isInfeasible ? "infeasible" : "rejected"
+                    }`}
+                  >
                     <h4>
                       {isChosen
                         ? "✓ Lý do hệ thống lựa chọn làm phương án khuyến nghị:"
-                        : isInfeasible
-                          ? "✕ Lý do không khả thi (Vi phạm ràng buộc cứng):"
-                          : "✕ Lý do bị loại bỏ:"}
+                        : isFeasibleNotSelected
+                          ? "ℹ Lý do phương án không được chọn:"
+                          : isInfeasible
+                            ? "✕ Lý do không khả thi (Vi phạm ràng buộc cứng):"
+                            : "✕ Lý do bị loại bỏ:"}
                     </h4>
-                    <p>
-                      {violations.length > 0
-                        ? violations.join(". ")
-                        : diagnosticReport.origin === "real"
-                          ? isChosen
-                            ? "Phương án thỏa mãn tối ưu mục tiêu bài toán chi phí & an toàn cung ứng."
-                            : isInfeasible
-                              ? "Phương án không khả thi theo kết quả tính toán từ Backend Solver."
-                              : "Không được chọn do không đạt điểm tối ưu toán học tốt nhất so với kịch bản khuyến nghị."
-                          : strat.defaultWhyRejected}
-                    </p>
+
+                    {summary ? (
+                      <p className="deepdive-reason-summary">{summary}</p>
+                    ) : candidate ? (
+                      <p className="deepdive-reason-summary null-text">NULL (Chưa có tóm tắt lý do)</p>
+                    ) : violations.length > 0 ? (
+                      <p>{violations.join(". ")}</p>
+                    ) : diagnosticReport.origin === "real" ? (
+                      <p>
+                        {isChosen
+                          ? "Phương án thỏa mãn tối ưu mục tiêu bài toán chi phí & an toàn cung ứng."
+                          : isInfeasible
+                            ? "Phương án không khả thi theo kết quả tính toán từ Backend Solver."
+                            : "Không được chọn do không đạt điểm tối ưu toán học tốt nhất so với kịch bản khuyến nghị."}
+                      </p>
+                    ) : (
+                      <p>{standardDef?.defaultWhyRejected ?? "Chưa có thông tin lý do."}</p>
+                    )}
+
+                    {reasonMessages.length > 0 ? (
+                      <ul className="deepdive-reason-messages">
+                        {reasonMessages.map((msg, idx) => (
+                          <li key={idx}>{msg}</li>
+                        ))}
+                      </ul>
+                    ) : candidate && !isChosen ? (
+                      <span className="deepdive-subtext-muted">Chưa có thông điệp lý do (NULL)</span>
+                    ) : null}
+
+                    {reasons.length > 0 ? (
+                      <div className="deepdive-reasons-detail">
+                        {reasons.map((r, idx) => {
+                          const delta = r.values?.purchase_cost_delta;
+                          const candCost = r.values?.candidate_purchase_cost;
+                          const selCost = r.values?.selected_purchase_cost;
+                          return (
+                            <div key={idx} className="deepdive-reason-item">
+                              {delta != null ? (
+                                <div className="deepdive-cost-delta-badge">
+                                  <span>Chênh lệch chi phí:</span>{" "}
+                                  <strong>+{formatVnd(delta)}</strong>
+                                  {candCost != null && selCost != null ? (
+                                    <span className="deepdive-delta-sub">
+                                      ({formatVnd(candCost)} vs {formatVnd(selCost)})
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                              {r.code ? (
+                                <span className="deepdive-code-tag">Mã: {r.code}</span>
+                              ) : (
+                                <span className="deepdive-code-tag null-text">Mã: NULL</span>
+                              )}
+                              {r.message ? (
+                                <div className="deepdive-reason-msg">{r.message}</div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : candidate && !isChosen ? (
+                      <div className="deepdive-subtext-muted">Chi tiết lý do: NULL</div>
+                    ) : null}
+
+                    {reasonStatus != null ? (
+                      <div className="deepdive-reason-status">
+                        <span>Trạng thái kiểm chứng:</span>{" "}
+                        <strong className="status-val">
+                          {reasonStatus === "verified" ? "Đã xác minh (Verified)" : reasonStatus}
+                        </strong>
+                      </div>
+                    ) : candidate ? (
+                      <div className="deepdive-reason-status null-text">
+                        <span>Trạng thái kiểm chứng:</span>{" "}
+                        <strong className="status-val">NULL</strong>
+                      </div>
+                    ) : null}
+
                     {warnings.length > 0 ? (
                       <ul className="deepdive-sub-list">
                         {warnings.map((w, idx) => (
@@ -1931,6 +2105,7 @@ export function DecisionBriefWorkspace({
   decision,
   data,
   appliedBudget,
+  initialViewMode,
 }: {
   brief: DecisionBriefFacts | null;
   loading: boolean;
@@ -1948,11 +2123,14 @@ export function DecisionBriefWorkspace({
   decision?: DecisionPackage | null;
   data?: BootstrapData;
   appliedBudget?: number | null;
+  initialViewMode?: "cockpit" | "strategy-analysis";
 }) {
   const [selectedIngredientId, setSelectedIngredientId] = useState<string>("");
   const [filterMode, setFilterMode] = useState<"all" | "urgent" | "safe">("all");
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<"cockpit" | "strategy-analysis">("cockpit");
+  const [viewMode, setViewMode] = useState<"cockpit" | "strategy-analysis">(
+    initialViewMode ?? "cockpit"
+  );
 
   // Deduplicate ingredients by ingredient_id
   const uniqueDemand = useMemo(() => {

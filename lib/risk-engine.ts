@@ -184,7 +184,12 @@ export function projectIngredientDailyRisks(
   const dailyAvgDemand = dates.length > 0 ? totalP50Demand / dates.length : 0;
 
   // 1. Resolve true starting inventory & inventory configuration
-  const invRecord = data?.inventory?.find((i) => i.ingredientId === ingredientId);
+  const invRecord = data?.inventory?.find(
+    (i) =>
+      (i.ingredientId && i.ingredientId === ingredientId) ||
+      i.ingredient === ingredientName ||
+      i.ingredient === ingredientId
+  );
   let initialStock: number | null = null;
   if (risk?.beginningInventory != null && risk.beginningInventory >= 0) {
     initialStock = risk.beginningInventory;

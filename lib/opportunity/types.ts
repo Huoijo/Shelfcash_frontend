@@ -10,6 +10,31 @@ export type OpportunityRunStatus =
 
 export type OpportunityCandidateDomain = "same_domain" | "cross_domain";
 
+export interface OpportunityAnalysisLocation {
+  lat: number;
+  lng: number;
+  label: string;
+  address?: string;
+  source: "store" | "search" | "map";
+}
+
+export type OpportunityPoiCategory =
+  | "competitor"
+  | "university"
+  | "transit"
+  | "supporting_retail";
+
+export interface OpportunityPoi {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  category: OpportunityPoiCategory;
+  distanceMeters?: number;
+  provider?: "google";
+  providerPlaceId?: string;
+}
+
 export interface PoiPoint {
   id: string;
   label: string;
@@ -37,6 +62,7 @@ export interface LocalOpportunityContext {
   metrics: ContextMetric[];
   signals: ContextSignal[];
   poiPoints: PoiPoint[];
+  pois?: OpportunityPoi[];
 }
 
 export interface OpportunityCandidateCriteria {
@@ -89,14 +115,17 @@ export interface TrialPortfolio {
 export interface OpportunityRunInput {
   storeId: string;
   storeName: string;
+  analysisLocation?: OpportunityAnalysisLocation;
   radiusKm: number;
   trialBudget: number;
+  pois?: OpportunityPoi[];
 }
 
 export interface OpportunityRun {
   runId: string;
   storeId: string;
   storeName: string;
+  analysisLocation?: OpportunityAnalysisLocation;
   radiusKm: number;
   trialBudget: number;
   status: OpportunityRunStatus;
@@ -114,6 +143,7 @@ export interface OpportunityRun {
 export interface OpportunityResult {
   runId: string;
   storeId: string;
+  analysisLocation?: OpportunityAnalysisLocation;
   status: "completed" | "failed";
   localContext: LocalOpportunityContext;
   rankedCandidates: OpportunityCandidate[];

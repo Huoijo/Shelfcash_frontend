@@ -1,5 +1,6 @@
 import type {
   ApiRecord,
+  BootstrapData,
   DecisionBriefFacts,
   DecisionExplanationResponse,
   DecisionPackage,
@@ -14,6 +15,7 @@ import type {
   WhatIfRequest,
   WhatIfResponse,
 } from "./types";
+import { addDays } from "./data";
 
 export const MOCK_STORE_ID = "STORE_001";
 export const MOCK_DECISION_RUN_ID = "decision-run-mock-happy-path";
@@ -1148,73 +1150,365 @@ export function buildMockDecisionBrief(today: string = "2026-08-20"): DecisionBr
   };
 }
 
-/** Build the DecisionPackage fixture */
-export function buildMockDecisionPackage(today: string = "2026-08-20"): DecisionPackage {
-  const brief = buildMockDecisionBrief(today);
+/**
+ * Build a complete, realistic 7-Day DecisionPackage fixture with daily demand,
+ * product forecast contributions, arrival shipments, and diverse risk levels.
+ */
+export function buildMock7DayDecisionPackage(
+  data?: BootstrapData,
+  fallbackDecision?: DecisionPackage | null,
+): DecisionPackage {
+  const baseDate = data?.today || fallbackDecision?.as_of_date || "2026-08-20";
+  const dates = Array.from({ length: 7 }, (_, i) => addDays(baseDate, i));
+
+  const config = [
+    {
+      id: "Sữa tươi",
+      aliasNames: ["Sữa tươi", "milk", "NL-SUA-001", "milk-fresh"],
+      name: "Sữa tươi",
+      unit: "lít",
+      onHand: 7,
+      safetyStock: 4,
+      dailyP50: [4.5, 5.0, 5.2, 5.5, 6.0, 4.8, 4.2],
+      stockoutDate: dates[1],
+      shortageQty: 2.5,
+      fillRate: 0.78,
+      stockoutProb: 0.82,
+      daysOfSupply: 1.4,
+      riskCategory: "critical",
+      incomingDay: 2,
+      incomingQty: 24,
+      supplierName: "ABC Food",
+      supplierId: "sup-abc-food",
+      unitPrice: 32_000,
+      contributions: [
+        { productId: "sp-cps-001", productName: "Cà phê sữa", recipeQty: 0.1, ratio: 0.55 },
+        { productId: "sp-stc-001", productName: "Sinh tố chuối", recipeQty: 0.15, ratio: 0.45 },
+      ],
+    },
+    {
+      id: "Chuối",
+      aliasNames: ["Chuối", "banana", "NL-CHUOI-001"],
+      name: "Chuối",
+      unit: "kg",
+      onHand: 12,
+      safetyStock: 4,
+      dailyP50: [2.5, 2.8, 3.0, 3.2, 3.5, 2.8, 2.4],
+      stockoutDate: dates[3],
+      shortageQty: 1.8,
+      fillRate: 0.88,
+      stockoutProb: 0.45,
+      daysOfSupply: 3.5,
+      riskCategory: "high",
+      incomingDay: 2,
+      incomingQty: 10,
+      supplierName: "Nông sản An Phú",
+      supplierId: "sup-an-phu",
+      unitPrice: 25_000,
+      contributions: [
+        { productId: "sp-stc-001", productName: "Sinh tố chuối", recipeQty: 0.12, ratio: 1.0 },
+      ],
+    },
+    {
+      id: "Sữa đặc",
+      aliasNames: ["Sữa đặc", "condensed-milk", "NL-SUADAC-001"],
+      name: "Sữa đặc",
+      unit: "kg",
+      onHand: 5.5,
+      safetyStock: 1.5,
+      dailyP50: [0.8, 0.85, 0.9, 1.0, 1.0, 0.9, 0.8],
+      stockoutDate: dates[5],
+      shortageQty: 0.6,
+      fillRate: 0.94,
+      stockoutProb: 0.25,
+      daysOfSupply: 5.2,
+      riskCategory: "watch",
+      incomingDay: 2,
+      incomingQty: 5,
+      supplierName: "ABC Food",
+      supplierId: "sup-abc-food",
+      unitPrice: 58_000,
+      contributions: [
+        { productId: "sp-cps-001", productName: "Cà phê sữa", recipeQty: 0.04, ratio: 1.0 },
+      ],
+    },
+    {
+      id: "Bột matcha",
+      aliasNames: ["Bột matcha", "matcha", "NL-MATCHA-001", "matcha-powder"],
+      name: "Bột matcha",
+      unit: "kg",
+      onHand: 0.35,
+      safetyStock: 0.25,
+      dailyP50: [0.08, 0.09, 0.10, 0.11, 0.12, 0.10, 0.08],
+      stockoutDate: dates[3],
+      shortageQty: 0.12,
+      fillRate: 0.84,
+      stockoutProb: 0.60,
+      daysOfSupply: 2.8,
+      riskCategory: "high",
+      incomingDay: 4,
+      incomingQty: 1,
+      supplierName: "Tea House",
+      supplierId: "sup-tea-house",
+      unitPrice: 720_000,
+      contributions: [
+        { productId: "sp-ms-001", productName: "Matcha sữa", recipeQty: 0.012, ratio: 1.0 },
+      ],
+    },
+    {
+      id: "Đường",
+      aliasNames: ["Đường", "sugar", "NL-DUONG-001"],
+      name: "Đường",
+      unit: "kg",
+      onHand: 18,
+      safetyStock: 3,
+      dailyP50: [1.3, 1.4, 1.5, 1.8, 1.7, 1.4, 1.2],
+      stockoutDate: "",
+      shortageQty: 0,
+      fillRate: 1.0,
+      stockoutProb: 0.01,
+      daysOfSupply: 14,
+      riskCategory: "low",
+      incomingDay: null,
+      incomingQty: 0,
+      supplierName: "ABC Food",
+      supplierId: "sup-abc-food",
+      unitPrice: 22_000,
+      contributions: [
+        { productId: "sp-stc-001", productName: "Sinh tố chuối", recipeQty: 0.02, ratio: 0.5 },
+        { productId: "sp-td-001", productName: "Trà đào", recipeQty: 0.015, ratio: 0.5 },
+      ],
+    },
+    {
+      id: "Cà phê",
+      aliasNames: ["Cà phê", "Cà phê hạt", "coffee", "NL-CAFE-001", "coffee-beans"],
+      name: "Cà phê",
+      unit: "kg",
+      onHand: 4.2,
+      safetyStock: 1.0,
+      dailyP50: [0.36, 0.40, 0.42, 0.48, 0.45, 0.38, 0.32],
+      stockoutDate: "",
+      shortageQty: 0,
+      fillRate: 1.0,
+      stockoutProb: 0.01,
+      daysOfSupply: 12,
+      riskCategory: "low",
+      incomingDay: null,
+      incomingQty: 0,
+      supplierName: "Roastery 1975",
+      supplierId: "sup-roastery",
+      unitPrice: 180_000,
+      contributions: [
+        { productId: "sp-cps-001", productName: "Cà phê sữa", recipeQty: 0.018, ratio: 1.0 },
+      ],
+    },
+    {
+      id: "Trà đen",
+      aliasNames: ["Trà đen", "tea", "NL-TRA-001", "black-tea"],
+      name: "Trà đen",
+      unit: "kg",
+      onHand: 2.2,
+      safetyStock: 0.6,
+      dailyP50: [0.18, 0.20, 0.22, 0.26, 0.24, 0.19, 0.16],
+      stockoutDate: "",
+      shortageQty: 0,
+      fillRate: 1.0,
+      stockoutProb: 0.02,
+      daysOfSupply: 10,
+      riskCategory: "low",
+      incomingDay: null,
+      incomingQty: 0,
+      supplierName: "Tea House",
+      supplierId: "sup-tea-house",
+      unitPrice: 145_000,
+      contributions: [
+        { productId: "sp-td-001", productName: "Trà đào", recipeQty: 0.012, ratio: 1.0 },
+      ],
+    },
+  ];
+
+  const ingredientDemandRows: any[] = [];
+  for (const item of config) {
+    const inv = data?.inventory?.find((i) =>
+      item.aliasNames.some((alias) =>
+        (i.ingredient && i.ingredient.toLowerCase() === alias.toLowerCase()) ||
+        (i.ingredientId && i.ingredientId.toLowerCase() === alias.toLowerCase()) ||
+        (i.sku && i.sku.toLowerCase() === alias.toLowerCase())
+      )
+    );
+    const ingId = inv?.ingredientId || inv?.ingredient || item.id;
+    const ingName = inv?.ingredient || item.name;
+    const unit = inv?.unit || item.unit;
+
+    for (let d = 0; d < dates.length; d++) {
+      const targetDate = dates[d];
+      const p50 = item.dailyP50[d] ?? 1.0;
+      const p25 = Math.round(p50 * 0.8 * 100) / 100;
+      const p75 = Math.round(p50 * 1.25 * 100) / 100;
+
+      const contributions = item.contributions.map((c) => {
+        const cP50 = Math.round(p50 * c.ratio * 100) / 100;
+        const productForecastP50 = Math.round((cP50 / (c.recipeQty || 1)) * 10) / 10;
+        return {
+          product_id: c.productId,
+          product_name: c.productName,
+          contribution_p25: Math.round(cP50 * 0.8 * 100) / 100,
+          contribution_p50: cP50,
+          contribution_p75: Math.round(cP50 * 1.25 * 100) / 100,
+          forecast_p25: Math.round(productForecastP50 * 0.8),
+          forecast_p50: productForecastP50,
+          forecast_p75: Math.round(productForecastP50 * 1.25),
+          recipe_quantity: c.recipeQty,
+          recipe_unit: unit,
+          contribution_unit: unit,
+          unit: unit,
+        };
+      });
+
+      ingredientDemandRows.push({
+        ingredient_id: ingId,
+        ingredient_name: ingName,
+        target_date: targetDate,
+        p25,
+        p50,
+        p75,
+        unit,
+        contributions,
+      });
+    }
+  }
+
+  const inventoryRisks = config.map((item) => {
+    const inv = data?.inventory?.find((i) =>
+      item.aliasNames.some((alias) =>
+        (i.ingredient && i.ingredient.toLowerCase() === alias.toLowerCase()) ||
+        (i.ingredientId && i.ingredientId.toLowerCase() === alias.toLowerCase()) ||
+        (i.sku && i.sku.toLowerCase() === alias.toLowerCase())
+      )
+    );
+    const ingId = inv?.ingredientId || inv?.ingredient || item.id;
+    const ingName = inv?.ingredient || item.name;
+    const onHand = inv?.onHand ?? item.onHand;
+    const unit = inv?.unit || item.unit;
+
+    return {
+      ingredient_id: ingId,
+      ingredient_name: ingName,
+      projected_stockout_date: item.stockoutDate,
+      shortage_quantity: item.shortageQty,
+      beginning_inventory: onHand,
+      expected_fill_rate: item.fillRate,
+      stockout_probability: item.stockoutProb,
+      days_of_supply: item.daysOfSupply,
+      risk_category: item.riskCategory,
+      unit,
+    };
+  });
+
+  const plannedItems = config
+    .filter((item) => item.incomingDay != null)
+    .map((item) => {
+      const inv = data?.inventory?.find((i) =>
+        item.aliasNames.some((alias) =>
+          (i.ingredient && i.ingredient.toLowerCase() === alias.toLowerCase()) ||
+          (i.ingredientId && i.ingredientId.toLowerCase() === alias.toLowerCase()) ||
+          (i.sku && i.sku.toLowerCase() === alias.toLowerCase())
+        )
+      );
+      const ingId = inv?.ingredientId || inv?.ingredient || item.id;
+      const ingName = inv?.ingredient || item.name;
+      const unit = inv?.unit || item.unit;
+      const arrivalDate = dates[item.incomingDay!];
+
+      return {
+        ingredient_id: ingId,
+        ingredient_name: ingName,
+        supplier_id: item.supplierId,
+        supplier_name: item.supplierName,
+        order_quantity: item.incomingQty,
+        unit,
+        pack_count: 2,
+        pack_size: Math.round(item.incomingQty / 2),
+        unit_price: item.unitPrice,
+        purchase_cost: item.incomingQty * item.unitPrice,
+        order_date: dates[0],
+        expected_arrival_date: arrivalDate,
+        arrival_date: arrivalDate,
+      };
+    });
+
+  const totalPurchaseCost = plannedItems.reduce((s, it) => s + it.purchase_cost, 0);
+
   return {
     decision_run_id: MOCK_DECISION_RUN_ID,
     status: "completed",
-    as_of_date: today,
+    as_of_date: baseDate,
     horizon_days: 7,
     recommended_strategy: "protected",
     business_metrics: {
-      projected_purchase_cost: brief.recommendation.total_purchase_cost,
+      projected_purchase_cost: totalPurchaseCost,
       expected_fill_rate: 0.988,
       stockout_probability: 0.015,
       expected_waste_quantity: 0,
     },
     recommended_plan: {
       valid: true,
-      items: brief.procurement_rows.map((row) => ({
-        ingredient_id: row.ingredient_id,
-        ingredient_name: row.ingredient_name ?? undefined,
-        quantity: row.quantity,
-        unit: row.unit ?? undefined,
-        supplier_name: row.supplier_name,
-        supplier_id: row.supplier_id,
-        order_date: row.order_date,
-        expected_arrival_date: row.arrival_date,
-        estimated_cost: row.purchase_cost,
-      })),
+      items: plannedItems,
     },
+    procurement_rows: plannedItems.map((p) => ({
+      ingredient_id: p.ingredient_id,
+      ingredient_name: p.ingredient_name,
+      supplier_id: p.supplier_id,
+      supplier_name: p.supplier_name,
+      quantity: p.order_quantity,
+      unit: p.unit,
+      pack_count: p.pack_count,
+      pack_size: p.pack_size,
+      order_date: p.order_date,
+      arrival_date: p.arrival_date,
+      purchase_cost: p.purchase_cost,
+      reason_codes: ["DEMAND_EXCEEDS_AVAILABLE_SUPPLY"],
+    })),
+    ingredient_demand: ingredientDemandRows,
+    inventory_risk: inventoryRisks,
     strategies: [
       {
         strategy: "protected",
         feasible: true,
         business_metrics: {
-          projected_purchase_cost: 8_338_000,
+          projected_purchase_cost: totalPurchaseCost,
           expected_fill_rate: 0.988,
           stockout_probability: 0.015,
         },
+        items: plannedItems,
       },
       {
         strategy: "balanced",
         feasible: true,
         business_metrics: {
-          projected_purchase_cost: 7_650_000,
+          projected_purchase_cost: Math.round(totalPurchaseCost * 0.9),
           expected_fill_rate: 0.965,
           stockout_probability: 0.038,
         },
+        items: plannedItems.slice(0, 3),
       },
       {
         strategy: "lean",
         feasible: true,
         business_metrics: {
-          projected_purchase_cost: 6_890_000,
+          projected_purchase_cost: Math.round(totalPurchaseCost * 0.78),
           expected_fill_rate: 0.920,
           stockout_probability: 0.082,
         },
+        items: plannedItems.slice(0, 2),
       },
     ],
-    inventory_risk: MOCK_INGREDIENTS.map((i) => ({
-      ingredient_id: i.id,
-      ingredient_name: i.name,
-      stockout_probability: i.orderNeeded ? (i.daysOfSupply <= 2 ? 0.08 : 0.03) : 0.005,
-      expected_shortage: 0,
-      days_of_supply: i.daysOfSupply,
-      risk_category: i.orderNeeded ? "high" : "low",
-    })),
   };
+}
+
+/** Build the DecisionPackage fixture */
+export function buildMockDecisionPackage(today: string = "2026-08-20"): DecisionPackage {
+  return buildMock7DayDecisionPackage(undefined, { as_of_date: today } as any);
 }
 
 /** Build contextual AI Explanation response */

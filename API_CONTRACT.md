@@ -1464,16 +1464,29 @@ Khi Backend xử lý các mutation của Staff, bổ sung các mã lỗi chuẩn
 #### Request Body:
 ```json
 {
+  "analysis_location": {
+    "lat": 10.7725,
+    "lng": 106.6578,
+    "label": "ShelfCash Flagship Coffee",
+    "address": "268 Lý Thường Kiệt, Phường 14, Quận 10, TP. Hồ Chí Minh",
+    "source": "store"
+  },
   "radius_km": 3,
   "trial_budget": 2000000
 }
 ```
+> **Ghi chú về bảo mật và tách biệt:** Các đối tượng SDK đặc thù của nhà cung cấp bản đồ (như OpenStreetMap / Leaflet, Nominatim response, Overpass JSON, hoặc `google.maps.Place`) hoàn toàn được chuẩn hóa và cô lập tại Frontend client adapter. OpenStreetMap, Nominatim và Overpass không phải là API của ShelfCash Backend. Hợp đồng API tương lai của ShelfCash Backend chỉ tiếp nhận các tham số chuẩn hóa: tọa độ địa lý (`lat`, `lng`), bán kính (`radius_km`), và ngân sách thử nghiệm (`trial_budget`). Trạng thái hiện tại: **PROPOSED / BACKEND NOT IMPLEMENTED**.
 
 #### Expected Response `201`:
 ```json
 {
   "run_id": "opp-run-1725102000",
   "store_id": "STORE_001",
+  "analysis_location": {
+    "lat": 10.7725,
+    "lng": 106.6578,
+    "label": "ShelfCash Flagship Coffee"
+  },
   "radius_km": 3,
   "trial_budget": 2000000,
   "status": "scanning",

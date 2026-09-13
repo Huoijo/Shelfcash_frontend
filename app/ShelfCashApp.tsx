@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BarChart3,
   BookOpen,
   CalendarClock,
   ChevronRight,
@@ -123,6 +124,7 @@ import {
 } from "../lib/subscriptions";
 import { getStoredSession, saveSession, clearSession, type UserSession } from "../lib/auth";
 import { getOpportunityMode } from "../lib/opportunity/config";
+import { ForecastBenchmark } from "./components/forecast/ForecastBenchmark";
 
 type PageKey =
   | "today"
@@ -135,6 +137,7 @@ type PageKey =
   | "recipes"
   | "plan"
   | "orders"
+  | "benchmark"
   | "settings";
 
 const opportunityMode = getOpportunityMode();
@@ -180,7 +183,10 @@ const navigationGroups: Array<{
   },
   {
     label: "Thiết lập",
-    items: [{ key: "settings", label: "Cài đặt", icon: Settings }],
+    items: [
+      { key: "benchmark", label: "Benchmark mô hình", icon: BarChart3 },
+      { key: "settings", label: "Cài đặt", icon: Settings },
+    ],
   },
 ];
 
@@ -1812,6 +1818,12 @@ export function ShelfCashApp({
             storeId={data.settings.storeId}
             storeName={data.settings.storeName}
           />
+        );
+      case "benchmark":
+        return (
+          <div className="forecast-benchmark-page-container">
+            <ForecastBenchmark />
+          </div>
         );
       case "settings":
         return (

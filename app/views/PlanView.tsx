@@ -34,6 +34,7 @@ import type {
   Strategy,
 } from "../../lib/types";
 import { ForecastChart } from "../components/ForecastChart";
+import { ForecastBenchmark } from "../components/forecast/ForecastBenchmark";
 import {
   ProcurementLoadingWorkspace,
   noFeasibleDecision,
@@ -1403,6 +1404,8 @@ export function PlanView({
           ) : null}
         </>
       ) : null}
+
+      <ForecastBenchmark />
 
       {demandEntries.length > 0 ? (
         <>

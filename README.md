@@ -98,16 +98,29 @@ Do frontend dùng proxy server-to-server, API key không cần xuất hiện tro
 
 ## Cấu hình tính năng Khám phá cơ hội (Opportunity Recommendation)
 
-Biến môi trường điều khiển chế độ hiển thị và kết nối:
+Biến môi trường điều khiển chế độ hiển thị, kết nối và bản đồ:
 
 ```dotenv
-NEXT_PUBLIC_SHELFCASH_OPPORTUNITY_MODE=preview
+# Opportunity Recommendation Mode: disabled | preview | live
+VITE_SHELFCASH_OPPORTUNITY_MODE=preview
+
+# Nhà cung cấp bản đồ khảo sát: osm | google | none
+VITE_SHELFCASH_MAP_PROVIDER=osm
+
+# Tùy chọn: Browser key cho Google Maps (chỉ khi VITE_SHELFCASH_MAP_PROVIDER=google)
+VITE_GOOGLE_MAPS_API_KEY=
 ```
 
 Các giá trị hỗ trợ:
-- `disabled`: Tắt tính năng, không hiển thị mục trên thanh điều hướng.
-- `preview`: Bật tính năng với Dev/Preview Adapter cục bộ, mô phỏng radar scan, nhận diện bối cảnh và gợi ý danh mục thử nghiệm mà không gọi backend.
-- `live`: Kết nối trực tiếp đến Opportunity API backend thật.
+- `VITE_SHELFCASH_OPPORTUNITY_MODE`:
+  - `disabled`: Tắt tính năng, không hiển thị mục trên thanh điều hướng.
+  - `preview`: Bật tính năng với Dev/Preview Adapter cục bộ, mô phỏng radar scan, nhận diện bối cảnh và gợi ý danh mục thử nghiệm mà không gọi backend.
+  - `live`: Kết nối trực tiếp đến Opportunity API backend thật.
+- `VITE_SHELFCASH_MAP_PROVIDER`:
+  - `osm` (Mặc định & Khuyến nghị): Sử dụng **Leaflet + OpenStreetMap** basemap thật với độ phân giải cao, tìm kiếm địa chỉ qua **Nominatim** (chỉ gọi khi nhấn Enter/[Tìm], rate limit 1s/req, có cache bộ nhớ), và quét địa điểm xung quanh bằng một truy vấn **Overpass API** duy nhất khi bấm Quét cơ hội. **Không cần API key và không yêu cầu thẻ thanh toán/billing**.
+    - *Lưu ý*: Các dịch vụ OSM, Nominatim và Overpass công cộng phục vụ phát triển, thử nghiệm và lưu lượng nhẹ. Đối với môi trường sản xuất quy mô lớn, nên triển khai hoặc thuê server tile/Overpass riêng.
+  - `google`: Tích hợp Google Maps (tùy chọn trong tương lai). Yêu cầu cấu hình `VITE_GOOGLE_MAPS_API_KEY`.
+  - `none`: Sử dụng bản đồ vector mô phỏng / Fallback Scanner cục bộ.
 
 
 ## Kiểm tra
