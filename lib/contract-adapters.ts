@@ -20,6 +20,7 @@ import type {
   PlanRunResultResponse,
   Product,
   PurchaseOrder,
+  Page,
   Recommendation,
   RecipeLine,
   StoreBootstrapResponse,
@@ -1474,3 +1475,21 @@ export function adaptOrders(
     };
   });
 }
+
+export function adaptPaginatedOrders(
+  value: unknown,
+  recommendations: Recommendation[] = [],
+): Page<PurchaseOrder> {
+  const record = isRecord(value) ? value : {};
+  const items = adaptOrders(value, recommendations);
+  const page = number(record, ["page"], 1);
+  const pageSize = number(record, ["page_size"], items.length || 50);
+  const total = typeof record.total === "number" ? record.total : items.length;
+  return {
+    items,
+    page,
+    page_size: pageSize,
+    total,
+  };
+}
+

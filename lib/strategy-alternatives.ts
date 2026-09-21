@@ -1,5 +1,4 @@
 import type {
-  DecisionBriefFacts,
   DecisionBriefStrategyAlternative,
   DecisionBriefStrategyReason,
   DecisionBriefStrategyPresentation,
@@ -52,39 +51,21 @@ export function normalizeCandidateStrategy(
 
   const headline = presentation?.headline || "";
 
-  // Infer strategy key if missing or non-standard
-  let strategy = rawStrategy;
-  if (!strategy) {
-    const combined = `${rawLabel} ${headline}`.toLowerCase();
-    if (combined.includes("tiết kiệm") || combined.includes("tiet kiem") || combined.includes("lean")) {
-      strategy = "lean";
-    } else if (combined.includes("cân bằng") || combined.includes("can bang") || combined.includes("balanced")) {
-      strategy = "balanced";
-    } else if (combined.includes("an toàn") || combined.includes("an toan") || combined.includes("protected") || combined.includes("safe")) {
-      strategy = "protected";
-    } else {
-      strategy = `strategy_${index + 1}`;
-    }
-  }
+  // Strategy identity comes strictly from typed strategy field (no regex/text inference)
+  const strategy = rawStrategy || `strategy_${index + 1}`;
 
-  // Infer label if missing
-  let label = rawLabel;
-  if (!label) {
-    if (strategy === "lean") label = "Tiết kiệm";
-    else if (strategy === "balanced") label = "Cân bằng";
-    else if (strategy === "protected") label = "An toàn";
-    else label = headline || `Phương án ${index + 1}`;
-  }
+  // Label from raw label or headline
+  const label = rawLabel || headline || `Phương án ${index + 1}`;
 
-  // Determine selection & feasibility
+  // Determine selection & feasibility strictly from typed status/boolean
   const rawStatus = typeof obj.status === "string" ? obj.status : null;
   let selected = typeof obj.selected === "boolean" ? obj.selected : null;
   let feasible = typeof obj.feasible === "boolean" ? obj.feasible : null;
 
   if (selected === null) {
-    if (rawStatus === "selected" || headline.toLowerCase().includes("được chọn")) {
+    if (rawStatus === "selected") {
       selected = true;
-    } else if (rawStatus === "feasible_not_selected") {
+    } else if (rawStatus === "feasible_not_selected" || rawStatus === "rejected" || rawStatus === "not_selected") {
       selected = false;
     }
   }
@@ -154,12 +135,11 @@ export function normalizeCandidateStrategy(
       ? obj.stockout_probability
       : null;
 
+  const rawWaste = obj.expected_waste ?? obj.waste_quantity;
   const expectedWaste =
-    obj.expected_waste != null
-      ? obj.expected_waste
-      : obj.waste_quantity != null
-        ? obj.waste_quantity
-        : null;
+    typeof rawWaste === "number" || typeof rawWaste === "string"
+      ? rawWaste
+      : null;
 
   return {
     ...obj,

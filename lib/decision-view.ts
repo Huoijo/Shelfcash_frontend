@@ -1,4 +1,4 @@
-import type { BootstrapData, DecisionPackage } from "./types";
+import type { BootstrapData, DecisionBriefFacts, DecisionPackage, PlanResponse } from "./types";
 
 type RecordValue = Record<string, unknown>;
 
@@ -42,10 +42,10 @@ export type DecisionDemandView = {
 export type DecisionRiskView = {
   ingredientId: string;
   ingredientName: string;
-  stockoutDate: string;
-  shortageQuantity: number | null;
+  stockoutDate?: string | null;
+  shortageQuantity?: number | null;
   beginningInventory: number | null;
-  fillRate: number | null;
+  fillRate?: number | null;
   stockoutProbability?: number | null;
   daysOfSupply?: number | null;
   riskCategory?: string | null;
@@ -331,14 +331,20 @@ export function adaptDecisionRunView(
     }
   }
 
-  let rawRiskItems: any[] = [];
+  let rawRiskItems: unknown[] = [];
   if (Array.isArray(raw.inventory_risk)) {
     rawRiskItems = raw.inventory_risk;
   } else if (raw.inventory_risk && typeof raw.inventory_risk === "object") {
-    const ir = raw.inventory_risk as any;
+    const ir = record(raw.inventory_risk);
     if (Array.isArray(ir.results)) {
-      const p50Design = ir.results.find((v: any) => v?.scenario_id === "p50_design") ?? ir.results[0];
-      const byKey = p50Design?.summary?.by_key ?? p50Design?.by_key ?? p50Design?.summary;
+      const results = ir.results as RecordValue[];
+      const p50Design =
+        results.find((v) => record(v)?.scenario_id === "p50_design") ??
+        results[0];
+      const p50Record = record(p50Design);
+      const summaryRecord = record(p50Record.summary);
+      const byKey =
+        summaryRecord.by_key ?? p50Record.by_key ?? p50Record.summary;
       if (Array.isArray(byKey)) {
         rawRiskItems = byKey;
       }
@@ -556,3 +562,269 @@ export function buildProcurementIngredientRows(
       return left.ingredientName.localeCompare(right.ingredientName, "vi");
     });
 }
+
+export interface ManagerDecisionViewModel {
+  hasDecision: boolean;
+  status:
+    | "idle"
+    | "loading"
+    | "ready"
+    | "no_feasible_strategy"
+    | "no_recommendation"
+    | "data_unavailable"
+    | "request_error";
+  hasFeasiblePlan: boolean;
+  isNoFeasible: boolean;
+  recommendedStrategy: {
+    key: string | null;
+    label: string;
+  } | null;
+  totalPlannedCost: number | null;
+  purchaseItemCount: number;
+  purchasePlanItems: Array<{
+    ingredientId: string;
+    ingredientName: string;
+    orderQuantity: number | null;
+    unit: string;
+    estimatedCost: number | null;
+    orderDate?: string | null;
+    arrivalDate?: string | null;
+    supplierName?: string | null;
+    reasonCodes?: string[] | null;
+  }>;
+  headline: string | null;
+  summary: string | null;
+  hasForecast: boolean;
+  hasDemand: boolean;
+  isRunning: boolean;
+}
+
+export interface AdaptManagerDecisionOptions {
+  brief?: DecisionBriefFacts | null;
+  technicalDecision?: DecisionPackage | null;
+  decision?: DecisionPackage | null;
+  plan?: PlanResponse | null;
+  lifecycleStatus?: string | null;
+  briefLoading?: boolean;
+  briefError?: string | null;
+}
+
+export function adaptManagerDecisionViewModel(
+  briefOrOptions?: DecisionBriefFacts | AdaptManagerDecisionOptions | null,
+  technicalDecision?: DecisionPackage | null,
+  plan?: PlanResponse | null,
+  briefLoading?: boolean,
+  briefError?: string | null,
+): ManagerDecisionViewModel {
+  const isOptionsObject =
+    Boolean(briefOrOptions) &&
+    typeof briefOrOptions === "object" &&
+    !("decision_run_id" in (briefOrOptions as Record<string, unknown>));
+
+  const options: AdaptManagerDecisionOptions = isOptionsObject
+    ? (briefOrOptions as AdaptManagerDecisionOptions)
+    : {
+        brief: briefOrOptions as DecisionBriefFacts | null | undefined,
+        technicalDecision,
+        plan,
+        briefLoading,
+        briefError,
+      };
+
+  const brief = options.brief ?? null;
+  const decision = options.technicalDecision ?? options.decision ?? null;
+  const currentPlan = options.plan ?? null;
+  const isBriefLoading = Boolean(options.briefLoading);
+  const currentBriefError = options.briefError ?? null;
+
+  const isRunning =
+    decision?.status === "queued" ||
+    decision?.status === "running" ||
+    brief?.status === "queued" ||
+    brief?.status === "running" ||
+    options.lifecycleStatus === "queued" ||
+    options.lifecycleStatus === "running";
+
+  const hasDemand = Boolean(
+    (brief?.ingredient_demand && brief.ingredient_demand.length > 0) ||
+      (decision?.ingredient_demand && decision.ingredient_demand.length > 0),
+  );
+
+  const hasForecast = Boolean(
+    brief?.forecast?.forecast_run_id ||
+      (decision as unknown as Record<string, unknown>)?.forecast_run_id ||
+      (currentPlan?.forecasts && Object.keys(currentPlan.forecasts).length > 0) ||
+      hasDemand,
+  );
+
+  // 1. BRIEF IS PRESENT -> Canonical Manager-Facing Read Model
+  if (brief) {
+    if (isBriefLoading) {
+      return {
+        hasDecision: true,
+        status: "loading",
+        hasFeasiblePlan: false,
+        isNoFeasible: false,
+        recommendedStrategy: null,
+        totalPlannedCost: null,
+        purchaseItemCount: 0,
+        purchasePlanItems: [],
+        headline: null,
+        summary: null,
+        hasForecast,
+        hasDemand,
+        isRunning: true,
+      };
+    }
+
+    const isNoFeasible =
+      brief.status === "completed_with_no_feasible_recommendation" ||
+      brief.recommendation?.available === false ||
+      brief.strategy_selection_presentation?.outcome === "no_feasible_strategy";
+
+    const hasFeasiblePlan =
+      !isNoFeasible &&
+      brief.recommendation?.available === true &&
+      (brief.procurement_rows?.length > 0 || brief.recommendation.total_purchase_cost != null);
+
+    const stratKey =
+      brief.strategy_selection_presentation?.selected_strategy ??
+      brief.recommendation?.strategy ??
+      null;
+
+    const stratLabel =
+      stratKey && strategyLabels[stratKey]
+        ? strategyLabels[stratKey]
+        : stratKey || "Khả thi";
+
+    const purchasePlanItems = (brief.procurement_rows ?? []).map((row) => ({
+      ingredientId: row.ingredient_id,
+      ingredientName: row.ingredient_name || row.ingredient_id,
+      orderQuantity: row.quantity,
+      unit: row.unit || "",
+      estimatedCost: row.purchase_cost ?? null,
+      orderDate: row.order_date,
+      arrivalDate: row.arrival_date,
+      supplierName: row.supplier_name,
+      reasonCodes: row.reason_codes,
+    }));
+
+    const totalPlannedCost =
+      brief.recommendation?.total_purchase_cost ??
+      (purchasePlanItems.some((i) => i.estimatedCost != null)
+        ? purchasePlanItems.reduce((sum, i) => sum + (i.estimatedCost ?? 0), 0)
+        : null);
+
+    const headline =
+      brief.strategy_selection_presentation?.headline ??
+      brief.recommendation?.summary ??
+      null;
+
+    const summary =
+      brief.strategy_selection_presentation?.summary ??
+      brief.assistant_summary?.summary ??
+      null;
+
+    const status: ManagerDecisionViewModel["status"] = isRunning
+      ? "loading"
+      : isNoFeasible
+        ? "no_feasible_strategy"
+        : hasFeasiblePlan
+          ? "ready"
+          : "no_recommendation";
+
+    return {
+      hasDecision: true,
+      status,
+      hasFeasiblePlan,
+      isNoFeasible,
+      recommendedStrategy: stratKey ? { key: stratKey, label: stratLabel } : null,
+      totalPlannedCost,
+      purchaseItemCount: purchasePlanItems.length,
+      purchasePlanItems,
+      headline,
+      summary,
+      hasForecast,
+      hasDemand,
+      isRunning,
+    };
+  }
+
+  // 2. BRIEF IS MISSING -> NEVER infer Manager business truth from raw DecisionPackage!
+  if (currentBriefError) {
+    return {
+      hasDecision: Boolean(decision),
+      status: "request_error",
+      hasFeasiblePlan: false,
+      isNoFeasible: false,
+      recommendedStrategy: null,
+      totalPlannedCost: null,
+      purchaseItemCount: 0,
+      purchasePlanItems: [],
+      headline: null,
+      summary: null,
+      hasForecast,
+      hasDemand,
+      isRunning,
+    };
+  }
+
+  if (isRunning || isBriefLoading) {
+    return {
+      hasDecision: Boolean(decision),
+      status: "loading",
+      hasFeasiblePlan: false,
+      isNoFeasible: false,
+      recommendedStrategy: null,
+      totalPlannedCost: null,
+      purchaseItemCount: 0,
+      purchasePlanItems: [],
+      headline: null,
+      summary: null,
+      hasForecast,
+      hasDemand,
+      isRunning: true,
+    };
+  }
+
+  if (decision) {
+    const status: ManagerDecisionViewModel["status"] =
+      decision.status === "failed" || decision.status === "blocked"
+        ? "request_error"
+        : "data_unavailable";
+
+    return {
+      hasDecision: true,
+      status,
+      hasFeasiblePlan: false,
+      isNoFeasible: false,
+      recommendedStrategy: null,
+      totalPlannedCost: null,
+      purchaseItemCount: 0,
+      purchasePlanItems: [],
+      headline: null,
+      summary: null,
+      hasForecast,
+      hasDemand,
+      isRunning: false,
+    };
+  }
+
+  // 3. IDLE / NO DECISION
+  return {
+    hasDecision: false,
+    status: "idle",
+    hasFeasiblePlan: false,
+    isNoFeasible: false,
+    recommendedStrategy: null,
+    totalPlannedCost: null,
+    purchaseItemCount: 0,
+    purchasePlanItems: [],
+    headline: null,
+    summary: null,
+    hasForecast,
+    hasDemand,
+    isRunning: false,
+  };
+}
+

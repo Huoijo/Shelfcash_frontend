@@ -39,6 +39,22 @@ test("proxy only accepts the ShelfCash API contract", () => {
     "/api/v1/stores/STORE_001/inventory-constraints",
   );
   assert.equal(
+    resolveBackendPath(["api", "v1", "stores", "STORE_001", "inventory-constraints"], "POST"),
+    "/api/v1/stores/STORE_001/inventory-constraints",
+  );
+  assert.equal(
+    resolveBackendPath(["api", "v1", "stores", "STORE_001", "inventory-constraints", "ic-1"], "PATCH"),
+    "/api/v1/stores/STORE_001/inventory-constraints/ic-1",
+  );
+  assert.equal(
+    resolveBackendPath(["api", "v1", "stores", "STORE_001", "inventory-constraints", "ic-1", "deactivate"], "POST"),
+    "/api/v1/stores/STORE_001/inventory-constraints/ic-1/deactivate",
+  );
+  assert.equal(
+    resolveBackendPath(["api", "v1", "business-constraint-types"], "GET"),
+    "/api/v1/business-constraint-types",
+  );
+  assert.equal(
     resolveBackendPath(
       ["api", "v1", "imports", "abc", "result"],
       "GET",
@@ -166,6 +182,8 @@ test("proxy only accepts the ShelfCash API contract", () => {
   );
   assert.equal(resolveBackendPath(["admin", "secrets"], "GET"), null);
   assert.equal(resolveBackendPath(["api", "v2", "imports"], "POST"), null);
+  assert.equal(resolveBackendPath(["api", "v1", "stores", "STORE_001", "inventory-constraints"], "DELETE"), null);
+  assert.equal(resolveBackendPath(["api", "v1", "business-constraint-types"], "POST"), null);
 });
 
 test("proxy keeps secrets server-side and preserves query/idempotency", async () => {

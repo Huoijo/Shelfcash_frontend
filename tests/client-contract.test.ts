@@ -17,7 +17,7 @@ import {
   getBootstrap,
   getDecisionBrief,
   getDecisionRun,
-  getDecisionExplanation,
+  explainDecision,
   getIngredientDemand,
   getInventoryMovements,
   getMenu,
@@ -70,7 +70,7 @@ test("decision runs use the canonical store-scoped create and global result endp
     });
     await getDecisionRun("decision-1");
     await getDecisionBrief("decision-1");
-    await getDecisionExplanation("decision-1");
+    await explainDecision("decision-1", { language: "vi", detail_level: "simple" });
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -558,6 +558,59 @@ test("forecast validates horizon and uses both scope arrays", async () => {
       calls[0]?.headers.get("Idempotency-Key"),
       "forecast-action-1",
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("createDecisionRun sends Idempotency-Key and preserves it on logical retry", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ headers: Headers; body: Record<string, unknown> }> = [];
+  globalThis.fetch = async (_input, init) => {
+    calls.push({
+      headers: new Headers(init?.headers),
+      body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {},
+    });
+    return Response.json({ decision_run_id: "decision-idemp-1", status: "completed" });
+  };
+  try {
+    await createDecisionRun({
+      storeId: "store-idemp",
+      request: {
+        forecast_run_id: "forecast-1",
+        as_of_date: "2026-08-10",
+        horizon_days: 7,
+        engine_mode: "deterministic",
+        include_open_purchase_orders: true,
+      },
+    });
+    assert.ok(calls[0]?.headers.get("Idempotency-Key"));
+
+    const explicitKey = "decision-logical-attempt-1";
+    await createDecisionRun({
+      storeId: "store-idemp",
+      request: {
+        forecast_run_id: "forecast-1",
+        as_of_date: "2026-08-10",
+        horizon_days: 7,
+        engine_mode: "deterministic",
+        include_open_purchase_orders: true,
+      },
+      idempotencyKey: explicitKey,
+    });
+    await createDecisionRun({
+      storeId: "store-idemp",
+      request: {
+        forecast_run_id: "forecast-1",
+        as_of_date: "2026-08-10",
+        horizon_days: 7,
+        engine_mode: "deterministic",
+        include_open_purchase_orders: true,
+      },
+      idempotencyKey: explicitKey,
+    });
+    assert.equal(calls[1]?.headers.get("Idempotency-Key"), explicitKey);
+    assert.equal(calls[2]?.headers.get("Idempotency-Key"), explicitKey);
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -525,6 +525,7 @@ export interface DecisionStrategy {
   strategy: DecisionStrategyKey;
   business_metrics?: DecisionBusinessMetrics | null;
   recommended_plan?: { items?: DecisionPlanItem[] | null; valid?: boolean | null } | null;
+  items?: DecisionPlanItem[] | null;
   feasible?: boolean | null;
   warnings?: string[] | null;
   violations?: string[] | null;
@@ -578,6 +579,8 @@ export interface DecisionPackage {
   business_metrics?: DecisionBusinessMetrics | null;
   recommended_plan?: { items?: DecisionPlanItem[] | null; valid?: boolean | null } | null;
   strategies?: DecisionStrategy[] | null;
+  ingredient_demand?: IngredientDemandRow[] | null;
+  procurement_rows?: ProcurementRow[] | null;
   inventory_risk?: DecisionInventoryRisk[] | null;
   critic?: { findings?: DecisionCriticFinding[] | null; status?: string } | null;
   technical_metrics?: DecisionTechnicalMetrics | null;
@@ -589,6 +592,39 @@ export interface DecisionPackage {
 }
 
 export type DecisionBriefStrategy = "lean" | "balanced" | "protected";
+export type CanonicalStrategy = DecisionBriefStrategy;
+
+export type StrategyCardStatus =
+  | "selected"
+  | "rejected"
+  | "not_selected";
+
+export interface StrategyPresentationNote {
+  strategy: DecisionBriefStrategy;
+  label: string;
+  status: StrategyCardStatus;
+  status_label: string;
+  headline: string;
+  message: string;
+  detail_lines: string[];
+  reason_codes: string[];
+  evidence_ids: string[];
+}
+
+export interface StrategySelectionPresentation {
+  source: "deterministic";
+  outcome:
+    | "selected"
+    | "no_feasible_strategy";
+  selected_strategy:
+    | DecisionBriefStrategy
+    | null;
+  headline: string;
+  summary:
+    | string
+    | null;
+  strategy_notes: StrategyPresentationNote[];
+}
 
 /**
  * The Decision Brief is the customer-facing, canonical result of a Decision
@@ -617,6 +653,7 @@ export interface IngredientDemandRow {
   p50: number | null;
   p75: number | null;
   contributions: Array<Record<string, unknown>>;
+  target_date?: string | null;
 }
 
 export interface RiskSummary {
@@ -665,6 +702,7 @@ export type PresentedWarning = {
 
 export interface DecisionBriefFacts {
   decision_run_id: string;
+  brief_id?: string;
   store_id: string;
   status: string;
   forecast: {
@@ -672,6 +710,7 @@ export interface DecisionBriefFacts {
     model_version: string | null;
     horizon_days: number | null;
     cutoff_date: string | null;
+    method?: string | null;
   };
   recommendation: {
     available: boolean;
@@ -698,6 +737,8 @@ export interface DecisionBriefFacts {
   strategy_comparison?: DecisionBriefStrategyAlternative[];
   strategy_alternatives?: DecisionBriefStrategyAlternative[];
   alternatives?: DecisionBriefStrategyAlternative[];
+  // Compatibility typing pending Backend runtime contract alignment.
+  strategy_selection_presentation?: StrategySelectionPresentation | null;
 }
 
 export interface DecisionBriefStrategyReasonValues {
@@ -1040,4 +1081,27 @@ export interface PurchaseOrderApiResponse extends ApiRecord {
   orders: ApiRecord[];
 }
 
+/** Canonical generic pagination envelope matching Backend contract */
+export interface Page<T> {
+  items: T[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface InventoryMovementRecord {
+  id: string;
+  store_id: string;
+  ingredient_id: string;
+  lot_id?: string | null;
+  movement_type: "inbound" | "outbound" | "waste" | "adjustment" | string;
+  quantity: number;
+  unit: string;
+  created_at: string;
+  reference_type?: string | null;
+  reference_id?: string | null;
+  notes?: string | null;
+}
+
 export type { RecipeDetail } from "./api-contract";
+

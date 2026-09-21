@@ -16,8 +16,30 @@ export function cn(
   return values.filter(Boolean).join(" ");
 }
 
-export function formatVnd(value: number): string {
+export function formatVnd(value: number | null | undefined, fallback = "—"): string {
+  if (value == null || !Number.isFinite(value)) return fallback;
   return `${Math.round(value).toLocaleString("vi-VN")} ₫`;
+}
+
+export function formatNullableVnd(value: number | null | undefined, fallback = "—"): string {
+  return formatVnd(value, fallback);
+}
+
+export function formatNullablePercent(
+  value: number | null | undefined,
+  fallback = "—",
+): string {
+  if (value == null || !Number.isFinite(value)) return fallback;
+  const pct = value <= 1 ? value * 100 : value;
+  return `${pct.toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`;
+}
+
+export function formatNullableNumber(
+  value: number | null | undefined,
+  fallback = "—",
+): string {
+  if (value == null || !Number.isFinite(value)) return fallback;
+  return value.toLocaleString("vi-VN");
 }
 
 /**
@@ -41,12 +63,25 @@ export function parseMoneyInput(value: string): number | undefined {
   return Number.isFinite(num) ? num : undefined;
 }
 
-export function formatQuantity(value: number, unit = ""): string {
+export function formatQuantity(
+  value: number | null | undefined,
+  unit = "",
+  fallback = "—",
+): string {
+  if (value == null || !Number.isFinite(value)) return fallback;
   const digits = Math.abs(value - Math.round(value)) < 0.001 ? 0 : 2;
   return `${value.toLocaleString("vi-VN", {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   })}${unit ? ` ${unit}` : ""}`;
+}
+
+export function formatNullableQuantity(
+  value: number | null | undefined,
+  unit = "",
+  fallback = "—",
+): string {
+  return formatQuantity(value, unit, fallback);
 }
 
 export function formatDate(value: string): string {

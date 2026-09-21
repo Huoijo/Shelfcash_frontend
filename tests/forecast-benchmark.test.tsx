@@ -228,13 +228,13 @@ const mockStaffSession = {
 
 test("Staff views do not render benchmark section (Manager only)", () => {
   const todayMarkup = renderToStaticMarkup(
-    <StaffTodayView session={mockStaffSession} onNavigate={() => undefined} />
+    <StaffTodayView session={mockStaffSession} onNavigateTab={() => undefined} />
   );
   assert.doesNotMatch(todayMarkup, /BENCHMARK MÔ HÌNH DỰ BÁO/);
   assert.doesNotMatch(todayMarkup, /forecast-benchmark/);
 
   const countMarkup = renderToStaticMarkup(
-    <StaffInventoryCountView session={mockStaffSession} onNavigate={() => undefined} />
+    <StaffInventoryCountView session={mockStaffSession} />
   );
   assert.doesNotMatch(countMarkup, /BENCHMARK MÔ HÌNH DỰ BÁO/);
   assert.doesNotMatch(countMarkup, /forecast-benchmark/);
@@ -248,6 +248,7 @@ test("Future planning view renders 7-day heatmap mock data and does not render F
       activeView="future"
       data={testBootstrap}
       decision={null}
+      previewMode={true}
       onNavigate={() => undefined}
       onViewChange={() => undefined}
       plan={{ forecasts: {}, enrichedInventory: [] } as any}
@@ -271,7 +272,7 @@ test("buildMock7DayDecisionPackage creates 7 distinct days, all 4 severity level
 
   assert.equal(pkg.horizon_days, 7);
   assert.ok(Array.isArray(pkg.ingredient_demand));
-  assert.ok(pkg.ingredient_demand.length >= 49); // 7 ingredients * 7 days
+  assert.ok((pkg.ingredient_demand?.length ?? 0) >= 49); // 7 ingredients * 7 days
 
   const view = adaptDecisionRunView(pkg, testBootstrap);
   assert.equal(view.dates.length, 7);
@@ -279,11 +280,10 @@ test("buildMock7DayDecisionPackage creates 7 distinct days, all 4 severity level
   assert.ok(view.risks.length >= 7);
 
   // Sữa tươi should have an arrival order in plannedItems
-  const milkArrival = pkg.recommended_plan.items.find(
+  const milkArrival = pkg.recommended_plan?.items?.find(
     (item: any) => item.ingredient_id === "Sữa tươi" || item.ingredient_name === "Sữa tươi"
   );
   assert.ok(milkArrival);
   assert.equal(milkArrival.order_quantity, 24);
 });
-
 

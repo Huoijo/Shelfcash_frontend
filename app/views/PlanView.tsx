@@ -312,6 +312,7 @@ export function PlanView({
   strategy,
   initialIngredient,
   draftOrders,
+  ordersPagination,
   onRunPlanning,
   onTrainModel,
   onStrategyChange,
@@ -340,6 +341,7 @@ export function PlanView({
   strategy: Strategy;
   initialIngredient?: string;
   draftOrders: PurchaseOrder[];
+  ordersPagination?: { page: number; pageSize: number; total: number };
   onRunPlanning: (input: SimulationRunInput) => Promise<void>;
   onTrainModel?: (modelVersion: string, historyDays: number) => Promise<void>;
   onStrategyChange: (strategy: Strategy) => void;
@@ -791,11 +793,7 @@ export function PlanView({
     }
   }
 
-  const hasCompletedDecision = Boolean(
-    decision && (noFeasibleDecision(decision) || decision.status === "completed")
-  );
-
-  if (focus === "plan" && hasCompletedDecision && !runBusy) {
+  if (focus === "plan" && decision && (noFeasibleDecision(decision) || decision.status === "completed") && !runBusy) {
     if (
       decisionBrief !== undefined ||
       briefLoading ||
@@ -1695,7 +1693,14 @@ export function PlanView({
         <section className="order-preview">
           <div className="order-select-row">
             <label className="field">
-              <span>Đơn đặt hàng</span>
+              <span>
+                Đơn đặt hàng
+                {ordersPagination && ordersPagination.total > draftOrders.length ? (
+                  <small style={{ marginLeft: "8px", fontWeight: 400, color: "#6b7773" }}>
+                    (Hiển thị {draftOrders.length} / {ordersPagination.total} đơn · Trang {ordersPagination.page})
+                  </small>
+                ) : null}
+              </span>
               <select
                 value={selectedOrderId}
                 onChange={(event) => setSelectedOrderId(event.target.value)}

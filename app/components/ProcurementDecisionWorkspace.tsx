@@ -27,11 +27,11 @@ function dateWindowLabel(asOfDate: string | undefined, horizonDays: number): str
   return `${formatter.format(start)} – ${formatter.format(end)}`;
 }
 
-function quantity(value: number | null, unit = ""): string {
+function quantity(value: number | null | undefined, unit = ""): string {
   return value == null ? "—" : formatQuantity(value, unit);
 }
 
-function percentage(value: number | null): string {
+function percentage(value: number | null | undefined): string {
   if (value == null) return "—";
   return `${(value <= 1 ? value * 100 : value).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`;
 }

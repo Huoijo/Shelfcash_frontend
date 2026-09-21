@@ -13,7 +13,6 @@ import type {
   PlanRunResponse,
   PlanRunResultResponse,
   DecisionBriefFacts,
-  DecisionExplanation,
   DecisionExplanationResponse,
   ExplanationRequest,
   WhatIfRequest,
@@ -22,6 +21,11 @@ import type {
   CreateDecisionRunRequest,
   SheetProfile,
   StoreBootstrapResponse,
+  Page,
+  InventoryMovementRecord,
+  SalesHistoryRow,
+  UsageHistoryRow,
+  PurchaseHistoryRow,
 } from "./types";
 import {
   assertForecastHorizon,
@@ -244,16 +248,26 @@ function decisionPath(decisionRunId: string): string {
   return `/api/v1/decision-runs/${encodeURIComponent(decisionRunId)}`;
 }
 
-export async function createDecisionRun(input: {
-  storeId: string;
-  request: CreateDecisionRunRequest;
-  signal?: AbortSignal;
-}): Promise<DecisionPackage> {
+export async function createDecisionRun(
+  input: {
+    storeId: string;
+    request: CreateDecisionRunRequest;
+    idempotencyKey?: string;
+    requestId?: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  },
+  options: MutationOptions = {},
+): Promise<DecisionPackage> {
+  const idempotencyKey = input.idempotencyKey ?? options.idempotencyKey;
   return request<DecisionPackage>(
     `${storePath(input.storeId)}/decision-runs`,
     jsonRequest("POST", input.request, {
-      signal: input.signal,
-      timeoutMs: 120_000,
+      idempotent: true,
+      idempotencyKey,
+      requestId: input.requestId ?? options.requestId,
+      signal: input.signal ?? options.signal,
+      timeoutMs: input.timeoutMs ?? options.timeoutMs ?? 120_000,
     }),
   );
 }
@@ -283,15 +297,6 @@ export async function explainDecision(
   );
 }
 
-export async function getDecisionExplanation(
-  decisionRunId: string,
-): Promise<DecisionExplanation> {
-  return request<DecisionExplanation>(
-    `${decisionPath(decisionRunId)}/explanation`,
-    jsonRequest("POST", { language: "vi", detail_level: "simple" }),
-  );
-}
-
 export async function runDecisionWhatIf(
   decisionRunId: string,
   mutation: WhatIfRequest,
@@ -301,11 +306,6 @@ export async function runDecisionWhatIf(
     `${decisionPath(decisionRunId)}/what-if`,
     jsonRequest("POST", mutation, options),
   );
-}
-
-/** @deprecated Use runDecisionWhatIf with an explicit WhatIfRequest. */
-export async function getDecisionWhatIf(decisionRunId: string): Promise<WhatIfResponse> {
-  return runDecisionWhatIf(decisionRunId, {});
 }
 
 export async function waitForDecisionRun(
@@ -577,7 +577,7 @@ export async function getInventoryMovements(input: {
   page?: number;
   pageSize?: number;
   signal?: AbortSignal;
-}): Promise<unknown> {
+}): Promise<Page<InventoryMovementRecord>> {
   const query = new URLSearchParams();
   if (input.ingredientId) query.set("ingredient_id", input.ingredientId);
   if (input.lotId) query.set("lot_id", input.lotId);
@@ -585,7 +585,7 @@ export async function getInventoryMovements(input: {
   if (input.dateTo) query.set("date_to", input.dateTo);
   if (input.page !== undefined) query.set("page", String(input.page));
   if (input.pageSize !== undefined) query.set("page_size", String(input.pageSize));
-  return request<unknown>(
+  return request<Page<InventoryMovementRecord>>(
     `${storePath(input.storeId)}/inventory-movements${query.size ? `?${query.toString()}` : ""}`,
     { signal: input.signal },
   );
@@ -1393,12 +1393,12 @@ export async function getPurchaseOrders(
   storeId: string,
   page = 1,
   pageSize = 50,
-): Promise<unknown> {
+): Promise<Page<PurchaseOrderRecord>> {
   const query = new URLSearchParams({
     page: String(page),
     page_size: String(pageSize),
   });
-  return request<unknown>(
+  return request<Page<PurchaseOrderRecord>>(
     `${storePath(storeId)}/purchase-orders?${query.toString()}`,
   );
 }
@@ -1542,14 +1542,14 @@ export async function getHistory(
     page?: number;
     pageSize?: number;
   },
-): Promise<unknown> {
+): Promise<Page<SalesHistoryRow | UsageHistoryRow | PurchaseHistoryRow>> {
   const query = new URLSearchParams({
     date_from: input.dateFrom,
     date_to: input.dateTo,
     page: String(input.page ?? 1),
     page_size: String(input.pageSize ?? 50),
   });
-  return request<unknown>(
+  return request<Page<SalesHistoryRow | UsageHistoryRow | PurchaseHistoryRow>>(
     `${storePath(storeId)}/${resource}?${query.toString()}`,
   );
 }

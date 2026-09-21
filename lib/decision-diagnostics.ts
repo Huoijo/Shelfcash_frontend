@@ -217,7 +217,7 @@ export function extractRealCriticDiagnostics(
 
     const evaluateStrat = (stratKey: "lean" | "balanced" | "protected"): StrategyEvalResult => {
       const st = strategyMap[stratKey];
-      const isChosen = brief.recommendation.strategy === stratKey && brief.recommendation.available;
+      const isChosen = brief.recommendation?.strategy === stratKey && Boolean(brief.recommendation?.available);
       const cost = st?.business_metrics?.projected_purchase_cost;
       const fillRate = st?.business_metrics?.expected_fill_rate;
       const stockout = st?.business_metrics?.stockout_probability;
@@ -307,7 +307,7 @@ export function extractRealCriticDiagnostics(
   });
 
   const generateSummary = (stratKey: "lean" | "balanced" | "protected", label: string): StrategySummaryCardInfo => {
-    const isChosen = brief.recommendation.strategy === stratKey && brief.recommendation.available;
+    const isChosen = brief.recommendation?.strategy === stratKey && Boolean(brief.recommendation?.available);
     const st = strategyMap[stratKey];
     const isFeasible = st?.feasible !== false;
     const stratViolations = rawViolations[stratKey];
@@ -332,17 +332,22 @@ export function extractRealCriticDiagnostics(
       statusLabel = `${passedCount}/${checks.length} Đạt · ⚠ CẢNH BÁO`;
     }
 
-    let reason = "";
-    if (isChosen) {
-      reason = "Phương án được thuật toán khuyến nghị: Thỏa mãn tối ưu các ràng buộc vận hành và chi phí.";
-    } else if (stratViolations.length > 0) {
-      reason = `Lý do loại: ${stratViolations.join(". ")}`;
-    } else if (!isFeasible) {
-      reason = "Lý do loại: Không tìm được phương án thỏa mãn toàn bộ các ràng buộc cứng của Solver.";
-    } else if (stratWarns.length > 0) {
-      reason = `Lưu ý: ${stratWarns.join(". ")}`;
-    } else {
-      reason = "Không được chọn làm phương án khuyến nghị tối ưu nhất theo hàm mục tiêu chi phí & rủi ro.";
+    const backendNote = brief.strategy_selection_presentation?.strategy_notes?.find(
+      (n) => n.strategy === stratKey,
+    );
+    let reason = backendNote?.message ?? "";
+    if (!reason) {
+      if (isChosen) {
+        reason = "Phương án được khuyến nghị.";
+      } else if (stratViolations.length > 0) {
+        reason = stratViolations.join(". ");
+      } else if (!isFeasible) {
+        reason = "Không thỏa mãn ràng buộc Solver.";
+      } else if (stratWarns.length > 0) {
+        reason = stratWarns.join(". ");
+      } else {
+        reason = "Không được chọn.";
+      }
     }
 
     return {
@@ -384,7 +389,7 @@ export function getMockCriticDiagnostics(
   brief: DecisionBriefFacts,
   remainingBudget = 15000000,
 ): DecisionDiagnosticsReport {
-  const baseCost = brief.recommendation.total_purchase_cost ?? 5625000;
+  const baseCost = brief.recommendation?.total_purchase_cost ?? 5625000;
 
   const checks: CriticCheckItem[] = [
     {

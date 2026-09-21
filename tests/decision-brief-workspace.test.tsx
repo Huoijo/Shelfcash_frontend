@@ -8,11 +8,16 @@ const brief: DecisionBriefFacts = {
   decision_run_id: "decision-brief-1",
   store_id: "store-1",
   status: "completed",
-  forecast: {},
-  recommendation: { available: true, strategy: "balanced", total_purchase_cost: 810_000, expected_fill_rate: 0.96 },
+  forecast: {
+    forecast_run_id: "fc-1",
+    model_version: "v1",
+    horizon_days: 7,
+    cutoff_date: "2026-08-20",
+  },
+  recommendation: { available: true, strategy: "balanced", summary: "Kế hoạch Cân bằng", total_purchase_cost: 810_000, expected_fill_rate: 0.96 },
   procurement_rows: [{ ingredient_id: "milk", ingredient_name: "Sữa tươi", supplier_id: "supplier-1", supplier_name: "Sữa Việt Distribution", quantity: 24, unit: "L", pack_count: 2, pack_size: 12, order_date: "2026-08-20", arrival_date: "2026-08-21", purchase_cost: 810_000, reason_codes: ["DEMAND_EXCEEDS_AVAILABLE_SUPPLY", "UNMAPPED_CODE"] }],
-  ingredient_demand: [{ ingredient_id: "milk", ingredient_name: "Sữa tươi", unit: "L", p25: 18, p50: 24, p75: 30 }],
-  risk: { stockout_probability: null },
+  ingredient_demand: [{ ingredient_id: "milk", ingredient_name: "Sữa tươi", unit: "L", p25: 18, p50: 24, p75: 30, contributions: [] }],
+  risk: { stockout_probability: null, expected_fill_rate: null, shortage_quantity: null, waste_quantity: null },
   critic: { hard_violations: [], warnings: [] },
   evidence: [],
   data_availability: {},
@@ -115,10 +120,10 @@ test("Decision Brief chart renders signed inventory balance and separates consum
   const briefWithShortage: DecisionBriefFacts = {
     ...brief,
     procurement_rows: [
-      { ingredient_id: "black-tea", ingredient_name: "Trà đen", supplier_id: "s1", supplier_name: "NCC Trà", quantity: 1, unit: "kg", order_date: "2026-08-13", arrival_date: "2026-08-18", purchase_cost: 120_000, reason_codes: ["DEMAND_EXCEEDS_AVAILABLE_SUPPLY"] },
+      { ingredient_id: "black-tea", ingredient_name: "Trà đen", supplier_id: "s1", supplier_name: "NCC Trà", quantity: 1, unit: "kg", pack_count: 1, pack_size: 1, order_date: "2026-08-13", arrival_date: "2026-08-18", purchase_cost: 120_000, reason_codes: ["DEMAND_EXCEEDS_AVAILABLE_SUPPLY"] },
     ],
     ingredient_demand: [
-      { ingredient_id: "black-tea", ingredient_name: "Trà đen", unit: "kg", p25: 0.35, p50: 0.43, p75: 0.5 },
+      { ingredient_id: "black-tea", ingredient_name: "Trà đen", unit: "kg", p25: 0.35, p50: 0.43, p75: 0.5, contributions: [] },
     ],
   };
 

@@ -4,6 +4,13 @@ import type {
   OpportunityRunInput,
 } from "./types";
 
+/**
+ * PREVIEW BOUNDARY:
+ * The Opportunity feature is currently in PREVIEW / NOT CONNECTED mode.
+ * PREVIEW_OPPORTUNITY_STORE_ID represents the deliberate preview identity and does not leak to live endpoints.
+ */
+export const PREVIEW_OPPORTUNITY_STORE_ID = "STORE_001";
+
 export class OpportunityApiService {
   private baseUrl: string;
 

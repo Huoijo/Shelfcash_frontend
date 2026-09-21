@@ -17,6 +17,7 @@ export type RiskEvaluationBasis =
   | "replenishment_buffer"
   | "fallback_coverage"
   | "stable"
+  | "missing_data"
   | "unknown";
 
 export interface DailyIngredientRiskState {
@@ -121,30 +122,31 @@ export function extractProcurementRows(
     }));
   }
 
-  const raw = decision as any;
+  const raw = decision as Record<string, unknown> | null | undefined;
   if (!raw) return [];
 
-  const items: any[] = [];
+  const items: Array<Record<string, unknown>> = [];
   if (Array.isArray(raw.procurement_rows)) {
-    items.push(...raw.procurement_rows);
+    items.push(...(raw.procurement_rows as Array<Record<string, unknown>>));
   }
-  if (Array.isArray(raw.recommended_plan?.items)) {
-    items.push(...raw.recommended_plan.items);
+  if (Array.isArray((raw.recommended_plan as { items?: unknown } | undefined)?.items)) {
+    items.push(...((raw.recommended_plan as { items: Array<Record<string, unknown>> }).items));
   }
   if (raw.strategies && typeof raw.strategies === "object") {
     if (Array.isArray(raw.strategies)) {
       const protectedStrat =
-        raw.strategies.find(
-          (s: any) => s?.strategy === "protected" || s?.key === "protected"
-        ) ?? raw.strategies[0];
+        (raw.strategies as Array<Record<string, unknown>>).find(
+          (s) => s?.strategy === "protected" || s?.key === "protected"
+        ) ?? (raw.strategies as Array<Record<string, unknown>>)[0];
       if (Array.isArray(protectedStrat?.items)) {
-        items.push(...protectedStrat.items);
+        items.push(...(protectedStrat.items as Array<Record<string, unknown>>));
       }
     } else {
+      const strategiesObj = raw.strategies as Record<string, { items?: Array<Record<string, unknown>> }>;
       const stratObj =
-        raw.strategies.protected ??
-        raw.strategies.balanced ??
-        Object.values(raw.strategies)[0];
+        strategiesObj.protected ??
+        strategiesObj.balanced ??
+        Object.values(strategiesObj)[0];
       if (Array.isArray(stratObj?.items)) {
         items.push(...stratObj.items);
       }
@@ -156,9 +158,9 @@ export function extractProcurementRows(
       ingredientId: String(item.ingredient_id ?? item.ingredientId ?? ""),
       quantity: Number(item.quantity ?? item.order_quantity ?? 0),
       arrivalDate: item.arrival_date
-        ? normalizeDateStr(item.arrival_date)
+        ? normalizeDateStr(String(item.arrival_date))
         : item.expected_arrival_date
-          ? normalizeDateStr(item.expected_arrival_date)
+          ? normalizeDateStr(String(item.expected_arrival_date))
           : null,
     }))
     .filter((item) => Boolean(item.ingredientId));
@@ -218,9 +220,13 @@ export function projectIngredientDailyRisks(
     const date = dates[i];
     const normDate = normalizeDateStr(date);
     const demandRow = matchingDemand.find((d) => normalizeDateStr(d.targetDate) === normDate);
-    const p50 = demandRow?.p50 ?? 0;
-    const p25 = demandRow?.p25 ?? (p50 * 0.8);
-    const p75 = demandRow?.p75 ?? (p50 * 1.2);
+    const p50 = demandRow?.p50 != null && Number.isFinite(demandRow.p50) ? demandRow.p50 : null;
+    const p25 = demandRow?.p25 != null && Number.isFinite(demandRow.p25)
+      ? demandRow.p25
+      : (p50 != null ? p50 * 0.8 : null);
+    const p75 = demandRow?.p75 != null && Number.isFinite(demandRow.p75)
+      ? demandRow.p75
+      : (p50 != null ? p50 * 1.2 : null);
 
     // Identify receipts on this day
     const dayArrivals = ingredientReceipts.filter(
@@ -245,14 +251,14 @@ export function projectIngredientDailyRisks(
           : FALLBACK_REPLENISHMENT_DAYS;
 
     // Detect demand spike metadata (does NOT dictate severity independently)
-    const isDemandSpike = dailyAvgDemand > 0 && p50 > 1.4 * dailyAvgDemand;
-    const demandSpikeRatio = dailyAvgDemand > 0 ? (p50 - dailyAvgDemand) / dailyAvgDemand : null;
+    const isDemandSpike = p50 != null && dailyAvgDemand > 0 && p50 > 1.4 * dailyAvgDemand;
+    const demandSpikeRatio = p50 != null && dailyAvgDemand > 0 ? (p50 - dailyAvgDemand) / dailyAvgDemand : null;
     const demandSpikeLabel = isDemandSpike && demandSpikeRatio != null
       ? `↗ Nhu cầu cao hơn TB ${Math.round(demandSpikeRatio * 100)}%`
       : null;
 
-    // Handle Unknown Data
-    if (currentStock == null || isNaN(currentStock)) {
+    // Handle Unknown Data (missing starting inventory OR missing demand forecast)
+    if (currentStock == null || isNaN(currentStock) || p50 == null) {
       dailyRisks.push({
         ingredientId,
         ingredientName,
@@ -261,12 +267,12 @@ export function projectIngredientDailyRisks(
         severity: "unknown",
         severityLevel: 0,
         severityLabel: "Không đủ dữ liệu",
-        basis: "unknown",
+        basis: "missing_data",
         demandP25: p25,
         demandP50: p50,
         demandP75: p75,
-        openingStock: null,
-        availableStock: null,
+        openingStock: currentStock != null ? Number(currentStock.toFixed(2)) : null,
+        availableStock: currentStock != null ? Number((currentStock + incomingQty).toFixed(2)) : null,
         closingStock: null,
         rawBalanceP50: null,
         rawBalanceP75: null,
@@ -284,7 +290,7 @@ export function projectIngredientDailyRisks(
         demandSpikeRatio,
         demandSpikeLabel,
         daysOfSupply: null,
-        reason: "Thiếu dữ liệu tồn kho",
+        reason: p50 == null ? "Chưa có dự báo nhu cầu" : "Thiếu dữ liệu tồn kho",
         contributionsCount: demandRow?.contributions.length ?? 0,
         demandRow: demandRow ?? null,
       });
@@ -301,7 +307,8 @@ export function projectIngredientDailyRisks(
     const shortageP50 = Math.max(0, -rawBalanceP50);
 
     // P75 Scenario Balances
-    const rawBalanceP75 = availableStock - p75;
+    const effP75 = p75 != null ? p75 : (p50 != null ? p50 * 1.2 : 0);
+    const rawBalanceP75 = availableStock - effP75;
     const closingStockP75 = Math.max(0, rawBalanceP75);
     const shortageP75 = Math.max(0, -rawBalanceP75);
 
@@ -334,8 +341,12 @@ export function projectIngredientDailyRisks(
       forwardCoverageDays += 1;
     }
 
-    if (simStock > 0 && dailyAvgDemand > 0) {
-      forwardCoverageDays += simStock / dailyAvgDemand;
+    if (simStock > 0) {
+      if (dailyAvgDemand > 0) {
+        forwardCoverageDays += simStock / dailyAvgDemand;
+      } else {
+        forwardCoverageDays = 999;
+      }
     }
 
     // ── STRICT PRECEDENCE EVALUATION ──
@@ -407,9 +418,9 @@ export function projectIngredientDailyRisks(
       severityLevel,
       severityLabel,
       basis,
-      demandP25: Number(p25.toFixed(2)),
-      demandP50: Number(p50.toFixed(2)),
-      demandP75: Number(p75.toFixed(2)),
+      demandP25: p25 != null ? Number(p25.toFixed(2)) : null,
+      demandP50: p50 != null ? Number(p50.toFixed(2)) : null,
+      demandP75: p75 != null ? Number(p75.toFixed(2)) : null,
       openingStock: Number(openingStock.toFixed(2)),
       availableStock: Number(availableStock.toFixed(2)),
       closingStock: Number(closingStockP50.toFixed(2)),

@@ -10,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   applyMappingSuggestion,
   buildEditableMappings,
@@ -47,6 +47,10 @@ import type {
 import {
   useRequestManager,
 } from "../../lib/request-manager/use-request-manager";
+import {
+  DEFAULT_MAX_POLL_DURATION_MS,
+  DEFAULT_POLL_INTERVAL_MS,
+} from "../../lib/request-manager/request-manager";
 import {
   computeRequestFingerprint,
   extractSafeFileMetadata,
@@ -269,17 +273,19 @@ export function ImportView({
     confirm?: { fingerprint: string; key: string };
     process?: { importId: string; key: string };
   }>({});
-  const [storeId, setStoreId] = useState(() => defaultStoreId?.trim() || "STORE_001");
+  const [storeId, setStoreId] = useState(() => defaultStoreId?.trim() || "");
   const [forecastDate, setForecastDate] = useState(defaultForecastDate);
   const [forecastHorizon, setForecastHorizon] = useState(() =>
     clampForecastHorizon(defaultForecastHorizon),
   );
 
-  useEffect(() => {
+  const [prevDefaultStoreId, setPrevDefaultStoreId] = useState(defaultStoreId);
+  if (defaultStoreId !== prevDefaultStoreId) {
+    setPrevDefaultStoreId(defaultStoreId);
     if (defaultStoreId?.trim()) {
       setStoreId(defaultStoreId.trim());
     }
-  }, [defaultStoreId]);
+  }
   const [phase, setPhase] = useState<Phase>("select");
 const [created, setCreated] = useState<ImportCreateResponse | null>(null);
   const [mappings, setMappings] = useState<EditableSheetMapping[]>([]);
@@ -400,7 +406,20 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
 
   async function startImport() {
     if (!files.length) return;
-    const targetStoreId = storeId.trim() || defaultStoreId?.trim() || "STORE_001";
+    const targetStoreId = storeId.trim() || defaultStoreId?.trim();
+    if (!targetStoreId) {
+      const key = actionKey("upload");
+      const attemptId = actionAttempts.begin(key);
+      actionAttempts.fail(
+        key,
+        attemptId,
+        "Chưa xác định cửa hàng (STORE_NOT_SELECTED). Vui lòng chọn hoặc nhập mã cửa hàng.",
+      );
+      setErrors([
+        "Chưa xác định cửa hàng (STORE_NOT_SELECTED). Vui lòng nhập mã cửa hàng trước khi tải tệp.",
+      ]);
+      return;
+    }
     const fileErrors = validateImportFiles(files);
     if (fileErrors.length) {
       const key = actionKey("upload");
@@ -651,16 +670,32 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
     }
   }
 
-  async function waitForResult(importId: string): Promise<IngestionResult> {
-    for (let attempt = 0; attempt < 12; attempt += 1) {
+  async function waitForResult(
+    importId: string,
+    options?: { maxDurationMs?: number; pollIntervalMs?: number },
+  ): Promise<IngestionResult> {
+    const maxDuration = options?.maxDurationMs ?? DEFAULT_MAX_POLL_DURATION_MS;
+    const pollInterval = options?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    const deadline = Date.now() + maxDuration;
+
+    while (Date.now() < deadline) {
       try {
         return await getImportResult(importId);
       } catch (caught) {
-        if (!importStillProcessing(caught) || attempt === 11) throw caught;
-        await delay(800);
+        if (!importStillProcessing(caught)) throw caught;
       }
+      await delay(pollInterval);
     }
-    throw new Error("Kết quả chưa sẵn sàng.");
+    const timeoutError = new ShelfCashApiError(
+      {
+        code: "CLIENT_TIMEOUT",
+        message:
+          "Đã dừng chờ tự động do quá thời gian quy định (120s). Quá trình xử lý có thể vẫn đang tiếp tục trên máy chủ. Nhấn 'Đồng bộ' để kiểm tra kết quả.",
+        details: { import_id: importId },
+      },
+      408,
+    );
+    throw timeoutError;
   }
 
   async function runProcess() {
@@ -714,17 +749,25 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
       }
       actionAttempts.succeed(action.key, action.attemptId, "Dữ liệu đã được xử lý và đồng bộ.");
     } catch (caught) {
+      const isClientTimeout =
+        caught instanceof ShelfCashApiError && caught.code === "CLIENT_TIMEOUT";
       const stillProcessing = importStillProcessing(caught);
+      const isPending = stillProcessing || isClientTimeout;
       const apiErr = parseApiError(caught);
-      setPhase(stillProcessing ? "processing" : "confirmed");
+      setPhase(isPending ? "processing" : "confirmed");
       setStatusText(
-        stillProcessing
-          ? "Dữ liệu có thể vẫn đang được xử lý. Không cần gửi lại; chọn Đồng bộ để kiểm tra trạng thái."
-          : "Yêu cầu bị máy chủ từ chối trước khi xử lý xong. Hãy xem lỗi và chỉnh dữ liệu trước khi thử lại.",
+        isClientTimeout
+          ? "Quá trình xử lý mất nhiều thời gian hơn dự kiến nhưng vẫn đang tiếp tục trên máy chủ. Chọn 'Đồng bộ' để kiểm tra kết quả mà không cần gửi lại."
+          : stillProcessing
+            ? "Dữ liệu có thể vẫn đang được xử lý. Không cần gửi lại; chọn Đồng bộ để kiểm tra trạng thái."
+            : "Yêu cầu bị máy chủ từ chối trước khi xử lý xong. Hãy xem lỗi và chỉnh dữ liệu trước khi thử lại.",
       );
-      if (stillProcessing) {
+      if (isPending) {
         if (activeRequestId) {
-          requestMgr.updateRequest(activeRequestId, { status: "waiting" });
+          requestMgr.updateRequest(activeRequestId, {
+            status: isClientTimeout ? "client_timeout" : "waiting",
+            error: isClientTimeout ? apiErr : undefined,
+          });
         }
         actionAttempts.unknown(
           action.key,
@@ -785,7 +828,7 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
               <input
                 value={storeId}
                 onChange={(event) => setStoreId(event.target.value)}
-                placeholder="STORE_001"
+                placeholder="Ví dụ: STORE_HCM_01"
               />
             </label>
             <label className="field">

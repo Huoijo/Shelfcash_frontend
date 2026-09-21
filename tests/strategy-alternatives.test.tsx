@@ -4,13 +4,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { DecisionBriefWorkspace } from "../app/components/DecisionBriefWorkspace.tsx";
 import {
   findStrategyAlternativesInBrief,
-  normalizeCandidateStrategy,
   isCandidateStrategyObject,
 } from "../lib/strategy-alternatives.ts";
 import type { DecisionBriefFacts } from "../lib/types.ts";
 
 const userBriefSnippet = [
   {
+    strategy: "lean",
+    label: "Tiết kiệm",
+    selected: true,
+    status: "selected",
     presentation: {
       headline: "Tiết kiệm được chọn",
       summary: "Đây là phương án hợp lệ có chi phí nhập thấp nhất trong các phương án được đánh giá.",
@@ -112,13 +115,14 @@ test("findStrategyAlternativesInBrief extracts candidates from root or nested br
   assert.equal(res4.length, 3);
 });
 
-test("DecisionBriefWorkspace renders candidate strategies with presentation, reasons, delta, and NULL for missing values", () => {
+test("DecisionBriefWorkspace renders grounded strategy selection presentation from brief", () => {
   const brief: DecisionBriefFacts = {
     decision_run_id: "decision-run-123",
     store_id: "store-1",
     status: "completed",
     forecast: {
       forecast_run_id: "f-1",
+      model_version: "v1",
       method: "quantile_regression",
       horizon_days: 7,
       cutoff_date: "2026-08-20",
@@ -147,13 +151,43 @@ test("DecisionBriefWorkspace renders candidate strategies with presentation, rea
       },
     ],
     ingredient_demand: [
-      { ingredient_id: "milk", ingredient_name: "Sữa tươi", unit: "L", p25: 8, p50: 10, p75: 12 },
+      { ingredient_id: "milk", ingredient_name: "Sữa tươi", unit: "L", p25: 8, p50: 10, p75: 12, contributions: [] },
     ],
-    risk: { stockout_probability: null, expected_fill_rate: null },
+    risk: { stockout_probability: null, expected_fill_rate: null, shortage_quantity: null, waste_quantity: null },
     critic: { hard_violations: [], warnings: [] },
     evidence: [],
     data_availability: {},
-    candidate_strategies: userBriefSnippet as any,
+    strategy_selection_presentation: {
+      source: "deterministic",
+      outcome: "selected",
+      selected_strategy: "lean",
+      headline: "Đã chọn phương án Tiết kiệm.",
+      summary: "Phương án Tiết kiệm là lựa chọn khả thi có chi phí thấp nhất.",
+      strategy_notes: [
+        {
+          strategy: "lean",
+          label: "Tiết kiệm",
+          status: "selected",
+          status_label: "Được chọn",
+          headline: "Phương án Tiết kiệm",
+          message: "Được chọn vì có chi phí nhập dự kiến 7,67 triệu đồng thấp nhất.",
+          detail_lines: ["Thỏa mãn mọi yêu cầu vận hành."],
+          reason_codes: ["LOWEST_COST"],
+          evidence_ids: ["ev-1"],
+        },
+        {
+          strategy: "balanced",
+          label: "Cân bằng",
+          status: "not_selected",
+          status_label: "Hợp lệ (Không chọn)",
+          headline: "Phương án Cân bằng",
+          message: "Chi phí cao hơn khoảng 1,73 triệu đồng.",
+          detail_lines: [],
+          reason_codes: ["HIGHER_COST"],
+          evidence_ids: ["ev-2"],
+        },
+      ],
+    },
   };
 
   const markup = renderToStaticMarkup(
@@ -174,32 +208,22 @@ test("DecisionBriefWorkspace renders candidate strategies with presentation, rea
     />
   );
 
-  // Strategy headlines
-  assert.match(markup, /Tiết kiệm được chọn/);
-  assert.match(markup, /Cân bằng vẫn là phương án hợp lệ/);
-  assert.match(markup, /An toàn vẫn là phương án hợp lệ/);
+  // Headlines and summaries rendered directly from backend
+  assert.match(markup, /Đã chọn phương án Tiết kiệm\./);
+  assert.match(markup, /Phương án Tiết kiệm là lựa chọn khả thi có chi phí thấp nhất\./);
+  assert.match(markup, /Phương án Tiết kiệm/);
+  assert.match(markup, /Phương án Cân bằng/);
 
-  // Strategy summaries
-  assert.match(markup, /Đây là phương án hợp lệ có chi phí nhập thấp nhất trong các phương án được đánh giá\./);
-  assert.match(markup, /Phương án này không được chọn vì chi phí nhập dự kiến cao hơn phương án được chọn\./);
-
-  // Strategy reason messages
-  assert.match(markup, /Chi phí nhập dự kiến là 7,67 triệu đồng\./);
+  // Messages and detail lines rendered directly
+  assert.match(markup, /Được chọn vì có chi phí nhập dự kiến 7,67 triệu đồng thấp nhất\./);
+  assert.match(markup, /Thỏa mãn mọi yêu cầu vận hành\./);
   assert.match(markup, /Chi phí cao hơn khoảng 1,73 triệu đồng\./);
 
-  // Badges
-  assert.match(markup, /ĐÃ CHỌN TỐI ƯU/);
-  assert.match(markup, /HỢP LỆ \(KHÔNG CHỌN\)/);
+  // Badges rendered directly
+  assert.match(markup, /Được chọn/);
+  assert.match(markup, /Hợp lệ \(Không chọn\)/);
 
-  // Reason codes and delta
-  assert.match(markup, /HIGHER_PURCHASE_COST_THAN_SELECTED/);
-  assert.match(markup, /\+1\.730\.000/);
-  assert.match(markup, /9\.398\.000/);
-  assert.match(markup, /7\.668\.000/);
-
-  // Verification status
-  assert.match(markup, /Đã xác minh \(Verified\)/);
-
-  // Missing fields display NULL
-  assert.match(markup, /NULL/);
+  // Reason codes MUST NOT be rendered to user
+  assert.doesNotMatch(markup, /LOWEST_COST/);
+  assert.doesNotMatch(markup, /HIGHER_COST/);
 });

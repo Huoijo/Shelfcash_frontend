@@ -43,12 +43,13 @@ function ForecastTooltip({ active, payload, unit }: ForecastTooltipProps) {
 
 export function forecastPointsForRun(
   points: ForecastResult["forecast"],
-  cutoffDate?: string,
-  horizonDays?: number,
+  cutoffDate?: string | null,
+  horizonDays?: number | null,
 ): ForecastResult["forecast"] {
   if (
     !cutoffDate ||
     !/^\d{4}-\d{2}-\d{2}$/.test(cutoffDate) ||
+    horizonDays == null ||
     !Number.isInteger(horizonDays) ||
     horizonDays < 1
   ) {
@@ -69,8 +70,8 @@ export function ForecastChart({
 }: {
   forecast: ForecastResult;
   compact?: boolean;
-  cutoffDate?: string;
-  horizonDays?: number;
+  cutoffDate?: string | null;
+  horizonDays?: number | null;
 }) {
   const chartId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const seriesName = forecast.product || forecast.ingredient || "sản phẩm";

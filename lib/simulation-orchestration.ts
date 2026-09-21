@@ -126,6 +126,7 @@ export async function runSimulationAttempt(
       engineMode: input.engineMode,
       scenarioCount: input.scenarioCount,
     }),
+    idempotencyKey: `${prefix}:decision`,
     signal: input.signal,
   });
   const decision = await api.waitForDecisionRun(
