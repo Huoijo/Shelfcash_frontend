@@ -1,67 +1,105 @@
 import type {
   LocalOpportunityContext,
+  OpportunityAnalysisLocation,
   OpportunityCandidate,
+  OpportunityPoi,
   PoiPoint,
 } from "./types";
 
+export const DEFAULT_STORE_LOCATION: OpportunityAnalysisLocation = {
+  lat: 10.7725,
+  lng: 106.6578,
+  label: "ShelfCash Flagship Coffee",
+  address: "268 Lý Thường Kiệt, Phường 14, Quận 10, TP. Hồ Chí Minh",
+  source: "store",
+};
+
+export const CANONICAL_PREVIEW_POIS: OpportunityPoi[] = [
+  // 8 Competitors
+  { id: "poi-c1", name: "Highlands Coffee", lat: 10.7738, lng: 106.6592, category: "competitor", distanceMeters: 210 },
+  { id: "poi-c2", name: "The Coffee House", lat: 10.7712, lng: 106.6558, category: "competitor", distanceMeters: 260 },
+  { id: "poi-c3", name: "Phúc Long Coffee & Tea", lat: 10.7745, lng: 106.6565, category: "competitor", distanceMeters: 270 },
+  { id: "poi-c4", name: "Katinat Saigon Kafe", lat: 10.7705, lng: 106.6601, category: "competitor", distanceMeters: 340 },
+  { id: "poi-c5", name: "Cà phê Ông Bầu", lat: 10.7752, lng: 106.6610, category: "competitor", distanceMeters: 460 },
+  { id: "poi-c6", name: "Trà sữa Gong Cha", lat: 10.7698, lng: 106.6535, category: "competitor", distanceMeters: 550 },
+  { id: "poi-c7", name: "Cheese Coffee", lat: 10.7761, lng: 106.6542, category: "competitor", distanceMeters: 560 },
+  { id: "poi-c8", name: "Cà phê Muối Chú Long", lat: 10.7682, lng: 106.6615, category: "competitor", distanceMeters: 630 },
+
+  // 4 Universities
+  { id: "poi-u1", name: "ĐH Bách Khoa TP.HCM", lat: 10.7721, lng: 106.6598, category: "university", distanceMeters: 220 },
+  { id: "poi-u2", name: "ĐH Kinh Tế TP.HCM (Cơ sở B)", lat: 10.7749, lng: 106.6635, category: "university", distanceMeters: 680 },
+  { id: "poi-u3", name: "ĐH Y Dược TP.HCM", lat: 10.7578, lng: 106.6612, category: "university", distanceMeters: 1700 },
+  { id: "poi-u4", name: "ĐH Sư Phạm Kỹ Thuật (Phân hiệu)", lat: 10.7782, lng: 106.6515, category: "university", distanceMeters: 950 },
+
+  // 3 Transit
+  { id: "poi-t1", name: "Trạm Metro Tuyến 2 (Bách Khoa)", lat: 10.7728, lng: 106.6570, category: "transit", distanceMeters: 95 },
+  { id: "poi-t2", name: "Trạm xe buýt Lý Thường Kiệt", lat: 10.7718, lng: 106.6582, category: "transit", distanceMeters: 110 },
+  { id: "poi-t3", name: "Bến xe buýt / Điểm trung chuyển Chợ Lớn", lat: 10.7535, lng: 106.6520, category: "transit", distanceMeters: 2200 },
+
+  // 5 Supporting Retail
+  { id: "poi-r1", name: "Siêu thị Co.opmart Lý Thường Kiệt", lat: 10.7709, lng: 106.6572, category: "supporting_retail", distanceMeters: 190 },
+  { id: "poi-r2", name: "Vạn Hạnh Mall", lat: 10.7695, lng: 106.6672, category: "supporting_retail", distanceMeters: 1100 },
+  { id: "poi-r3", name: "Cửa hàng tiện lợi GS25", lat: 10.7732, lng: 106.6562, category: "supporting_retail", distanceMeters: 190 },
+  { id: "poi-r4", name: "Circle K Lý Thường Kiệt", lat: 10.7715, lng: 106.6591, category: "supporting_retail", distanceMeters: 180 },
+  { id: "poi-r5", name: "Nhà sách Phương Nam", lat: 10.7741, lng: 106.6618, category: "supporting_retail", distanceMeters: 480 },
+];
+
+/**
+ * Generates deterministic POIs around any chosen analysis center and radius.
+ */
+export function generatePreviewPoisForLocation(
+  center: OpportunityAnalysisLocation,
+  radiusKm: number
+): OpportunityPoi[] {
+  const scale = Math.min(1.5, Math.max(0.6, radiusKm / 3));
+
+  return CANONICAL_PREVIEW_POIS.map((poi) => {
+    // Relative displacement from default center
+    const relLat = (poi.lat - DEFAULT_STORE_LOCATION.lat) * scale;
+    const relLng = (poi.lng - DEFAULT_STORE_LOCATION.lng) * scale;
+
+    const lat = center.lat + relLat;
+    const lng = center.lng + relLng;
+    const distanceMeters = Math.round((poi.distanceMeters ?? 300) * scale);
+
+    return {
+      ...poi,
+      id: `${poi.id}-${center.source}-${radiusKm}`,
+      lat,
+      lng,
+      distanceMeters,
+    };
+  });
+}
+
 export const PREVIEW_POI_POINTS: PoiPoint[] = [
-  // Universities (6)
-  { id: "poi-u1", label: "Đại học Bách Khoa", type: "university", angleDeg: 28, distanceNormalized: 0.35 },
-  { id: "poi-u2", label: "Đại học Kinh Tế", type: "university", angleDeg: 72, distanceNormalized: 0.52 },
-  { id: "poi-u3", label: "Đại học Y Dược", type: "university", angleDeg: 145, distanceNormalized: 0.7 },
-  { id: "poi-u4", label: "Đại học Sư Phạm", type: "university", angleDeg: 210, distanceNormalized: 0.44 },
-  { id: "poi-u5", label: "Đại học Khoa Học Tự Nhiên", type: "university", angleDeg: 285, distanceNormalized: 0.65 },
-  { id: "poi-u6", label: "Cao Đẳng Kỹ Thuật", type: "university", angleDeg: 330, distanceNormalized: 0.8 },
-
-  // Transit (4)
-  { id: "poi-t1", label: "Trạm Metro Số 1", type: "transit", angleDeg: 45, distanceNormalized: 0.28 },
-  { id: "poi-t2", label: "Trạm xe buýt Trung tâm", type: "transit", angleDeg: 120, distanceNormalized: 0.38 },
-  { id: "poi-t3", label: "Nút giao thông Vành Đai", type: "transit", angleDeg: 195, distanceNormalized: 0.78 },
-  { id: "poi-t4", label: "Bến đón trả khách liên quận", type: "transit", angleDeg: 310, distanceNormalized: 0.82 },
-
-  // Competition (12)
-  { id: "poi-c1", label: "Chuỗi cà phê A", type: "competition", angleDeg: 15, distanceNormalized: 0.22 },
-  { id: "poi-c2", label: "Quán trà sữa X", type: "competition", angleDeg: 40, distanceNormalized: 0.48 },
-  { id: "poi-c3", label: "Cà phê vỉa hè B", type: "competition", angleDeg: 60, distanceNormalized: 0.31 },
-  { id: "poi-c4", label: "Chuỗi đồ uống C", type: "competition", angleDeg: 85, distanceNormalized: 0.62 },
-  { id: "poi-c5", label: "Quán trà trái cây D", type: "competition", angleDeg: 105, distanceNormalized: 0.4 },
-  { id: "poi-c6", label: "Quán cà phê Specialty", type: "competition", angleDeg: 135, distanceNormalized: 0.55 },
-  { id: "poi-c7", label: "Tiệm trà sữa Y", type: "competition", angleDeg: 160, distanceNormalized: 0.75 },
-  { id: "poi-c8", label: "Chuỗi đồ uống E", type: "competition", angleDeg: 175, distanceNormalized: 0.33 },
-  { id: "poi-c9", label: "Cà phê máy tự động", type: "competition", angleDeg: 225, distanceNormalized: 0.58 },
-  { id: "poi-c10", label: "Quán nước ép F", type: "competition", angleDeg: 240, distanceNormalized: 0.42 },
-  { id: "poi-c11", label: "Quán cà phê rang xay", type: "competition", angleDeg: 270, distanceNormalized: 0.25 },
-  { id: "poi-c12", label: "Trà sữa nhà làm G", type: "competition", angleDeg: 340, distanceNormalized: 0.68 },
-
-  // Complementary Retail (9)
-  { id: "poi-r1", label: "Cửa hàng tiện lợi 24/7", type: "retail", angleDeg: 32, distanceNormalized: 0.2 },
-  { id: "poi-r2", label: "Nhà sách Fahasa", type: "retail", angleDeg: 68, distanceNormalized: 0.45 },
-  { id: "poi-r3", label: "Khu văn phòng Tech Hub", type: "retail", angleDeg: 110, distanceNormalized: 0.5 },
-  { id: "poi-r4", label: "Phòng gym California", type: "retail", angleDeg: 150, distanceNormalized: 0.6 },
-  { id: "poi-r5", label: "Cửa hàng bánh mì tươi", type: "retail", angleDeg: 165, distanceNormalized: 0.27 },
-  { id: "poi-r6", label: "Siêu thị mini WinMart", type: "retail", angleDeg: 200, distanceNormalized: 0.36 },
-  { id: "poi-r7", label: "Khu Co-working Space", type: "retail", angleDeg: 230, distanceNormalized: 0.53 },
-  { id: "poi-r8", label: "Tòa nhà Ngân hàng", type: "retail", angleDeg: 280, distanceNormalized: 0.72 },
-  { id: "poi-r9", label: "Cửa hàng phụ kiện số", type: "retail", angleDeg: 325, distanceNormalized: 0.6 },
+  { id: "poi-c1", label: "Chuỗi cà phê A", type: "competition", angleDeg: 28, distanceNormalized: 0.38 },
+  { id: "poi-c2", label: "Quán trà sữa X", type: "competition", angleDeg: 68, distanceNormalized: 0.65 },
+  { id: "poi-c3", label: "Cà phê vỉa hè B", type: "competition", angleDeg: 115, distanceNormalized: 0.44 },
+  { id: "poi-c4", label: "Chuỗi đồ uống C", type: "competition", angleDeg: 160, distanceNormalized: 0.72 },
+  { id: "poi-c5", label: "Quán trà trái cây D", type: "competition", angleDeg: 205, distanceNormalized: 0.35 },
+  { id: "poi-c6", label: "Quán cà phê Specialty", type: "competition", angleDeg: 250, distanceNormalized: 0.58 },
+  { id: "poi-c7", label: "Tiệm trà sữa Y", type: "competition", angleDeg: 295, distanceNormalized: 0.78 },
+  { id: "poi-c8", label: "Chuỗi đồ uống E", type: "competition", angleDeg: 335, distanceNormalized: 0.48 },
 ];
 
 export const PREVIEW_LOCAL_CONTEXT: LocalOpportunityContext = {
   radiusKm: 3,
-  totalPois: 31,
-  scannedPois: 31,
+  totalPois: 20,
+  scannedPois: 20,
   metrics: [
-    { key: "university", label: "Trường / Đại học", count: 6 },
-    { key: "transit", label: "Transit", count: 4 },
-    { key: "competition", label: "Cạnh tranh", count: 12 },
-    { key: "retail", label: "Retail bổ trợ", count: 9 },
+    { key: "competitor", label: "Cửa hàng / Đối thủ", count: 8 },
+    { key: "university", label: "Trường / Đại học", count: 4 },
+    { key: "transit", label: "Transit", count: 3 },
+    { key: "supporting_retail", label: "Retail bổ trợ", count: 5 },
   ],
-
   signals: [
     { key: "students", label: "Sinh viên cao", badgeType: "info" },
     { key: "to_go", label: "Mang đi mạnh", badgeType: "success" },
     { key: "rainy_season", label: "Mùa mưa", badgeType: "warning" },
   ],
   poiPoints: PREVIEW_POI_POINTS,
+  pois: CANONICAL_PREVIEW_POIS,
 };
 
 export const PREVIEW_CANDIDATE_CATALOG: OpportunityCandidate[] = [

@@ -693,6 +693,53 @@ export interface DecisionBriefFacts {
   assistant_summary?: AssistantSummary | null;
   ingredient_synthesis?: IngredientSynthesis[];
   presented_warnings?: PresentedWarning[];
+  candidate_strategies?: DecisionBriefStrategyAlternative[];
+  strategies?: DecisionBriefStrategyAlternative[];
+  strategy_comparison?: DecisionBriefStrategyAlternative[];
+  strategy_alternatives?: DecisionBriefStrategyAlternative[];
+  alternatives?: DecisionBriefStrategyAlternative[];
+}
+
+export interface DecisionBriefStrategyReasonValues {
+  candidate_purchase_cost?: number | null;
+  selected_purchase_cost?: number | null;
+  purchase_cost_delta?: number | null;
+  [key: string]: unknown;
+}
+
+export interface DecisionBriefStrategyReason {
+  kind?: string | null;
+  code?: string | null;
+  message?: string | null;
+  values?: DecisionBriefStrategyReasonValues | null;
+  [key: string]: unknown;
+}
+
+export interface DecisionBriefStrategyPresentation {
+  headline?: string | null;
+  summary?: string | null;
+  reason_messages?: string[] | null;
+  [key: string]: unknown;
+}
+
+export interface DecisionBriefStrategyAlternative {
+  strategy: string;
+  label?: string | null;
+  status?: string | null;
+  selected?: boolean | null;
+  feasible?: boolean | null;
+  purchase_cost?: number | null;
+  reason_status?: string | null;
+  reasons?: DecisionBriefStrategyReason[] | null;
+  presentation?: DecisionBriefStrategyPresentation | null;
+  expected_fill_rate?: number | null;
+  fill_rate?: number | null;
+  stockout_probability?: number | null;
+  expected_waste?: number | string | null;
+  waste_quantity?: number | null;
+  violations?: string[] | null;
+  warnings?: string[] | null;
+  [key: string]: unknown;
 }
 
 export interface ExplanationRequest {

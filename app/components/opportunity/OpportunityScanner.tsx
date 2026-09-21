@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertCircle, CheckCircle2, Compass, Loader2, Play, RotateCw } from "lucide-react";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import type { LocalOpportunityContext, OpportunityRun, OpportunityRunStatus } from "../../../lib/opportunity/types";
 
 interface OpportunityScannerProps {
@@ -41,6 +41,28 @@ export function OpportunityScanner({
   const isCompleted = status === "completed";
   const isFailed = status === "failed";
   const isIdle = status === "idle" || (!isScanning && !isCompleted && !isFailed);
+  const [sweepAngle, setSweepAngle] = useState<number>(0);
+
+  useEffect(() => {
+    if (!isScanning) {
+      setSweepAngle(0);
+      return;
+    }
+    const startTime = performance.now();
+    const SWEEP_PERIOD_MS = 3400; // 3.4s per revolution (relaxed, steady pace)
+    let frameId: number;
+
+    const tick = (now: number) => {
+      const elapsed = now - startTime;
+      const angle = (elapsed / SWEEP_PERIOD_MS) * 360;
+      setSweepAngle(angle);
+      frameId = requestAnimationFrame(tick);
+    };
+
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
+  }, [isScanning]);
+
 
   const handleBudgetBlur = () => {
     const numeric = parseInt(budgetInput.replace(/\D/g, ""), 10);
@@ -64,6 +86,7 @@ export function OpportunityScanner({
     setBudgetInput(num.toLocaleString("vi-VN"));
     if (onBudgetChange) onBudgetChange(num);
   };
+
 
   // Compact Completed Banner
   if (isCompleted) {
@@ -155,38 +178,39 @@ export function OpportunityScanner({
           {/* Rotating radar beam during scan */}
           {isScanning && <div className="opp-radar-sweep-beam" />}
 
-          {/* Center store anchor */}
-          <div className="opp-radar-center-hub">
+          {/* Center store anchor (Exactly centered at 50% / 50%) */}
+          <div className="opp-radar-center-hub" aria-hidden="true">
             <div className="opp-hub-core" />
             <span className="opp-hub-label">CỬA HÀNG</span>
           </div>
 
-          {/* POI scatter indicators */}
-          {localContext?.poiPoints.map((poi, idx) => {
+          {/* POI scatter indicators (discovered smoothly as radar beam sweeps through their angle) */}
+          {(localContext?.poiPoints ?? []).map((poi) => {
             const angleRad = (poi.angleDeg * Math.PI) / 180;
-            const radiusPx = poi.distanceNormalized * 110;
-            const x = Math.cos(angleRad) * radiusPx;
-            const y = Math.sin(angleRad) * radiusPx;
+            const radiusPx = poi.distanceNormalized * 105;
+            const x = Math.round(Math.cos(angleRad) * radiusPx);
+            const y = Math.round(Math.sin(angleRad) * radiusPx);
 
             const isRevealed =
-              isScanning && currentRun?.scannedCount
-                ? idx < currentRun.scannedCount
-                : isCompleted;
+              isCompleted ||
+              (isScanning && (sweepAngle >= poi.angleDeg || (currentRun?.progressPercent ?? 0) >= 70));
 
             return (
               <div
                 key={poi.id}
-                className={`opp-radar-poi poi-${poi.type} ${isRevealed ? "poi-visible" : "poi-hidden"}`}
+                className={`opp-radar-poi poi-competition ${isRevealed ? "poi-visible" : "poi-hidden"}`}
                 style={{
-                  transform: `translate(${x}px, ${y}px)`,
+                  left: `calc(50% + ${x}px)`,
+                  top: `calc(50% + ${y}px)`,
                 }}
-                title={`${poi.label} (${poi.type})`}
+                title={`${poi.label} (Cửa hàng / Đối thủ)`}
               >
                 <div className="opp-poi-ping" />
               </div>
             );
           })}
         </div>
+
 
         {/* Dynamic Stage Message & Progress Indicator */}
         <div className="opp-scanner-status-area">

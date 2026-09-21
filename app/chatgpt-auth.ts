@@ -1,4 +1,4 @@
-import { headers } from "next/headers";
+git import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 export type ChatGPTUser = {
@@ -24,7 +24,7 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   const encodedFullName = requestHeaders.get(USER_FULL_NAME_HEADER);
   const fullName =
     encodedFullName &&
-    requestHeaders.get(USER_FULL_NAME_ENCODING_HEADER) === PERCENT_ENCODED_UTF8
+      requestHeaders.get(USER_FULL_NAME_ENCODING_HEADER) === PERCENT_ENCODED_UTF8
       ? safeDecodeURIComponent(encodedFullName)
       : null;
 
