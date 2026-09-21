@@ -12,6 +12,7 @@ const routeRules: RouteRule[] = [
   { pattern: /^\/api\/v1\/llm\/health$/, methods: methods("GET") },
   { pattern: /^\/api\/v1\/llm\/map-sheet$/, methods: methods("POST") },
   { pattern: /^\/api\/v1\/import-schemas$/, methods: methods("GET") },
+  { pattern: /^\/api\/v1\/business-constraint-types$/, methods: methods("GET") },
   { pattern: /^\/api\/v1\/imports$/, methods: methods("POST") },
   { pattern: /^\/api\/v1\/imports\/[^/]+$/, methods: methods("GET") },
   {
@@ -84,6 +85,19 @@ const routeRules: RouteRule[] = [
     pattern:
       /^\/api\/v1\/stores\/[^/]+\/supplier-constraints\/[^/]+$/,
     methods: methods("PUT"),
+  },
+  {
+    pattern: /^\/api\/v1\/stores\/[^/]+\/inventory-constraints$/,
+    methods: methods("POST"),
+  },
+  {
+    pattern: /^\/api\/v1\/stores\/[^/]+\/inventory-constraints\/[^/]+$/,
+    methods: methods("PATCH"),
+  },
+  {
+    pattern:
+      /^\/api\/v1\/stores\/[^/]+\/inventory-constraints\/[^/]+\/deactivate$/,
+    methods: methods("POST"),
   },
   {
     pattern:

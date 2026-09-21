@@ -47,6 +47,7 @@ import type {
   DecisionPackage,
   ExplanationRequest,
   IngredientDemandRow,
+  IngredientSynthesis,
   ProcurementRow,
   WhatIfRequest,
   WhatIfResponse,
@@ -55,7 +56,6 @@ import {
   getDecisionDiagnosticsReport,
   type DiagnosticOrigin,
 } from "../../lib/decision-diagnostics";
-import { findStrategyAlternativesInBrief } from "../../lib/strategy-alternatives";
 import {
   Button,
   Notice,
@@ -776,14 +776,13 @@ function IngredientDecisionChart({
             isStockout: dr.severityLevel === 3 || dr.hasStockout,
             shortageQty: dr.shortageQuantity,
             shortageP75: dr.shortageP75 ?? 0,
-            status:
-              dr.severityLevel === 3
-                ? "stockout"
-                : dr.severityLevel === 2
-                  ? "danger"
-                  : dr.severityLevel === 1
-                    ? "watch"
-                    : "safe",
+            status: (dr.severityLevel === 3
+              ? "stockout"
+              : dr.severityLevel === 2
+                ? "danger"
+                : dr.severityLevel === 1
+                  ? "watch"
+                  : "safe") as "stockout" | "danger" | "watch" | "safe",
             severityLabel: dr.severityLabel,
           };
         });
@@ -1007,17 +1006,17 @@ function DecisionExplanationDrawer({
 }: {
   open: boolean;
   onClose: () => void;
-  explanation: DecisionExplanationResponse | null;
-  loading: boolean;
-  error: string | null;
-  onAsk: (request: ExplanationRequest) => void;
+  explanation?: DecisionExplanationResponse | null;
+  loading?: boolean;
+  error?: string | null;
+  onAsk?: (request: ExplanationRequest) => void;
 }) {
   const [question, setQuestion] = useState("");
 
   const ask = (q?: string) => {
     const text = q ?? question.trim();
     if (!text && !q) return;
-    onAsk({
+    onAsk?.({
       language: "vi",
       detail_level: "simple",
       ...(text ? { question: text } : {}),
@@ -1142,6 +1141,56 @@ function DecisionExplanationDrawer({
   );
 }
 
+function getRealMetricsForStrategy(
+  strategyKey: string,
+  brief: DecisionBriefFacts,
+) {
+  let compCandidate: Record<string, unknown> | null = null;
+  const rawComp = brief.strategy_comparison as unknown;
+  if (Array.isArray(rawComp)) {
+    compCandidate = (rawComp.find(
+      (c: unknown) => (c as Record<string, unknown>)?.strategy === strategyKey,
+    ) as Record<string, unknown>) ?? null;
+  } else if (rawComp && typeof rawComp === "object" && Array.isArray((rawComp as Record<string, unknown>).candidates)) {
+    compCandidate = (((rawComp as Record<string, unknown>).candidates as unknown[]).find(
+      (c: unknown) => (c as Record<string, unknown>)?.strategy === strategyKey,
+    ) as Record<string, unknown>) ?? null;
+  }
+
+  // Also check brief.candidate_strategies if present
+  if (!compCandidate && Array.isArray((brief as unknown as Record<string, unknown>).candidate_strategies)) {
+    compCandidate = (((brief as unknown as Record<string, unknown>).candidate_strategies as unknown[]).find(
+      (c: unknown) => (c as Record<string, unknown>)?.strategy === strategyKey,
+    ) as Record<string, unknown>) ?? null;
+  }
+
+  const isSelected = strategyKey === brief.recommendation.strategy;
+
+  const candidateMetrics = compCandidate?.metrics as Record<string, unknown> | undefined;
+
+  const cost =
+    (typeof candidateMetrics?.purchase_cost === "number" ? candidateMetrics.purchase_cost : null) ??
+    (typeof compCandidate?.purchase_cost === "number" ? compCandidate.purchase_cost : null) ??
+    (isSelected && brief.recommendation.available ? brief.recommendation.total_purchase_cost : null);
+
+  const fillRate =
+    (typeof candidateMetrics?.expected_fill_rate === "number" ? candidateMetrics.expected_fill_rate : null) ??
+    (typeof compCandidate?.expected_fill_rate === "number" ? compCandidate.expected_fill_rate : null) ??
+    (isSelected && brief.recommendation.available ? (brief.risk?.expected_fill_rate ?? null) : null);
+
+  const stockout =
+    (typeof candidateMetrics?.stockout_probability === "number" ? candidateMetrics.stockout_probability : null) ??
+    (typeof compCandidate?.stockout_probability === "number" ? compCandidate.stockout_probability : null) ??
+    (isSelected && brief.recommendation.available ? (brief.risk?.stockout_probability ?? null) : null);
+
+  const wasteRaw = candidateMetrics?.expected_waste ?? compCandidate?.expected_waste ?? null;
+  const wasteText = wasteRaw != null ? `${wasteRaw}` : null;
+
+  const hasAnyMetrics = cost != null || fillRate != null || stockout != null || wasteText != null;
+
+  return { cost, fillRate, stockout, wasteText, hasAnyMetrics };
+}
+
 /** Comprehensive In-Depth Strategy Analysis & Trade-off View */
 function StrategyAnalysisDeepDive({
   brief,
@@ -1193,83 +1242,6 @@ function StrategyAnalysisDeepDive({
 
   const criticChecks = diagnosticReport.checks;
 
-  const strategyDefinitions = [
-    {
-      key: "lean",
-      label: "Tiết kiệm (Tồn kho gọn)",
-      quantile: "P25",
-      defaultCost: brief.recommendation.total_purchase_cost
-        ? Math.round(brief.recommendation.total_purchase_cost * 0.88)
-        : null,
-      defaultFillRate: 0.92,
-      defaultStockout: 0.082,
-      expectedWasteText: "0% (Tồn kho tối thiểu)",
-      defaultWhyRejected:
-        "Tồn kho đệm quá mỏng. Xác suất thiếu hụt nguyên liệu cao (8.2%) nếu nhu cầu thực tế tăng đột biến vượt mức dự báo P25.",
-    },
-    {
-      key: "balanced",
-      label: "Cân bằng (Khuyến nghị)",
-      quantile: "P50",
-      defaultCost: brief.recommendation.total_purchase_cost,
-      defaultFillRate: brief.risk?.expected_fill_rate ?? 0.965,
-      defaultStockout: brief.risk?.stockout_probability ?? 0.038,
-      expectedWasteText: "< 0.5% (Tối ưu chu kỳ)",
-      defaultWhyRejected:
-        "Cân bằng tối ưu giữa việc giảm thiểu rủi ro thiếu hụt hàng với việc kiểm soát dòng tiền và nguy cơ tồn kho quá hạn (FEFO).",
-    },
-    {
-      key: "protected",
-      label: "An toàn (Dự phòng cao)",
-      quantile: "P75",
-      defaultCost: brief.recommendation.total_purchase_cost
-        ? Math.round(brief.recommendation.total_purchase_cost * 1.15)
-        : null,
-      defaultFillRate: 0.988,
-      defaultStockout: 0.015,
-      expectedWasteText: "~3.2% (Nguy cơ cận date)",
-      defaultWhyRejected:
-        "Chi phí vốn mua hàng tăng cao và lượng tồn trữ lớn làm tăng rủi ro hao hụt hủy hàng cho các nguyên liệu tươi sống hạn ngắn (FEFO).",
-    },
-  ];
-
-  const candidateStrategies = useMemo(
-    () => findStrategyAlternativesInBrief(brief),
-    [brief],
-  );
-
-  const displayStrategies = useMemo(() => {
-    if (candidateStrategies.length > 0) {
-      return candidateStrategies.map((cand, idx) => {
-        const standardDef = strategyDefinitions.find((s) => s.key === cand.strategy);
-        const quantile =
-          cand.strategy === "lean"
-            ? "P25"
-            : cand.strategy === "balanced"
-              ? "P50"
-              : cand.strategy === "protected"
-                ? "P75"
-                : ((cand as unknown as { quantile?: string }).quantile ?? null);
-
-        return {
-          key: cand.strategy || `strat_${idx}`,
-          label: cand.label || standardDef?.label || cand.strategy || `Phương án ${idx + 1}`,
-          quantile,
-          candidate: cand,
-          standardDef,
-        };
-      });
-    }
-
-    return strategyDefinitions.map((strat) => ({
-      key: strat.key,
-      label: strat.label,
-      quantile: strat.quantile,
-      candidate: null,
-      standardDef: strat,
-    }));
-  }, [candidateStrategies, strategyDefinitions]);
-
   // Build ingredient breakdown matrix
   const seen = new Set<string>();
   const uniqueDemand = brief.ingredient_demand.filter((row) => {
@@ -1298,12 +1270,12 @@ function StrategyAnalysisDeepDive({
       moq: sup?.moq ?? inv?.moq ?? null,
       packSize: p?.pack_size ?? sup?.packSize ?? inv?.packSize ?? null,
       leadTimeDays: sup?.leadTimeDays ?? inv?.leadTimeDays ?? 1,
-      leanQty: p ? Math.max(0, Math.round(baseQty * 0.85)) : 0,
+      leanQty: null as number | null,
       balancedQty: baseQty,
-      protectedQty: p ? Math.round(baseQty * 1.2) : 0,
-      leanCost: p ? Math.round(baseCost * 0.85) : 0,
+      protectedQty: null as number | null,
+      leanCost: null as number | null,
       balancedCost: baseCost,
-      protectedCost: p ? Math.round(baseCost * 1.2) : 0,
+      protectedCost: null as number | null,
       reasonCodes: p?.reason_codes ?? [],
       orderDate: p?.order_date ?? "—",
       arrivalDate: p?.arrival_date ?? "—",
@@ -1354,245 +1326,131 @@ function StrategyAnalysisDeepDive({
       {/* TAB 1: STRATEGY COMPARISON OVERVIEW */}
       {activeTab === "comparison" ? (
         <div className="deepdive-tab-content">
-          <div className="deepdive-strategy-grid">
-            {displayStrategies.map((item) => {
-              const { key, label, quantile, candidate, standardDef } = item;
-              const match = rawStrategies.find((s) => s.strategy === key);
+          {!brief.strategy_selection_presentation ? (
+            <div className="strategy-unavailable-banner">
+              <Info size={18} className="text-muted" />
+              <span>Chưa có thông tin giải thích phương án.</span>
+            </div>
+          ) : (
+            <>
+              {/* Presentation Header */}
+              <div className="deepdive-presentation-header">
+                <h2>{brief.strategy_selection_presentation.headline}</h2>
+                {brief.strategy_selection_presentation.summary ? (
+                  <p className="deepdive-presentation-summary">
+                    {brief.strategy_selection_presentation.summary}
+                  </p>
+                ) : null}
+              </div>
 
-              const isChosen =
-                candidate?.selected === true ||
-                candidate?.status === "selected" ||
-                (chosenStrategy === key && brief.recommendation.available);
+              {/* Strategy Notes if present */}
+              {brief.strategy_selection_presentation.strategy_notes &&
+              brief.strategy_selection_presentation.strategy_notes.length > 0 ? (
+                <div className="deepdive-strategy-grid">
+                  {[...brief.strategy_selection_presentation.strategy_notes]
+                    .sort((a, b) => {
+                      const order: Record<string, number> = { lean: 1, balanced: 2, protected: 3 };
+                      return (order[a.strategy] ?? 99) - (order[b.strategy] ?? 99);
+                    })
+                    .map((note, noteIdx) => {
+                      const isChosen = note.status === "selected";
+                      const isRejected = note.status === "rejected";
+                      const metrics = getRealMetricsForStrategy(note.strategy, brief);
 
-              const isInfeasible =
-                candidate?.feasible === false ||
-                candidate?.status === "infeasible" ||
-                match?.feasible === false;
+                      return (
+                        <div
+                          key={`${note.strategy}-${noteIdx}`}
+                          className={`deepdive-card ${
+                            isChosen ? "selected" : isRejected ? "infeasible" : "unselected"
+                          }`}
+                        >
+                          <div className="deepdive-card-header">
+                            <div className="deepdive-card-tag-row">
+                              <span className="deepdive-eyebrow">{note.label}</span>
+                              {isChosen ? (
+                                <span className="deepdive-badge selected">
+                                  <CheckCircle2 size={12} /> {note.status_label}
+                                </span>
+                              ) : isRejected ? (
+                                <span className="deepdive-badge rejected">
+                                  ✕ {note.status_label}
+                                </span>
+                              ) : (
+                                <span className="deepdive-badge feasible-not-selected">
+                                  <Info size={12} /> {note.status_label}
+                                </span>
+                              )}
+                            </div>
+                            <h2>{note.headline}</h2>
+                          </div>
 
-              const isFeasibleNotSelected =
-                !isChosen &&
-                !isInfeasible &&
-                (candidate?.status === "feasible_not_selected" || candidate?.feasible === true);
-
-              // Prioritize candidate data from brief.json; if candidate is present and property missing, show NULL
-              const cost =
-                candidate != null
-                  ? (candidate.purchase_cost ?? null)
-                  : (match?.business_metrics?.projected_purchase_cost ?? standardDef?.defaultCost ?? null);
-
-              const fillRate =
-                candidate != null
-                  ? (candidate.expected_fill_rate ?? candidate.fill_rate ?? null)
-                  : (match?.business_metrics?.expected_fill_rate ?? standardDef?.defaultFillRate ?? null);
-
-              const stockout =
-                candidate != null
-                  ? (candidate.stockout_probability ?? null)
-                  : (match?.business_metrics?.stockout_probability ?? standardDef?.defaultStockout ?? null);
-
-              const wasteText =
-                candidate != null
-                  ? (candidate.expected_waste != null
-                      ? `${candidate.expected_waste}`
-                      : candidate.waste_quantity != null
-                        ? `${candidate.waste_quantity}`
-                        : null)
-                  : (match?.business_metrics?.waste_percentage != null
-                      ? `${match.business_metrics.waste_percentage}%`
-                      : standardDef?.expectedWasteText ?? null);
-
-              const headline = candidate?.presentation?.headline ?? null;
-              const summary = candidate?.presentation?.summary ?? null;
-              const reasonMessages = candidate?.presentation?.reason_messages ?? [];
-              const reasons = candidate?.reasons ?? [];
-              const reasonStatus = candidate?.reason_status ?? null;
-              const violations = candidate?.violations ?? match?.violations ?? [];
-              const warnings = candidate?.warnings ?? match?.warnings ?? [];
-
-              return (
-                <div
-                  key={key}
-                  className={`deepdive-card ${
-                    isChosen ? "selected" : isInfeasible ? "infeasible" : "unselected"
-                  }`}
-                >
-                  <div className="deepdive-card-header">
-                    <div className="deepdive-card-tag-row">
-                      <span className="deepdive-eyebrow">
-                        {quantile ? `Kịch bản ${quantile}` : label}
-                      </span>
-                      {isChosen ? (
-                        <span className="deepdive-badge selected">
-                          <CheckCircle2 size={12} /> ĐÃ CHỌN TỐI ƯU
-                        </span>
-                      ) : isInfeasible ? (
-                        <span className="deepdive-badge infeasible">
-                          <AlertTriangle size={12} /> KHÔNG KHẢ THI
-                        </span>
-                      ) : isFeasibleNotSelected ? (
-                        <span className="deepdive-badge feasible-not-selected">
-                          <Info size={12} /> HỢP LỆ (KHÔNG CHỌN)
-                        </span>
-                      ) : (
-                        <span className="deepdive-badge rejected">
-                          ✕ BỊ LOẠI
-                        </span>
-                      )}
-                    </div>
-                    <h2>{label}</h2>
-                    {headline ? (
-                      <div className="deepdive-card-headline">{headline}</div>
-                    ) : candidate ? (
-                      <div className="deepdive-card-headline null-text">NULL</div>
-                    ) : null}
-                  </div>
-
-                  <div className="deepdive-metrics-grid">
-                    <div className="deepdive-metric">
-                      <span className="metric-lbl">Tổng chi phí dự kiến</span>
-                      <strong className={`metric-val ${cost != null ? "text-primary" : "null-val"}`}>
-                        {cost != null ? formatVnd(cost) : "NULL"}
-                      </strong>
-                    </div>
-                    <div className="deepdive-metric">
-                      <span className="metric-lbl">Tỉ lệ đáp ứng nhu cầu</span>
-                      <strong className={`metric-val ${fillRate != null ? "" : "null-val"}`}>
-                        {fillRate != null ? `${(fillRate * 100).toFixed(1)}%` : "NULL"}
-                      </strong>
-                    </div>
-                    <div className="deepdive-metric">
-                      <span className="metric-lbl">Xác suất thiếu hàng</span>
-                      <strong
-                        className={`metric-val ${
-                          stockout != null
-                            ? stockout > 0.05
-                              ? "text-danger"
-                              : "text-success"
-                            : "null-val"
-                        }`}
-                      >
-                        {stockout != null ? `${(stockout * 100).toFixed(1)}%` : "NULL"}
-                      </strong>
-                    </div>
-                    <div className="deepdive-metric">
-                      <span className="metric-lbl">Hao hụt hết hạn (FEFO)</span>
-                      <strong className={`metric-val ${wasteText != null ? "" : "null-val"}`}>
-                        {wasteText != null ? wasteText : "NULL"}
-                      </strong>
-                    </div>
-                  </div>
-
-                  <div
-                    className={`deepdive-reason-section ${
-                      isChosen ? "selected" : isInfeasible ? "infeasible" : "rejected"
-                    }`}
-                  >
-                    <h4>
-                      {isChosen
-                        ? "✓ Lý do hệ thống lựa chọn làm phương án khuyến nghị:"
-                        : isFeasibleNotSelected
-                          ? "ℹ Lý do phương án không được chọn:"
-                          : isInfeasible
-                            ? "✕ Lý do không khả thi (Vi phạm ràng buộc cứng):"
-                            : "✕ Lý do bị loại bỏ:"}
-                    </h4>
-
-                    {summary ? (
-                      <p className="deepdive-reason-summary">{summary}</p>
-                    ) : candidate ? (
-                      <p className="deepdive-reason-summary null-text">NULL (Chưa có tóm tắt lý do)</p>
-                    ) : violations.length > 0 ? (
-                      <p>{violations.join(". ")}</p>
-                    ) : diagnosticReport.origin === "real" ? (
-                      <p>
-                        {isChosen
-                          ? "Phương án thỏa mãn tối ưu mục tiêu bài toán chi phí & an toàn cung ứng."
-                          : isInfeasible
-                            ? "Phương án không khả thi theo kết quả tính toán từ Backend Solver."
-                            : "Không được chọn do không đạt điểm tối ưu toán học tốt nhất so với kịch bản khuyến nghị."}
-                      </p>
-                    ) : (
-                      <p>{standardDef?.defaultWhyRejected ?? "Chưa có thông tin lý do."}</p>
-                    )}
-
-                    {reasonMessages.length > 0 ? (
-                      <ul className="deepdive-reason-messages">
-                        {reasonMessages.map((msg, idx) => (
-                          <li key={idx}>{msg}</li>
-                        ))}
-                      </ul>
-                    ) : candidate && !isChosen ? (
-                      <span className="deepdive-subtext-muted">Chưa có thông điệp lý do (NULL)</span>
-                    ) : null}
-
-                    {reasons.length > 0 ? (
-                      <div className="deepdive-reasons-detail">
-                        {reasons.map((r, idx) => {
-                          const delta = r.values?.purchase_cost_delta;
-                          const candCost = r.values?.candidate_purchase_cost;
-                          const selCost = r.values?.selected_purchase_cost;
-                          return (
-                            <div key={idx} className="deepdive-reason-item">
-                              {delta != null ? (
-                                <div className="deepdive-cost-delta-badge">
-                                  <span>Chênh lệch chi phí:</span>{" "}
-                                  <strong>+{formatVnd(delta)}</strong>
-                                  {candCost != null && selCost != null ? (
-                                    <span className="deepdive-delta-sub">
-                                      ({formatVnd(candCost)} vs {formatVnd(selCost)})
-                                    </span>
-                                  ) : null}
+                          {metrics.hasAnyMetrics ? (
+                            <div className="deepdive-metrics-grid">
+                              {metrics.cost != null ? (
+                                <div className="deepdive-metric">
+                                  <span className="metric-lbl">Tổng chi phí dự kiến</span>
+                                  <strong className="metric-val text-primary">
+                                    {formatVnd(metrics.cost)}
+                                  </strong>
                                 </div>
                               ) : null}
-                              {r.code ? (
-                                <span className="deepdive-code-tag">Mã: {r.code}</span>
-                              ) : (
-                                <span className="deepdive-code-tag null-text">Mã: NULL</span>
-                              )}
-                              {r.message ? (
-                                <div className="deepdive-reason-msg">{r.message}</div>
+                              {metrics.fillRate != null ? (
+                                <div className="deepdive-metric">
+                                  <span className="metric-lbl">Tỉ lệ đáp ứng nhu cầu</span>
+                                  <strong className="metric-val">
+                                    {(metrics.fillRate * 100).toFixed(1)}%
+                                  </strong>
+                                </div>
+                              ) : null}
+                              {metrics.stockout != null ? (
+                                <div className="deepdive-metric">
+                                  <span className="metric-lbl">Xác suất thiếu hàng</span>
+                                  <strong
+                                    className={`metric-val ${
+                                      metrics.stockout > 0.05 ? "text-danger" : "text-success"
+                                    }`}
+                                  >
+                                    {(metrics.stockout * 100).toFixed(1)}%
+                                  </strong>
+                                </div>
+                              ) : null}
+                              {metrics.wasteText != null ? (
+                                <div className="deepdive-metric">
+                                  <span className="metric-lbl">Hao hụt hết hạn (FEFO)</span>
+                                  <strong className="metric-val">{metrics.wasteText}</strong>
+                                </div>
                               ) : null}
                             </div>
-                          );
-                        })}
-                      </div>
-                    ) : candidate && !isChosen ? (
-                      <div className="deepdive-subtext-muted">Chi tiết lý do: NULL</div>
-                    ) : null}
+                          ) : null}
 
-                    {reasonStatus != null ? (
-                      <div className="deepdive-reason-status">
-                        <span>Trạng thái kiểm chứng:</span>{" "}
-                        <strong className="status-val">
-                          {reasonStatus === "verified" ? "Đã xác minh (Verified)" : reasonStatus}
-                        </strong>
-                      </div>
-                    ) : candidate ? (
-                      <div className="deepdive-reason-status null-text">
-                        <span>Trạng thái kiểm chứng:</span>{" "}
-                        <strong className="status-val">NULL</strong>
-                      </div>
-                    ) : null}
-
-                    {warnings.length > 0 ? (
-                      <ul className="deepdive-sub-list">
-                        {warnings.map((w, idx) => (
-                          <li key={idx}>{w}</li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
+                          <div
+                            className={`deepdive-reason-section ${
+                              isChosen ? "selected" : isRejected ? "infeasible" : "rejected"
+                            }`}
+                          >
+                            <p className="deepdive-reason-summary">{note.message}</p>
+                            {note.detail_lines && note.detail_lines.length > 0 ? (
+                              <ul className="deepdive-reason-messages">
+                                {note.detail_lines.map((line, idx) => (
+                                  <li key={idx}>{line}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
                 </div>
-              );
-            })}
-          </div>
+              ) : null}
+            </>
+          )}
 
           <div className="deepdive-info-banner">
             <Info size={20} className="text-accent" />
             <div>
               <strong>Nguyên tắc phân bổ của ShelfCash Decision Engine:</strong>
               <p>
-                Thuật toán không chỉ tìm phương án rẻ nhất mà giải bài toán tối ưu hóa đa mục tiêu: Tối thiểu hóa chi phí vốn mua hàng + Chi phí rủi ro thiếu hụt doanh thu + Chi phí hao hụt tồn kho hết hạn (FEFO). Kịch bản <strong>Cân bằng (P50)</strong> đạt điểm tối ưu toán học cao nhất trên toàn bộ 100 kịch bản mô phỏng Monte Carlo.
+                Thuật toán tối ưu hóa đa mục tiêu: Tối thiểu hóa chi phí vốn mua hàng + Chi phí rủi ro thiếu hụt doanh thu + Chi phí hao hụt tồn kho hết hạn (FEFO) theo các ràng buộc vận hành thực tế.
               </p>
             </div>
           </div>
@@ -1633,13 +1491,17 @@ function StrategyAnalysisDeepDive({
                     <td className="text-semibold">{formatQuantity(item.p50)}</td>
                     <td className="text-muted">{formatQuantity(item.p75)}</td>
                     <td>
-                      {item.leanQty > 0 ? (
-                        <div>
-                          <strong>{formatQuantity(item.leanQty)} {item.unit}</strong>
-                          <div className="table-subtext">{formatVnd(item.leanCost)}</div>
-                        </div>
+                      {item.leanQty != null ? (
+                        item.leanQty > 0 ? (
+                          <div>
+                            <strong>{formatQuantity(item.leanQty)} {item.unit}</strong>
+                            <div className="table-subtext">{formatVnd(item.leanCost)}</div>
+                          </div>
+                        ) : (
+                          <span className="text-muted">Không đặt</span>
+                        )
                       ) : (
-                        <span className="text-muted">Không đặt</span>
+                        <span className="text-muted">—</span>
                       )}
                     </td>
                     <td className="td-highlight">
@@ -1653,13 +1515,17 @@ function StrategyAnalysisDeepDive({
                       )}
                     </td>
                     <td>
-                      {item.protectedQty > 0 ? (
-                        <div>
-                          <strong>{formatQuantity(item.protectedQty)} {item.unit}</strong>
-                          <div className="table-subtext">{formatVnd(item.protectedCost)}</div>
-                        </div>
+                      {item.protectedQty != null ? (
+                        item.protectedQty > 0 ? (
+                          <div>
+                            <strong>{formatQuantity(item.protectedQty)} {item.unit}</strong>
+                            <div className="table-subtext">{formatVnd(item.protectedCost)}</div>
+                          </div>
+                        ) : (
+                          <span className="text-muted">Không đặt</span>
+                        )
                       ) : (
-                        <span className="text-muted">Không đặt</span>
+                        <span className="text-muted">—</span>
                       )}
                     </td>
                     <td>
@@ -1901,10 +1767,10 @@ function WhatIfLab({
   error,
   onRun,
 }: {
-  result: WhatIfResponse | null;
-  loading: boolean;
-  error: string | null;
-  onRun: (mutation: WhatIfRequest) => void;
+  result?: WhatIfResponse | null;
+  loading?: boolean;
+  error?: string | null;
+  onRun?: (mutation: WhatIfRequest) => void;
 }) {
   const [demandMultiplier, setDemandMultiplier] = useState("1.1");
   const [supplierDelayDays, setSupplierDelayDays] = useState("1");
@@ -1926,7 +1792,7 @@ function WhatIfLab({
     )
       return;
 
-    onRun({
+    onRun?.({
       ...(demand === undefined ? {} : { demand_multiplier: demand }),
       ...(delay === undefined ? {} : { supplier_delay_days: delay }),
       ...(budget === undefined ? {} : { budget_limit: budget }),
@@ -2108,18 +1974,18 @@ export function DecisionBriefWorkspace({
   initialViewMode,
 }: {
   brief: DecisionBriefFacts | null;
-  loading: boolean;
-  error: string | null;
-  onRetry: () => void;
+  loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
   onRunAgain?: () => void;
-  explanation: DecisionExplanationResponse | null;
-  explanationLoading: boolean;
-  explanationError: string | null;
-  onExplain: (request: ExplanationRequest) => void;
-  whatIf: WhatIfResponse | null;
-  whatIfLoading: boolean;
-  whatIfError: string | null;
-  onRunWhatIf: (mutation: WhatIfRequest) => void;
+  explanation?: DecisionExplanationResponse | null;
+  explanationLoading?: boolean;
+  explanationError?: string | null;
+  onExplain?: (request: ExplanationRequest) => void;
+  whatIf?: WhatIfResponse | null;
+  whatIfLoading?: boolean;
+  whatIfError?: string | null;
+  onRunWhatIf?: (mutation: WhatIfRequest) => void;
   decision?: DecisionPackage | null;
   data?: BootstrapData;
   appliedBudget?: number | null;
@@ -2257,12 +2123,12 @@ export function DecisionBriefWorkspace({
       return brief.generated_at.slice(0, 10);
     }
     return new Date().toISOString().slice(0, 10);
-  }, [brief?.forecast?.cutoff_date, decision?.as_of_date, brief?.procurement_rows, data?.today, brief?.generated_at]);
+  }, [brief, decision, data]);
 
   const horizonDays = useMemo(() => {
     const raw = brief?.forecast?.horizon_days ?? decision?.horizon_days;
     return typeof raw === "number" && raw >= 1 && raw <= 30 ? raw : 7;
-  }, [brief?.forecast?.horizon_days, decision?.horizon_days]);
+  }, [brief, decision]);
 
   if (loading) {
     return (
@@ -2321,12 +2187,10 @@ export function DecisionBriefWorkspace({
 
   const fillRate = percentage(
     brief.recommendation.expected_fill_rate ??
-      decision?.business_metrics?.expected_fill_rate ??
       brief.risk.expected_fill_rate
   );
   const stockoutProb = percentage(
-    brief.risk?.stockout_probability ??
-      decision?.business_metrics?.stockout_probability
+    brief.risk?.stockout_probability
   );
 
   // Selected item state (default to first urgent item or first item)

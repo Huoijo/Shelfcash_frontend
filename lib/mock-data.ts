@@ -1590,7 +1590,7 @@ export function buildMockWhatIfResponse(
   const multiplier = mutation.demand_multiplier ?? 1.0;
   const delay = mutation.supplier_delay_days ?? 0;
   const baseBrief = buildMockDecisionBrief(today);
-  const baseCost = baseBrief.recommendation.total_purchase_cost ?? 8_338_000;
+  const baseCost = baseBrief.recommendation?.total_purchase_cost ?? 8_338_000;
 
   const costMultiplier = multiplier * (1 + delay * 0.04);
   const hypotheticalCost = Math.round(baseCost * costMultiplier);
@@ -1619,7 +1619,7 @@ export function buildMockWhatIfResponse(
     recommendation: {
       ...baseBrief.recommendation,
       total_purchase_cost: hypotheticalCost,
-      expected_fill_rate: Math.min(1, Math.max(0, (baseBrief.recommendation.expected_fill_rate ?? 0.988) + fillRateDelta)),
+      expected_fill_rate: Math.min(1, Math.max(0, (baseBrief.recommendation?.expected_fill_rate ?? 0.988) + fillRateDelta)),
     },
     risk: {
       ...baseBrief.risk,

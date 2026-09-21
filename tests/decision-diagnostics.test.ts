@@ -11,10 +11,18 @@ import type { DecisionBriefFacts, DecisionPackage } from "../lib/types";
 const sampleBrief: DecisionBriefFacts = {
   brief_id: "brief-1",
   decision_run_id: "run-1",
+  store_id: "store-001",
   status: "completed_with_recommendation",
+  forecast: {
+    forecast_run_id: "fc-1",
+    model_version: "v1",
+    horizon_days: 7,
+    cutoff_date: "2026-08-20",
+  },
   recommendation: {
     available: true,
     strategy: "balanced",
+    summary: "Khuyến nghị cân bằng",
     total_purchase_cost: 5625000,
     expected_fill_rate: 0.965,
   },

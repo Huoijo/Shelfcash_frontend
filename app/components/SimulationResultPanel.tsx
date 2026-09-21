@@ -15,11 +15,11 @@ import {
   formatQuantity,
 } from "./ui";
 
-function quantity(value: number | null, unit = ""): string {
+function quantity(value: number | null | undefined, unit = ""): string {
   return value == null ? "—" : formatQuantity(value, unit);
 }
 
-function percentage(value: number | null): string {
+function percentage(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
   const percent = value <= 1 ? value * 100 : value;
   return `${percent.toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`;

@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import type {
   BootstrapData,
+  DecisionBriefFacts,
   EnrichedInventoryItem,
   InventoryLot,
   InventoryStatus,
@@ -105,11 +106,68 @@ function alertCopy(alert: InventoryAlert): {
   };
 }
 
-function planningCopy(plan: PlanResponse): {
+function planningCopy(
+  plan: PlanResponse,
+  brief?: DecisionBriefFacts | null,
+  briefLoading?: boolean,
+  briefError?: string | null,
+): {
   title: string;
   body: string;
   tone: "pine" | "red" | "amber" | "blue";
 } {
+  if (briefLoading) {
+    return {
+      title: "Đang tải kế hoạch",
+      body: "Đang đồng bộ tóm tắt quyết định kinh doanh…",
+      tone: "blue",
+    };
+  }
+  if (briefError) {
+    return {
+      title: "Không thể tải kế hoạch",
+      body: briefError || "Đã xảy ra lỗi khi tải dữ liệu kế hoạch.",
+      tone: "amber",
+    };
+  }
+  if (brief) {
+    if (
+      brief.status === "completed_with_no_feasible_recommendation" ||
+      brief.recommendation?.available === false ||
+      brief.strategy_selection_presentation?.outcome === "no_feasible_strategy"
+    ) {
+      return {
+        title: "Chưa có phương án khả thi",
+        body:
+          brief.strategy_selection_presentation?.headline ||
+          "Dự báo và nhu cầu đã tính nhưng chưa tìm được phương án đáp ứng toàn bộ ràng buộc.",
+        tone: "amber",
+      };
+    }
+    if (brief.recommendation?.available) {
+      const plannedCost =
+        brief.recommendation.total_purchase_cost ??
+        brief.procurement_rows.reduce((sum, line) => sum + (line.purchase_cost ?? 0), 0);
+      const strategyName =
+        brief.strategy_selection_presentation?.selected_strategy ||
+        brief.recommendation.strategy ||
+        "khuyến nghị";
+      return {
+        title: "Kế hoạch đã hoàn tất",
+        body:
+          plannedCost > 0
+            ? `Chi phí dự kiến ${formatVnd(plannedCost)} · phương án ${strategyName}.`
+            : "Kế hoạch hoàn tất không phát sinh chi phí nhập.",
+        tone: "pine",
+      };
+    }
+    return {
+      title: "Chưa có phương án",
+      body: "Chưa có khuyến nghị từ hệ thống.",
+      tone: "amber",
+    };
+  }
+
   const status = plan.status ?? "idle";
   if (status === "running") {
     return {
@@ -137,15 +195,10 @@ function planningCopy(plan: PlanResponse): {
     };
   }
   if (status === "completed") {
-    const plannedCost =
-      plan.budget?.plannedCost ??
-      plan.recommendations.reduce((sum, line) => sum + line.cost, 0);
     return {
-      title: "Kế hoạch đã hoàn tất",
-      body: plan.completedAt
-        ? `Chi phí dự kiến ${formatVnd(plannedCost)} · hoàn tất ngày ${formatBackendDate(plan.completedAt)}.`
-        : `Chi phí dự kiến ${formatVnd(plannedCost)}.`,
-      tone: "pine",
+      title: "Dữ liệu kế hoạch chưa khả dụng",
+      body: "Cần tải tóm tắt quyết định (brief) để hiển thị chi phí và phương án.",
+      tone: "amber",
     };
   }
   return {
@@ -158,12 +211,18 @@ function planningCopy(plan: PlanResponse): {
 export function TodayView({
   data,
   plan,
+  brief,
+  briefLoading = false,
+  briefError = null,
   onNavigate,
   onOpenDecision,
   loading = false,
 }: {
   data: BootstrapData;
   plan: PlanResponse;
+  brief?: DecisionBriefFacts | null;
+  briefLoading?: boolean;
+  briefError?: string | null;
   onNavigate: (page: "inventory" | "plan") => void;
   onOpenDecision?: (ingredient: string) => void;
   loading?: boolean;
@@ -176,7 +235,7 @@ export function TodayView({
   const missingCount = plan.enrichedInventory.filter(
     (item) => item.statusKey === "missing",
   ).length;
-  const planning = planningCopy(plan);
+  const planning = planningCopy(plan, brief, briefLoading, briefError);
   const bars = plan.status === "completed" ? plan.recommendations.slice(0, 6) : [];
 
   return (

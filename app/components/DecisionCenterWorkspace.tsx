@@ -2,7 +2,12 @@
 
 import { ArrowRight, CircleAlert, Clock3, PackageSearch, ScanSearch, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { adaptDecisionRunView, type DecisionDemandView, type DecisionRiskView } from "../../lib/decision-view";
+import {
+  adaptDecisionRunView,
+  adaptManagerDecisionViewModel,
+  type DecisionDemandView,
+  type DecisionRiskView,
+} from "../../lib/decision-view";
 import {
   extractProcurementRows,
   projectIngredientDailyRisks,
@@ -12,7 +17,13 @@ import {
   type RiskSeverity,
 } from "../../lib/risk-engine";
 import { buildMock7DayDecisionPackage } from "../../lib/mock-data";
-import type { BootstrapData, DecisionPackage, PlanResponse } from "../../lib/types";
+import type {
+  BootstrapData,
+  DecisionBriefFacts,
+  DecisionPackage,
+  ForecastResult,
+  PlanResponse,
+} from "../../lib/types";
 import { DemandChart } from "./DemandChart";
 import { ForecastChart } from "./ForecastChart";
 import { DemandExplanationDialog, noFeasibleDecision } from "./ProcurementDecisionWorkspace";
@@ -104,14 +115,31 @@ function TodayOperationalView({
   data,
   plan,
   decision,
+  brief,
+  briefLoading = false,
+  briefError = null,
   onNavigate,
 }: {
   data: BootstrapData;
   plan: PlanResponse;
   decision: DecisionPackage | null;
+  brief?: DecisionBriefFacts | null;
+  briefLoading?: boolean;
+  briefError?: string | null;
   onNavigate: (target: "inventory" | "plan") => void;
 }) {
   const view = useMemo(() => adaptDecisionRunView(decision, data), [data, decision]);
+  const vm = useMemo(
+    () =>
+      adaptManagerDecisionViewModel({
+        brief,
+        technicalDecision: decision,
+        plan,
+        briefLoading,
+        briefError,
+      }),
+    [brief, decision, plan, briefLoading, briefError],
+  );
 
   // Extract and sort inventory items with expiring lots by daysRemaining ascending (Cam 4d -> Chuối 6d)
   const inventoryItemsWithExpiringLots = useMemo(() => {
@@ -169,20 +197,15 @@ function TodayOperationalView({
     });
   }, [plan.enrichedInventory, data.today]);
 
-  const purchasePlanItems = decision?.recommended_plan?.items ?? [];
-  const purchaseItemCount = purchasePlanItems.length;
-  const totalPlannedCost =
-    decision?.business_metrics?.projected_purchase_cost ??
-    purchasePlanItems.reduce((sum, line) => sum + (line.estimated_cost ?? 0), 0);
-  const hasFeasiblePlan =
-    decision?.status === "completed" &&
-    Boolean(decision.recommended_strategy) &&
-    purchaseItemCount > 0;
-  const isNoFeasible = noFeasibleDecision(decision);
+  const purchasePlanItems = vm.purchasePlanItems;
+  const purchaseItemCount = vm.purchaseItemCount;
+  const totalPlannedCost = vm.totalPlannedCost;
+  const hasFeasiblePlan = vm.hasFeasiblePlan;
+  const isNoFeasible = vm.isNoFeasible;
 
-  const hasDemand = view.demand.length > 0;
-  const hasForecast = Object.keys(plan.forecasts).length > 0 || hasDemand;
-  const isRunning = decision?.status === "queued" || decision?.status === "running";
+  const hasDemand = vm.hasDemand;
+  const hasForecast = vm.hasForecast;
+  const isRunning = vm.isRunning;
 
   const forecastStatusText = hasForecast ? "Sẵn sàng" : isRunning ? "Đang chạy" : "Chưa chạy";
   const demandStatusText = hasDemand ? "Đã tính" : isRunning ? "Đang tính" : "Chờ dự báo";
@@ -190,9 +213,13 @@ function TodayOperationalView({
     ? "Sẵn sàng"
     : isNoFeasible
       ? "Chưa khả thi"
-      : isRunning
+      : isRunning || vm.status === "loading"
         ? "Đang xử lý"
-        : "Chờ dữ liệu";
+        : vm.status === "request_error"
+          ? "Lỗi tải dữ liệu"
+          : vm.status === "data_unavailable"
+            ? "Chưa khả dụng"
+            : "Chờ dữ liệu";
 
   const expiringLotsCount = plan.enrichedInventory.flatMap((item) =>
     (item.lots ?? []).filter((lot) => lot.status === "expiring" || lot.status === "expired")
@@ -367,7 +394,7 @@ function TodayOperationalView({
               <div className="pending-plan-card">
                 <div className="plan-summary-top">
                   <strong className="plan-strategy-title">
-                    Kế hoạch {decision?.recommended_strategy || "Khả thi"}
+                    Kế hoạch {vm.recommendedStrategy?.label || "Khả thi"}
                   </strong>
                   <span className="plan-ready-pill">Sẵn sàng</span>
                 </div>
@@ -375,7 +402,9 @@ function TodayOperationalView({
                 <div className="plan-figures-row">
                   <div className="plan-figure-col">
                     <span className="plan-figure-label">Chi phí dự kiến</span>
-                    <strong className="plan-figure-val">{formatVnd(totalPlannedCost)}</strong>
+                    <strong className="plan-figure-val">
+                      {totalPlannedCost != null ? formatVnd(totalPlannedCost) : "—"}
+                    </strong>
                   </div>
                   <div className="plan-figure-col">
                     <span className="plan-figure-label">Quy mô</span>
@@ -389,16 +418,16 @@ function TodayOperationalView({
                     <div className="today-preview-items-list">
                       {purchasePlanItems.slice(0, 5).map((item, idx) => (
                         <div
-                          key={`${item.ingredient_id ?? item.ingredient_name ?? idx}`}
+                          key={`${item.ingredientId ?? item.ingredientName ?? idx}`}
                           className="today-preview-item-row"
                         >
                           <div className="today-preview-item-name">
-                            <span>{item.ingredient_name || item.ingredient || "Nguyên liệu"}</span>
+                            <span>{item.ingredientName || "Nguyên liệu"}</span>
                           </div>
                           <div className="today-preview-item-qty">
-                            <strong>{quantity(item.order_quantity ?? item.quantity, item.unit)}</strong>
-                            {item.estimated_cost != null && item.estimated_cost > 0 ? (
-                              <small>{formatVnd(item.estimated_cost)}</small>
+                            <strong>{quantity(item.orderQuantity, item.unit)}</strong>
+                            {item.estimatedCost != null && item.estimatedCost > 0 ? (
+                              <small>{formatVnd(item.estimatedCost)}</small>
                             ) : null}
                           </div>
                         </div>
@@ -426,7 +455,8 @@ function TodayOperationalView({
               <div className="pending-plan-card is-warning">
                 <strong className="plan-strategy-title">Chưa có phương án khả thi</strong>
                 <p className="plan-unfeasible-note">
-                  Dự báo và nhu cầu đã tính nhưng chưa tìm được phương án đáp ứng toàn bộ ràng buộc NCC.
+                  {vm.headline ||
+                    "Dự báo và nhu cầu đã tính nhưng chưa tìm được phương án đáp ứng toàn bộ ràng buộc NCC."}
                 </p>
                 <div className="plan-card-action">
                   <button
@@ -435,6 +465,41 @@ function TodayOperationalView({
                     onClick={() => onNavigate("plan")}
                   >
                     Kiểm tra ràng buộc →
+                  </button>
+                </div>
+              </div>
+            ) : vm.status === "loading" ? (
+              <div className="pending-plan-card is-idle">
+                <strong className="plan-strategy-title">Đang tải kế hoạch mua hàng…</strong>
+                <p className="plan-idle-note">Hệ thống đang đồng bộ kết quả quyết định từ máy chủ.</p>
+              </div>
+            ) : vm.status === "request_error" ? (
+              <div className="pending-plan-card is-warning">
+                <strong className="plan-strategy-title">Không thể tải kế hoạch mua hàng</strong>
+                <p className="plan-unfeasible-note">
+                  {briefError || "Đã xảy ra lỗi khi tải dữ liệu kế hoạch. Vui lòng thử lại sau."}
+                </p>
+                <div className="plan-card-action">
+                  <button
+                    type="button"
+                    className="lane-action-cta"
+                    onClick={() => onNavigate("plan")}
+                  >
+                    Kiểm tra kế hoạch →
+                  </button>
+                </div>
+              </div>
+            ) : vm.status === "data_unavailable" ? (
+              <div className="pending-plan-card is-idle">
+                <strong className="plan-strategy-title">Dữ liệu kế hoạch chưa khả dụng</strong>
+                <p className="plan-idle-note">Chưa có bản tóm tắt quyết định cho lượt chạy này.</p>
+                <div className="plan-card-action">
+                  <button
+                    type="button"
+                    className="lane-action-cta is-primary"
+                    onClick={() => onNavigate("plan")}
+                  >
+                    Mở Kế hoạch nhập →
                   </button>
                 </div>
               </div>
@@ -809,19 +874,17 @@ function SelectedIngredientDetail({
   );
 
   // Authoritative daily risk simulation across full planning window
-  const projection = useMemo(() => {
-    const horizonDates = dates.length > 0 ? dates : [selectedDate];
-    return projectIngredientDailyRisks(
-      selectedIngredientId,
-      ingredientName,
-      unit,
-      horizonDates,
-      demand,
-      risk,
-      data,
-      procurementRows
-    );
-  }, [selectedIngredientId, ingredientName, unit, dates, selectedDate, demand, risk, data, procurementRows]);
+  const horizonDates = dates.length > 0 ? dates : [selectedDate];
+  const projection = projectIngredientDailyRisks(
+    selectedIngredientId,
+    ingredientName,
+    unit,
+    horizonDates,
+    demand,
+    risk,
+    data,
+    procurementRows
+  );
 
   const dailyRisk =
     projection.dailyRisks.find((dr) => dr.targetDate === selectedDate) ??
@@ -1050,7 +1113,7 @@ function ProductForecastDrilldownModal({
       drivers: [],
       confidence: "Tốt",
       dataNotes: [],
-    } as ForecastResult;
+    } as unknown as ForecastResult;
   }, [activeContribution, productForecasts, row.targetDate]);
 
   return (
@@ -1167,23 +1230,30 @@ function FuturePlanningView({
   plan,
   decision,
   initialIngredient,
+  previewMode = false,
 }: {
   data: BootstrapData;
   plan: PlanResponse;
   decision: DecisionPackage | null;
+  brief?: DecisionBriefFacts | null;
   initialIngredient?: string;
   onNavigate?: (target: "inventory" | "plan") => void;
+  previewMode?: boolean;
 }) {
   const effectiveDecision = useMemo(() => {
-    if (
-      decision &&
-      Array.isArray((decision as any).ingredient_demand) &&
-      (decision as any).ingredient_demand.length > 0
-    ) {
-      return decision;
+    if (previewMode) {
+      const rawDecision = decision as Record<string, unknown> | null;
+      if (
+        rawDecision &&
+        Array.isArray(rawDecision.ingredient_demand) &&
+        rawDecision.ingredient_demand.length > 0
+      ) {
+        return decision;
+      }
+      return buildMock7DayDecisionPackage(data, decision);
     }
-    return buildMock7DayDecisionPackage(data, decision);
-  }, [decision, data]);
+    return decision;
+  }, [decision, data, previewMode]);
 
   const view = useMemo(() => adaptDecisionRunView(effectiveDecision, data), [data, effectiveDecision]);
   const [ingredientId, setIngredientId] = useState("");
@@ -1206,11 +1276,11 @@ function FuturePlanningView({
         history: [],
         forecast: pf.points.map((pt) => ({
           date: pt.targetDate,
-          p25: pt.p25 ?? 0,
-          p50: pt.p50 ?? 0,
-          p75: pt.p75 ?? 0,
-          intervalLower: pt.p25 ?? 0,
-          intervalUpper: pt.p75 ?? 0,
+          p25: pt.p25 ?? undefined,
+          p50: pt.p50 ?? (undefined as unknown as number),
+          p75: pt.p75 ?? undefined,
+          intervalLower: pt.p25 ?? undefined,
+          intervalUpper: pt.p75 ?? undefined,
           confidenceScore: 0.9,
         })),
         totals: {
@@ -1293,17 +1363,19 @@ function FuturePlanningView({
       </section>
 
       {/* ── SECTION ③: CHI TIẾT ĐANG CHỌN (MERGES DEMAND + INVENTORY RISK + SOURCES) ── */}
-      <SelectedIngredientDetail
-        dates={view.dates}
-        demand={view.demand}
-        risks={view.risks}
-        data={data}
-        decision={effectiveDecision}
-        onExplain={(row) => setExplaining(row)}
-        onOpenForecastDrilldown={(row) => setDrilldownRow(row)}
-        selectedDate={activeDate}
-        selectedIngredientId={activeIngredientId}
-      />
+      {view.demand.length > 0 ? (
+        <SelectedIngredientDetail
+          dates={view.dates}
+          demand={view.demand}
+          risks={view.risks}
+          data={data}
+          decision={effectiveDecision}
+          onExplain={(row) => setExplaining(row)}
+          onOpenForecastDrilldown={(row) => setDrilldownRow(row)}
+          selectedDate={activeDate}
+          selectedIngredientId={activeIngredientId}
+        />
+      ) : null}
 
       {/* ── SECTION ⓘ: LƯU Ý CHẤT LƯỢNG DỮ LIỆU (COLLAPSED DISCLOSURE) ── */}
       {view.warnings.length ? (
@@ -1335,18 +1407,26 @@ export function DecisionCenterWorkspace({
   activeView,
   data,
   decision,
+  brief,
+  briefLoading = false,
+  briefError = null,
   initialIngredient,
   onNavigate,
   onViewChange,
   plan,
+  previewMode = false,
 }: {
   activeView: DecisionCenterView;
   data: BootstrapData;
   decision: DecisionPackage | null;
+  brief?: DecisionBriefFacts | null;
+  briefLoading?: boolean;
+  briefError?: string | null;
   initialIngredient?: string;
   onNavigate: (target: "inventory" | "plan") => void;
   onViewChange: (view: DecisionCenterView, ingredientId?: string) => void;
   plan: PlanResponse;
+  previewMode?: boolean;
 }) {
   const view = useMemo(() => adaptDecisionRunView(decision, data), [data, decision]);
   const period = dateWindowLabel(view.dates, decision?.as_of_date, decision?.horizon_days);
@@ -1386,6 +1466,9 @@ export function DecisionCenterWorkspace({
         <TodayOperationalView
           data={data}
           decision={decision}
+          brief={brief}
+          briefLoading={briefLoading}
+          briefError={briefError}
           onNavigate={(target) => onNavigate(target)}
           plan={plan}
         />
@@ -1393,9 +1476,11 @@ export function DecisionCenterWorkspace({
         <FuturePlanningView
           data={data}
           decision={decision}
+          brief={brief}
           initialIngredient={initialIngredient}
           onNavigate={(target) => onNavigate(target)}
           plan={plan}
+          previewMode={previewMode}
         />
       )}
     </div>

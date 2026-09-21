@@ -21,6 +21,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   adaptBootstrap,
   adaptOrders,
+  adaptPaginatedOrders,
   adaptPlan,
   emptyBackendPlan,
   selectPlanningScenario,
@@ -63,7 +64,6 @@ import { parseApiError } from "../lib/request-manager/error-policy";
 import {
   createDraftOrdersFromLegacyPlan,
   runLegacyPurchaseOrderBridge,
-  type PlanningWorkflowSnapshot,
 } from "../lib/planning-workflow";
 import {
   isTimezoneAwareDateTime,
@@ -77,6 +77,7 @@ import {
   productIdentityKey,
 } from "../lib/recipes";
 import { normalizeMenuItems, validateComboComponents } from "../lib/menu";
+import type { ForecastRunResult } from "../lib/api-contract";
 import type {
   Alias,
   ApiRecord,
@@ -485,6 +486,8 @@ export function ShelfCashApp({
     if (storeId && typeof window !== "undefined") {
       window.localStorage.removeItem(`shelfcash:decision-run:${storeId}`);
     }
+    activeForecast.current = null;
+    draftIdempotency.current = null;
     setDecision(null);
     setDecisionBrief(null);
     setDecisionExplanation(null);
@@ -535,6 +538,11 @@ export function ShelfCashApp({
   );
   const [planIngredient, setPlanIngredient] = useState("");
   const [draftOrders, setDraftOrders] = useState<PurchaseOrder[]>([]);
+  const [ordersPagination, setOrdersPagination] = useState<{
+    page: number;
+    pageSize: number;
+    total: number;
+  }>({ page: 1, pageSize: 50, total: 0 });
   const [importLogs, setImportLogs] = useState<ImportLog[]>([]);
   const [recipeVersions] = useState<RecipeVersion[]>([]);
   const [importDraftFiles, setImportDraftFiles] = useState<File[]>([]);
@@ -574,7 +582,7 @@ export function ShelfCashApp({
     useState(false);
   const operationSequence = useRef(0);
   const decisionRunAbort = useRef<AbortController | null>(null);
-  const workflowSnapshot = useRef<PlanningWorkflowSnapshot | null>(null);
+  const activeForecast = useRef<ForecastRunResult | null>(null);
   const draftIdempotency = useRef<{
     fingerprint: string;
     bridge: string;
@@ -671,12 +679,19 @@ export function ShelfCashApp({
           setToast({ message: inventoryLotsResult.error, tone: "error" });
         }
         if (resetPlanning) {
-          workflowSnapshot.current = null;
+          activeForecast.current = null;
+          draftIdempotency.current = null;
           setStrategy(nextStrategy);
           setPlan(emptyBackendPlan(nextData, nextStrategy));
         }
         if (ordersResult.value) {
-          setDraftOrders(adaptOrders(ordersResult.value));
+          const paginated = adaptPaginatedOrders(ordersResult.value);
+          setDraftOrders(paginated.items);
+          setOrdersPagination({
+            page: paginated.page,
+            pageSize: paginated.page_size,
+            total: paginated.total,
+          });
         } else if (ordersResult.error) {
           setToast({ message: ordersResult.error, tone: "error" });
         }
@@ -1275,6 +1290,7 @@ export function ShelfCashApp({
         onProgress,
       });
       if (operation === operationSequence.current) {
+        activeForecast.current = resolved.forecast;
         // The POST only creates the run. Read the canonical resource before
         // rendering its brief, even when the create response is already terminal.
         const decisionRun = await getDecisionRun(resolved.decision.decision_run_id, {
@@ -1314,9 +1330,7 @@ export function ShelfCashApp({
   async function createOrdersFromPlan(
     recommendations: typeof plan.recommendations,
   ): Promise<PurchaseOrder[]> {
-    const snapshot = workflowSnapshot.current;
     if (
-      !snapshot ||
       !plan.forecastRunId ||
       !plan.cutoffDate ||
       plan.status !== "completed"
@@ -1355,10 +1369,18 @@ export function ShelfCashApp({
         remainingBudget: data.settings.remainingBudget,
         idempotencyKey: keys?.bridge,
       });
+      const forecastResponse: ForecastRunResult = activeForecast.current ?? {
+        store_id: data.settings.storeId,
+        forecast_run_id: plan.forecastRunId,
+        cutoff_date: plan.cutoffDate,
+        horizon_days: plan.horizonDays,
+        status: "completed",
+        predictions: [],
+      };
       const legacyPlan = adaptPlan(
         data,
         strategy,
-        snapshot.forecast,
+        forecastResponse,
         bridge.result,
       );
       const overrides = new Map<string, number>();
@@ -1708,6 +1730,9 @@ export function ShelfCashApp({
             activeView="today"
             data={data}
             decision={decision}
+            brief={decisionBrief}
+            briefLoading={briefLoading}
+            briefError={briefError}
             initialIngredient={decisionCenterIngredient}
             onNavigate={(target) =>
               target === "plan" ? openPlan() : setPage("inventory")
@@ -1762,6 +1787,9 @@ export function ShelfCashApp({
             activeView="future"
             data={data}
             decision={decision}
+            brief={decisionBrief}
+            briefLoading={briefLoading}
+            briefError={briefError}
             initialIngredient={decisionCenterIngredient}
             onNavigate={(target) =>
               target === "plan" ? openPlan() : setPage("inventory")
@@ -1795,6 +1823,7 @@ export function ShelfCashApp({
             strategy={strategy}
             initialIngredient={planIngredient}
             draftOrders={draftOrders}
+            ordersPagination={ordersPagination}
             onRunPlanning={runPlanning}
             onTrainModel={trainModel}
             onStrategyChange={changeStrategy}

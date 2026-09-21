@@ -124,6 +124,7 @@ export async function runSimulationAttempt(
       monthlyBudget: input.monthlyBudget,
       engineMode: input.engineMode,
     }),
+    idempotencyKey: `${prefix}:decision`,
     signal: input.signal,
   });
   const decision = await api.waitForDecisionRun(

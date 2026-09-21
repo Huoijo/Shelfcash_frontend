@@ -336,3 +336,79 @@ test("PO creation fails locally when every legacy recommendation is ineligible",
   );
   assert.deepEqual(calls, []);
 });
+
+test("purchase order creation lineage succeeds using active forecastRunId without workflowSnapshot", async () => {
+  const calls: RecordedCall[] = [];
+  const deps = dependencies(calls);
+  const activePlanState = {
+    storeId: "STORE_D1",
+    forecastRunId: "forecast-authoritative-99",
+    cutoffDate: "2026-09-21",
+    strategy: "Cân bằng" as const,
+    remainingBudget: 15_000_000,
+  };
+  const recLines = [
+    recommendation({
+      recommendationId: "REC-AUTHORITATIVE-1",
+      supplierId: "SUP_A",
+      orderQty: 20,
+    }),
+  ];
+
+  // 1. Run bridge to acquire plan_run_id from forecast_run_id
+  const bridge = await runLegacyPurchaseOrderBridge(
+    {
+      storeId: activePlanState.storeId,
+      forecastRunId: activePlanState.forecastRunId,
+      forecastCutoffDate: activePlanState.cutoffDate,
+      strategy: activePlanState.strategy,
+      remainingBudget: activePlanState.remainingBudget,
+      idempotencyKey: "bridge-key-1",
+    },
+    deps,
+  );
+
+  assert.equal(bridge.run.plan_run_id, "legacy-1");
+  const bridgeCall = calls.find((c) => c.name === "legacy:create");
+  assert.ok(bridgeCall);
+  const bridgeInput = bridgeCall.input as Record<string, unknown>;
+  assert.equal(bridgeInput.forecastRunId, "forecast-authoritative-99");
+  assert.equal(bridgeInput.storeId, "STORE_D1");
+
+  // 2. Create draft POs from legacy plan run id
+  const poResponse = await createDraftOrdersFromLegacyPlan(
+    {
+      storeId: activePlanState.storeId,
+      planRunId: bridge.result.plan_run_id,
+      recommendations: recLines,
+      idempotencyKey: "po-key-1",
+    },
+    deps,
+  );
+
+  assert.equal(poResponse.orders.length, 1);
+  assert.equal(poResponse.orders[0]?.po_id, "PO-1");
+  assert.equal(poResponse.orders[0]?.status, "draft");
+
+  const poCall = calls.find((c) => c.name === "po:create");
+  assert.ok(poCall);
+  const poInput = poCall.input as Record<string, unknown>;
+  assert.equal(poInput.storeId, "STORE_D1");
+  assert.equal(poInput.planRunId, "legacy-1");
+  assert.equal(poInput.idempotencyKey, "po-key-1");
+
+  // 3. Verify retry preserves idempotency key and does not duplicate PO intent
+  calls.length = 0;
+  const retryResponse = await createDraftOrdersFromLegacyPlan(
+    {
+      storeId: activePlanState.storeId,
+      planRunId: bridge.result.plan_run_id,
+      recommendations: recLines,
+      idempotencyKey: "po-key-1", // same intent, same key
+    },
+    deps,
+  );
+  assert.equal(retryResponse.orders[0]?.po_id, "PO-1");
+  const retryCall = calls.find((c) => c.name === "po:create");
+  assert.equal((retryCall?.input as Record<string, unknown>).idempotencyKey, "po-key-1");
+});

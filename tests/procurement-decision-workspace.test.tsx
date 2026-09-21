@@ -186,17 +186,27 @@ test("DecisionBriefWorkspace renders button for viewing candidate strategies and
   const { DecisionBriefWorkspace } = await import("../app/components/DecisionBriefWorkspace.tsx");
   const brief = {
     decision_run_id: "decision-123",
+    store_id: "store-1",
     generated_at: "2026-08-27T10:00:00Z",
     status: "completed",
+    forecast: {
+      forecast_run_id: "f-1",
+      model_version: "v1",
+      horizon_days: 7,
+      cutoff_date: "2026-08-20",
+    },
     recommendation: {
       available: true,
       strategy: "balanced" as const,
+      summary: "Kế hoạch Cân bằng",
       total_purchase_cost: 5625000,
       expected_fill_rate: 0.965,
     },
     risk: {
       stockout_probability: 0.038,
       expected_fill_rate: 0.965,
+      shortage_quantity: 0,
+      waste_quantity: 0,
     },
     procurement_rows: [],
     ingredient_demand: [],

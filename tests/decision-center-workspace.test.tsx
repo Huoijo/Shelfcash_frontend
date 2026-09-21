@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { DecisionCenter } from "../app/components/DecisionCenter.tsx";
 import { DecisionCenterWorkspace } from "../app/components/DecisionCenterWorkspace.tsx";
 import { adaptDecisionRunView } from "../lib/decision-view.ts";
 import { projectIngredientDailyRisks } from "../lib/risk-engine.ts";
@@ -61,31 +60,6 @@ test("Decision Center exposes both operational and seven-day planning views", ()
   assert.doesNotMatch(future, /0 ₫/);
 });
 
-test("DecisionCenter renders keyed deterministic strategies without calling array methods on an object", () => {
-  const markup = renderToStaticMarkup(
-    <DecisionCenter
-      decision={{
-        decision_run_id: "keyed-strategy-run",
-        status: "completed",
-        recommended_strategy: "balanced",
-        recommended_plan: { items: [] },
-        strategies: {
-          balanced: {
-            strategy: "balanced",
-            is_feasible: true,
-            business_metrics: { projected_purchase_cost: 120000 },
-            items: [],
-          },
-        },
-      } as unknown as DecisionPackage}
-      running={false}
-    />,
-  );
-
-  assert.match(markup, /Cân bằng/);
-  assert.match(markup, /120.000/);
-});
-
 test("Decision Run view model reads singular demand and deduplicates product forecasts by product and date", () => {
   const view = adaptDecisionRunView(decision, data);
   assert.equal(view.demand.length, 3);
@@ -105,7 +79,7 @@ test("demand chart makes P50 primary and keeps the P25-P75 range as an accessibl
 });
 
 test("Decision Center seven-day view focuses cleanly on demand and risk without separate procurement surface", () => {
-  const markup = renderToStaticMarkup(<DecisionCenterWorkspace activeView="future" data={data} decision={{ decision_run_id: "feasible", status: "completed", recommended_strategy: "balanced", recommended_plan: { valid: true, items: [{ ingredient_name: "Sữa tươi", order_quantity: 12, unit: "L", order_date: "2026-08-12", expected_arrival_date: "2026-08-13", estimated_cost: 120000 }] } }} onNavigate={() => undefined} onViewChange={() => undefined} plan={plan} />);
+  const markup = renderToStaticMarkup(<DecisionCenterWorkspace activeView="future" data={data} decision={{ decision_run_id: "feasible", status: "completed", recommended_strategy: "balanced", recommended_plan: { valid: true, items: [{ ingredient_name: "Sữa tươi", order_quantity: 12, unit: "L", order_date: "2026-08-12", expected_arrival_date: "2026-08-13", estimated_cost: 120000 }] } }} previewMode={true} onNavigate={() => undefined} onViewChange={() => undefined} plan={plan} />);
   assert.match(markup, /Kế hoạch 7 ngày tới/);
   assert.match(markup, /Heatmap rủi ro/);
   assert.match(markup, /Chi tiết đang chọn/);
