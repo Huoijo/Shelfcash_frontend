@@ -11,6 +11,7 @@ export function buildDecisionRunRequest(input: {
   budgetOverride?: number;
   monthlyBudget: number;
   engineMode?: "legacy" | "deterministic" | "stochastic";
+  scenarioCount?: number;
 }): CreateDecisionRunRequest {
   return {
     forecast_run_id: input.forecastRunId,
@@ -19,7 +20,7 @@ export function buildDecisionRunRequest(input: {
     engine_mode: input.engineMode ?? "deterministic",
     include_open_purchase_orders: input.includeOpenPurchaseOrders,
     budget_override: input.budgetOverride ?? input.monthlyBudget,
-    scenario_count: DECISION_SCENARIO_COUNT,
+    scenario_count: input.scenarioCount ?? DECISION_SCENARIO_COUNT,
     random_seed: DECISION_RANDOM_SEED,
   };
 }

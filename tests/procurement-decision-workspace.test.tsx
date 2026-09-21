@@ -159,7 +159,7 @@ test("a feasible decision routes into the procurement planning workspace", () =>
   assert.doesNotMatch(markup, /Chưa tìm được kế hoạch nhập đủ an toàn/);
 });
 
-test("PlanView idle screen renders clean launchpad with strategy selection option", () => {
+test("PlanView idle screen renders clean launchpad with a scenario-count input", () => {
   const markup = renderToStaticMarkup(
     <PlanView
       data={data}
@@ -176,7 +176,8 @@ test("PlanView idle screen renders clean launchpad with strategy selection optio
       focus="plan"
     />,
   );
-  assert.match(markup, /Lựa chọn kế hoạch nhập/);
+  assert.match(markup, /Số kịch bản giả lập/);
+  assert.match(markup, /type="number" min="1" step="1" inputMode="numeric" value="100"/);
   assert.match(markup, /Sẵn sàng tính toán dự báo (?:&|&amp;) kế hoạch nhập hàng/);
   assert.match(markup, /Dự đoán (?:&|&amp;) Lập kế hoạch/);
   assert.doesNotMatch(markup, /Dòng đề xuất của kịch bản/);

@@ -5,9 +5,11 @@ import { ShelfCashApiError } from "../lib/shelfcash-client.ts";
 
 function fakeApi(options: { modelReady?: boolean; decisionStatus?: string } = {}) {
   const calls: string[] = [];
+  const decisionRequests: Array<{ scenario_count?: number }> = [];
   let forecastCreates = 0;
   return {
     calls,
+    decisionRequests,
     api: {
       createForecastRun: async () => {
         calls.push("forecast:create");
@@ -28,8 +30,9 @@ function fakeApi(options: { modelReady?: boolean; decisionStatus?: string } = {}
         calls.push("forecast:train");
         return { status: "ready" };
       },
-      createDecisionRun: async (input: { request: { forecast_run_id: string } }) => {
+      createDecisionRun: async (input: { request: { forecast_run_id: string; scenario_count?: number } }) => {
         calls.push(`decision:create:${input.request.forecast_run_id}`);
+        decisionRequests.push(input.request);
         return { decision_run_id: "decision-1", status: "running" };
       },
       waitForDecisionRun: async () => {
@@ -56,13 +59,14 @@ function input() {
 
 test("ready model creates forecast then runs the canonical decision flow without training", async () => {
   const fake = fakeApi();
-  await runSimulationAttempt(input(), fake.api as never);
+  await runSimulationAttempt({ ...input(), scenarioCount: 250 }, fake.api as never);
   assert.deepEqual(fake.calls, [
     "forecast:create",
     "forecast:wait-result",
     "decision:create:forecast-1",
     "decision:wait",
   ]);
+  assert.equal(fake.decisionRequests[0]?.scenario_count, 250);
 });
 
 test("MODEL_NOT_READY trains once then creates a separate forecast run", async () => {

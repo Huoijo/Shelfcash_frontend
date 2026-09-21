@@ -39,6 +39,19 @@ test("simulation request includes the complete deterministic decision contract",
     }).engine_mode,
     "stochastic",
   );
+
+  assert.equal(
+    buildDecisionRunRequest({
+      forecastRunId: "d3c0ef9a-59f7-421d-9dc4-265a9b6e4376",
+      asOfDate: "2026-08-12",
+      horizonDays: 7,
+      includeOpenPurchaseOrders: true,
+      monthlyBudget: 50_000_000,
+      engineMode: "stochastic",
+      scenarioCount: 250,
+    }).scenario_count,
+    250,
+  );
 });
 
 test("decision run lifecycle polls only canonical non-terminal statuses", () => {

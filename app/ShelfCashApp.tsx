@@ -1236,6 +1236,7 @@ export function ShelfCashApp({
     includeOpenPurchaseOrders,
     budgetOverride,
     engineMode,
+    scenarioCount,
     onProgress,
   }: SimulationRunInput): Promise<void> {
     if (!data.settings.storeId.trim()) {
@@ -1261,6 +1262,7 @@ export function ShelfCashApp({
         includeOpenPurchaseOrders,
         budgetOverride,
         engineMode,
+        scenarioCount,
         monthlyBudget:
           data.settings.remainingBudget > 0
             ? data.settings.remainingBudget

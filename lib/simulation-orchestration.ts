@@ -62,6 +62,7 @@ export async function runSimulationAttempt(
     budgetOverride?: number;
     monthlyBudget: number;
     engineMode?: "legacy" | "deterministic" | "stochastic";
+    scenarioCount?: number;
     modelVersion?: string;
     historyDays?: number;
     signal?: AbortSignal;
@@ -123,6 +124,7 @@ export async function runSimulationAttempt(
       budgetOverride: input.budgetOverride,
       monthlyBudget: input.monthlyBudget,
       engineMode: input.engineMode,
+      scenarioCount: input.scenarioCount,
     }),
     signal: input.signal,
   });

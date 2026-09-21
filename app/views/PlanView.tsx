@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ShelfCashApiError } from "../../lib/shelfcash-client";
+import { DECISION_SCENARIO_COUNT } from "../../lib/decision-run";
 import type {
   BootstrapData,
   CoreStrategy,
@@ -117,6 +118,7 @@ export interface SimulationRunInput {
   includeOpenPurchaseOrders: boolean;
   budgetOverride?: number;
   engineMode?: "deterministic" | "stochastic";
+  scenarioCount?: number;
   onProgress?: (progress: SimulationProgress) => void;
 }
 
@@ -358,6 +360,7 @@ export function PlanView({
   const [cutoffDate, setCutoffDate] = useState(plan.cutoffDate ?? data.today);
   const [budgetOverride, setBudgetOverride] = useState("");
   const [engineMode, setEngineMode] = useState<"deterministic" | "stochastic">("deterministic");
+  const [scenarioCount, setScenarioCount] = useState(String(DECISION_SCENARIO_COUNT));
   const [includeOpenPurchaseOrders, setIncludeOpenPurchaseOrders] = useState(true);
   const [controlsDirty, setControlsDirty] = useState(false);
   const [simulationProgress, setSimulationProgress] = useState<SimulationProgress | null>(null);
@@ -551,11 +554,21 @@ export function PlanView({
         );
         return;
       }
+      const parsedScenarioCount = Number(scenarioCount);
+      if (!Number.isInteger(parsedScenarioCount) || parsedScenarioCount < 1) {
+        actionAttempts.fail(
+          planningAction,
+          attemptId,
+          "Số kịch bản giả lập phải là số nguyên từ 1 trở lên.",
+        );
+        return;
+      }
       await onRunPlanning({
         cutoffDate,
         horizonDays,
         includeOpenPurchaseOrders,
         engineMode,
+        scenarioCount: parsedScenarioCount,
         ...(parsedBudget === undefined ? {} : { budgetOverride: parsedBudget }),
         onProgress: setSimulationProgress,
       });
@@ -871,16 +884,19 @@ export function PlanView({
             />
           </label>
           <label className="field">
-            <span>Lựa chọn kế hoạch nhập</span>
-            <select
+            <span>Số kịch bản giả lập</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              inputMode="numeric"
               disabled={isRunning}
-              value={strategy}
-              onChange={(event) => onStrategyChange(event.target.value as Strategy)}
-            >
-              <option value="Cân bằng">Cân bằng (Khuyến nghị - P50)</option>
-              <option value="Tiết kiệm">Tiết kiệm (Tồn kho gọn - P25)</option>
-              <option value="An toàn">An toàn (Dự phòng cao - P75)</option>
-            </select>
+              value={scenarioCount}
+              onChange={(event) => {
+                setScenarioCount(event.target.value);
+                setControlsDirty(true);
+              }}
+            />
           </label>
           <label className="field">
             <span>Chế độ mô phỏng</span>
@@ -968,16 +984,19 @@ export function PlanView({
             />
           </label>
           <label className="field">
-            <span>Lựa chọn kế hoạch nhập</span>
-            <select
+            <span>Số kịch bản giả lập</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              inputMode="numeric"
               disabled={runBusy}
-              value={strategy}
-              onChange={(event) => onStrategyChange(event.target.value as Strategy)}
-            >
-              <option value="Cân bằng">Cân bằng (Khuyến nghị - P50)</option>
-              <option value="Tiết kiệm">Tiết kiệm (Tồn kho gọn - P25)</option>
-              <option value="An toàn">An toàn (Dự phòng cao - P75)</option>
-            </select>
+              value={scenarioCount}
+              onChange={(event) => {
+                setScenarioCount(event.target.value);
+                setControlsDirty(true);
+              }}
+            />
           </label>
           <label className="field">
             <span>Chế độ mô phỏng</span>
