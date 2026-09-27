@@ -65,6 +65,8 @@ import {
   formatVnd,
   parseMoneyInput,
 } from "./ui";
+import { useTutorial } from "./tutorial/TutorialContext";
+import { DecisionExplanationDrawer } from "./DecisionExplanationDrawer";
 
 const strategyLabels = {
   lean: "Tiết kiệm",
@@ -868,9 +870,11 @@ function IngredientDecisionChart({
 function IngredientDecisionNarrative({
   item,
   synthesis,
+  onAskAi,
 }: {
   item: IngredientItemData;
   synthesis?: IngredientSynthesis | null;
+  onAskAi?: (req: ExplanationRequest) => void;
 }) {
   const p = item.procurement;
   const d = item.demand;
@@ -991,151 +995,24 @@ function IngredientDecisionNarrative({
           ))}
         </div>
       ) : null}
-    </div>
-  );
-}
 
-/** Side Drawer for Contextual AI Explanations */
-function DecisionExplanationDrawer({
-  open,
-  onClose,
-  explanation,
-  loading,
-  error,
-  onAsk,
-}: {
-  open: boolean;
-  onClose: () => void;
-  explanation?: DecisionExplanationResponse | null;
-  loading?: boolean;
-  error?: string | null;
-  onAsk?: (request: ExplanationRequest) => void;
-}) {
-  const [question, setQuestion] = useState("");
-
-  const ask = (q?: string) => {
-    const text = q ?? question.trim();
-    if (!text && !q) return;
-    onAsk?.({
-      language: "vi",
-      detail_level: "simple",
-      ...(text ? { question: text } : {}),
-    });
-  };
-
-  return (
-    <div
-      className={`cockpit-drawer-overlay ${open ? "open" : ""}`}
-      style={{ display: open ? "block" : "none" }}
-      onClick={onClose}
-      aria-modal="true"
-      role="dialog"
-    >
-      <div className="cockpit-drawer-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="cockpit-drawer-header">
-          <div className="drawer-header-title">
-            <Sparkles size={18} className="text-accent" />
-            <div>
-              <h3>Trợ lý lý giải quyết định AI</h3>
-              <p>Giải thích logic và các đánh đổi đằng sau kế hoạch nhập</p>
-            </div>
-          </div>
-          <button className="drawer-close-btn" onClick={onClose} type="button" aria-label="Đóng">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="cockpit-drawer-body">
-          <div className="drawer-quick-prompts">
-            <span className="quick-prompts-label">Câu hỏi nhanh:</span>
-            {[
-              "Tại sao chọn kế hoạch này?",
-              "Tại sao phải nhập mặt hàng này?",
-              "Có rủi ro thiếu hàng không?",
-              "Kế hoạch có vượt ngân sách không?",
-            ].map((q) => (
-              <button
-                key={q}
-                className="quick-prompt-chip"
-                disabled={loading}
-                onClick={() => {
-                  setQuestion(q);
-                  ask(q);
-                }}
-                type="button"
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-
-          <form
-            className="drawer-input-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              ask();
-            }}
-          >
-            <input
-              placeholder="Đặt câu hỏi về kế hoạch này..."
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              disabled={loading}
-            />
-            <Button busy={loading} disabled={!question.trim()} type="submit">
-              <Send size={15} /> Hỏi
-            </Button>
-          </form>
-
-          {error ? <Notice tone="error">{error}</Notice> : null}
-
-          {explanation ? (
-            <div className="drawer-answer-card" aria-live="polite">
-              <div className="drawer-answer-badge">
-                <Bot size={15} /> Câu trả lời từ AI Decision Engine
-              </div>
-              <p className="drawer-answer-text">{explanation.answer}</p>
-
-              {explanation.why_this_plan?.length ? (
-                <div className="drawer-sub-section">
-                  <strong>Tại sao kế hoạch này tối ưu?</strong>
-                  <ul>
-                    {explanation.why_this_plan.map((item, i) => (
-                      <li key={i}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              {explanation.main_risks?.length ? (
-                <div className="drawer-sub-section warning-tone">
-                  <strong>Rủi ro cần lưu ý:</strong>
-                  <ul>
-                    {explanation.main_risks.map((item, i) => (
-                      <li key={i}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              {explanation.tradeoffs?.length ? (
-                <div className="drawer-sub-section">
-                  <strong>Các đánh đổi đã cân nhắc:</strong>
-                  <ul>
-                    {explanation.tradeoffs.map((item, i) => (
-                      <li key={i}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <div className="drawer-empty-state">
-              <Bot size={36} />
-              <p>Chọn câu hỏi nhanh ở trên hoặc nhập câu hỏi cụ thể để AI giải thích chi tiết kế hoạch.</p>
-            </div>
-          )}
-        </div>
+      {/* Ask AI CTA sending canonical ingredient_id */}
+      <div className="narrative-ai-action-row" style={{ marginTop: "12px", borderTop: "1px dashed #e2e8f0", paddingTop: "10px" }}>
+        <Button
+          type="button"
+          variant="secondary"
+          className="narrative-ask-ai-btn"
+          onClick={() => {
+            onAskAi?.({
+              ingredient_id: item.demand.ingredient_id,
+              question: `Tại sao cần nhập ${item.demand.ingredient_name || "nguyên liệu này"}?`,
+              language: "vi",
+              detail_level: "simple",
+            });
+          }}
+        >
+          <Bot size={14} /> Hỏi AI về nguyên liệu này
+        </Button>
       </div>
     </div>
   );
@@ -1772,6 +1649,7 @@ function WhatIfLab({
   error?: string | null;
   onRun?: (mutation: WhatIfRequest) => void;
 }) {
+  const { triggerAction } = useTutorial();
   const [demandMultiplier, setDemandMultiplier] = useState("1.1");
   const [supplierDelayDays, setSupplierDelayDays] = useState("1");
   const [budgetLimit, setBudgetLimit] = useState("");
@@ -1798,10 +1676,17 @@ function WhatIfLab({
       ...(budget === undefined ? {} : { budget_limit: budget }),
       ...(strategy ? { strategy } : {}),
     });
+    triggerAction("what-if-input", "submit");
+    triggerAction("what-if-submit", "click");
   };
 
   return (
-    <section className="what-if-lab-section" aria-labelledby="what-if-lab-title">
+    <section
+      className="what-if-lab-section"
+      aria-labelledby="what-if-lab-title"
+      data-tutorial-id="what-if-button"
+      onClick={() => triggerAction("what-if-button", "click")}
+    >
       <div className="what-if-lab-header">
         <div className="what-if-lab-title-group">
           <span className="cockpit-eyebrow">
@@ -1848,7 +1733,7 @@ function WhatIfLab({
             </div>
           </label>
 
-          <label className="control-field">
+          <label className="control-field" data-tutorial-id="what-if-input">
             <span>Ngân sách tối đa (₫)</span>
             <div className="input-with-hint">
               <input
@@ -1880,7 +1765,7 @@ function WhatIfLab({
         </div>
 
         <div className="controls-actions">
-          <Button busy={loading} type="submit" variant="primary">
+          <Button busy={loading} type="submit" variant="primary" data-tutorial-id="what-if-submit">
             <SlidersHorizontal size={15} /> Chạy giả lập kịch bản
           </Button>
         </div>
@@ -1889,7 +1774,7 @@ function WhatIfLab({
       {error ? <Notice tone="error">{error}</Notice> : null}
 
       {result ? (
-        <div className="what-if-results-cockpit" aria-live="polite">
+        <div className="what-if-results-cockpit" aria-live="polite" data-tutorial-id="what-if-result">
           <div className="results-header">
             <h4>Kết quả so sánh với kế hoạch gốc</h4>
             <p>{result.grounded_explanation?.answer || "Đã tạo phương án giả lập thành công."}</p>
@@ -1972,6 +1857,7 @@ export function DecisionBriefWorkspace({
   data,
   appliedBudget,
   initialViewMode,
+  onCreateOrders,
 }: {
   brief: DecisionBriefFacts | null;
   loading?: boolean;
@@ -1990,10 +1876,14 @@ export function DecisionBriefWorkspace({
   data?: BootstrapData;
   appliedBudget?: number | null;
   initialViewMode?: "cockpit" | "strategy-analysis";
+  onCreateOrders?: () => void | Promise<unknown>;
 }) {
+  const { mode, triggerAction } = useTutorial();
+  const isTutorial = mode === "tutorial";
   const [selectedIngredientId, setSelectedIngredientId] = useState<string>("");
   const [filterMode, setFilterMode] = useState<"all" | "urgent" | "safe">("all");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [aiChatInitialRequest, setAiChatInitialRequest] = useState<ExplanationRequest | null>(null);
   const [viewMode, setViewMode] = useState<"cockpit" | "strategy-analysis">(
     initialViewMode ?? "cockpit"
   );
@@ -2214,7 +2104,7 @@ export function DecisionBriefWorkspace({
     <div className="decision-cockpit-root">
       <section className="hero-decision-cockpit" aria-labelledby="cockpit-title">
         <div className="hero-top-bar">
-          <div className="hero-badge-group">
+          <div className="hero-badge-group" data-tutorial-id="strategy-section">
             <span className="hero-ai-badge">
               <Sparkles size={13} /> ShelfCash Decision Engine
             </span>
@@ -2229,7 +2119,10 @@ export function DecisionBriefWorkspace({
             <div className="hero-quick-actions-row">
               <Button
                 className="ai-explain-trigger-btn"
-                onClick={() => setDrawerOpen(true)}
+                onClick={() => {
+                  setAiChatInitialRequest(null);
+                  setDrawerOpen(true);
+                }}
                 variant="secondary"
               >
                 <Bot size={16} /> Hỏi AI về kế hoạch
@@ -2239,6 +2132,19 @@ export function DecisionBriefWorkspace({
                   <RefreshCw size={15} /> Chạy lại
                 </Button>
               ) : null}
+              <Button
+                className="hero-draft-po-btn"
+                data-tutorial-id="draft-po-button"
+                onClick={() => {
+                  triggerAction("draft-po-button", "click");
+                  if (onCreateOrders) {
+                    void onCreateOrders();
+                  }
+                }}
+                variant="primary"
+              >
+                <ShieldCheck size={15} /> Tạo Draft PO
+              </Button>
             </div>
             <Button
               className="hero-other-strategies-btn"
@@ -2250,7 +2156,7 @@ export function DecisionBriefWorkspace({
           </div>
         </div>
 
-        <div className="hero-main-content">
+        <div className="hero-main-content" data-tutorial-id="decision-recommendation">
           <div className="hero-title-area">
             <h1 id="cockpit-title">Kế hoạch nhập hàng</h1>
           </div>
@@ -2544,6 +2450,10 @@ export function DecisionBriefWorkspace({
                         (s) => s.ingredient_id === selectedItem.demand.ingredient_id
                       )
                     }
+                    onAskAi={(req) => {
+                      setAiChatInitialRequest(req);
+                      setDrawerOpen(true);
+                    }}
                   />
                 </div>
               </div>
@@ -2570,11 +2480,18 @@ export function DecisionBriefWorkspace({
           DRAWER: AI DECISION EXPLANATION
       ═══════════════════════════════════════════════════════════════ */}
       <DecisionExplanationDrawer
+        brief={brief}
+        decisionRunId={decision?.decision_run_id || (brief as unknown as { decision_run_id?: string })?.decision_run_id}
         error={explanationError}
         explanation={explanation}
+        initialRequest={aiChatInitialRequest}
+        isTutorial={isTutorial}
         loading={explanationLoading}
         onAsk={onExplain}
-        onClose={() => setDrawerOpen(false)}
+        onClose={() => {
+          setDrawerOpen(false);
+          setAiChatInitialRequest(null);
+        }}
         open={drawerOpen}
       />
     </div>

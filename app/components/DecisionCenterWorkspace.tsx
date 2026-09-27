@@ -28,6 +28,7 @@ import { DemandChart } from "./DemandChart";
 import { ForecastChart } from "./ForecastChart";
 import { DemandExplanationDialog, noFeasibleDecision } from "./ProcurementDecisionWorkspace";
 import { Button, Details, GuidanceHint, Notice, SectionHeading, StatCard, SummaryGrid, formatDate, formatQuantity, formatVnd } from "./ui";
+import { useTutorial } from "./tutorial/TutorialContext";
 
 type DecisionCenterView = "today" | "future";
 
@@ -128,6 +129,7 @@ function TodayOperationalView({
   briefError?: string | null;
   onNavigate: (target: "inventory" | "plan") => void;
 }) {
+  const { triggerAction } = useTutorial();
   const view = useMemo(() => adaptDecisionRunView(decision, data), [data, decision]);
   const vm = useMemo(
     () =>
@@ -279,7 +281,7 @@ function TodayOperationalView({
   return (
     <div className="today-briefing-wrap">
       {/* ── 1. TOP OVERVIEW CARDS (Balanced 2-cards strip) ── */}
-      <div className="today-overview-cards">
+      <div className="today-overview-cards" data-tutorial-id="today-summary">
         {/* Card 1: Pipeline Strip */}
         <section className="today-overview-card" aria-labelledby="today-pipeline-title">
           <span id="today-pipeline-title" className="today-card-eyebrow">Trạng thái quyết định</span>
@@ -344,8 +346,27 @@ function TodayOperationalView({
 
           <div className="lane-content-scrollable">
             {operationalAlerts.length > 0 ? (
-              operationalAlerts.map((alert) => (
-                <div className="operational-alert-row" key={alert.key}>
+              operationalAlerts.map((alert, alertIdx) => (
+                <div
+                  className="operational-alert-row"
+                  key={alert.key}
+                  data-tutorial-id={alertIdx === 0 ? "risk-item" : undefined}
+                  onClick={() => {
+                    if (alertIdx === 0) {
+                      triggerAction("risk-item", "click");
+                    }
+                    onNavigate(alert.target);
+                  }}
+                  role={alertIdx === 0 ? "button" : undefined}
+                  tabIndex={alertIdx === 0 ? 0 : undefined}
+                  onKeyDown={(e) => {
+                    if (alertIdx === 0 && (e.key === "Enter" || e.key === " ")) {
+                      e.preventDefault();
+                      triggerAction("risk-item", "click");
+                      onNavigate(alert.target);
+                    }
+                  }}
+                >
                   <div className="alert-row-main">
                     <strong className="alert-item-title">{alert.title}</strong>
                     <span className="alert-item-context">{alert.context}</span>
@@ -365,7 +386,13 @@ function TodayOperationalView({
                     <button
                       type="button"
                       className="lane-action-cta"
-                      onClick={() => onNavigate(alert.target)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (alertIdx === 0) {
+                          triggerAction("risk-item", "click");
+                        }
+                        onNavigate(alert.target);
+                      }}
                     >
                       {alert.cta}
                     </button>
@@ -1336,7 +1363,11 @@ function FuturePlanningView({
       </section>
 
       {/* ── SECTION ①: TỔNG QUAN & SECTION ②: HEATMAP RỦI RO (HERO VISUALIZATION) ── */}
-      <section className="decision-demand-section" aria-labelledby="decision-demand-title">
+      <section
+        className="decision-demand-section"
+        aria-labelledby="decision-demand-title"
+        data-tutorial-id="future-heatmap"
+      >
         <div className="decision-section-heading">
           <div>
             <span className="eyebrow">Nhu cầu nguyên liệu dự kiến</span>

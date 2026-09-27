@@ -25,6 +25,7 @@ import {
   formatQuantity,
   formatVnd,
 } from "../components/ui";
+import { useTutorial } from "../components/tutorial/TutorialContext";
 
 type ActionableStatus = Extract<
   InventoryStatus,
@@ -227,6 +228,7 @@ export function TodayView({
   onOpenDecision?: (ingredient: string) => void;
   loading?: boolean;
 }) {
+  const { triggerAction } = useTutorial();
   const alerts = inventoryAlerts(plan.enrichedInventory);
   const stockoutCount = alerts.filter((alert) => alert.status === "stockout").length;
   const expiredCount = alerts.filter((alert) => alert.status === "expired").length;
@@ -239,7 +241,7 @@ export function TodayView({
   const bars = plan.status === "completed" ? plan.recommendations.slice(0, 6) : [];
 
   return (
-    <div className="dashboard-page">
+    <div className="dashboard-page" data-tutorial-id="today-summary">
       <PageHeader
         title="Hôm nay"
         context={`${data.today.split("-").reverse().join("/")} · ${data.settings.storeName}`}
@@ -366,20 +368,27 @@ export function TodayView({
             </div>
           ) : (
             <div className="dashboard-alert-list">
-              {alerts.slice(0, 6).map((alert) => {
+              {alerts.slice(0, 6).map((alert, alertIndex) => {
                 const copy = alertCopy(alert);
                 return (
-                  <AlertRow
+                  <div
                     key={alert.key}
-                  title={copy.title}
-                  body={copy.body}
-                  tone={copy.tone}
-                    onClick={() =>
-                      onOpenDecision?.(
-                        alert.ingredient.ingredientId || alert.ingredient.ingredient,
-                      )
-                    }
-                  />
+                    data-tutorial-id={alertIndex === 0 ? "risk-item" : undefined}
+                  >
+                    <AlertRow
+                      title={copy.title}
+                      body={copy.body}
+                      tone={copy.tone}
+                      onClick={() => {
+                        if (alertIndex === 0) {
+                          triggerAction("risk-item", "click");
+                        }
+                        onOpenDecision?.(
+                          alert.ingredient.ingredientId || alert.ingredient.ingredient,
+                        );
+                      }}
+                    />
+                  </div>
                 );
               })}
               {alerts.length > 6 ? (

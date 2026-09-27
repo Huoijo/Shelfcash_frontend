@@ -168,3 +168,16 @@ test("import stepper exposes all four labelled steps and a narrow vertical layou
     /@media \(max-width: 760px\)[\s\S]*?\.step-connector\s*\{\s*display:\s*none/,
   );
 });
+
+test("inline store error renders red text below input and exclamation icon on the right", () => {
+  const styles = readFileSync(
+    new URL("../app/globals.css", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(styles, /\.field-input-wrapper\s*\{[\s\S]*?position:\s*relative/);
+  assert.match(styles, /\.field-error-icon\s*\{[\s\S]*?position:\s*absolute/);
+  assert.match(styles, /\.field-error-icon\s*\{[\s\S]*?color:\s*var\(--red\)/);
+  assert.match(styles, /\.field-error-message\s*\{[\s\S]*?color:\s*var\(--red\)/);
+  assert.match(styles, /\.field input\.input-error[\s\S]*?border-color:\s*var\(--red\)/);
+});

@@ -783,42 +783,118 @@ export interface DecisionBriefStrategyAlternative {
   [key: string]: unknown;
 }
 
+export type ExplanationLanguage = "vi" | "en";
+export type ExplanationDetailLevel = "simple" | "manager" | "technical";
+
 export interface ExplanationRequest {
-  language?: "vi" | "en";
-  detail_level?: "simple" | "manager" | "technical";
+  language?: ExplanationLanguage;
+  detail_level?: ExplanationDetailLevel;
   question?: string | null;
+  ingredient_id?: string | null;
 }
 
-export interface DecisionExplanationResponse {
+export interface ExplanationClaim {
+  type: string;
+  value: unknown;
+  unit?: string;
+  evidence_ids: string[];
+}
+
+export interface ExplanationCitation {
+  evidence_id: string;
+  label: string;
+  source_type: string;
+}
+
+export interface ExplanationSuccess {
   source: string;
-  language: "vi" | "en";
-  detail_level: "simple" | "manager" | "technical";
+  language: ExplanationLanguage;
+  detail_level: ExplanationDetailLevel;
+  decision_run_id: string;
+  answer: string;
   summary: string;
   why_this_plan: string[];
   main_risks: string[];
   tradeoffs: string[];
   important_assumptions: string[];
-  decision_run_id: string;
-  answer: string;
   intent: string;
   entities: {
     ingredient_ids: string[];
     supplier_ids: string[];
   };
-  claims: Array<{
-    type: string;
-    value: unknown;
-    unit: string | null;
-    evidence_ids: string[];
-  }>;
-  citations: Array<{
-    evidence_id: string;
-    label: string;
-    source_type: string;
-  }>;
+  claims: ExplanationClaim[];
+  citations: ExplanationCitation[];
   grounded: boolean;
-  provider: "shelfcash_decision_intelligence" | "legacy_template_fallback";
+  provider: string;
 }
+
+/** Alias for backwards compatibility */
+export type DecisionExplanationResponse = ExplanationSuccess;
+
+export interface ApiError {
+  code: string;
+  message: string;
+  details: Record<string, unknown>;
+  request_id: string;
+}
+
+export type ExplanationChatMessage =
+  | {
+      id: string;
+      kind: "user";
+      text: string;
+      timestamp?: number;
+    }
+  | {
+      id: string;
+      kind: "typing";
+    }
+  | {
+      id: string;
+      kind: "answer";
+      text: string;
+      response: ExplanationSuccess;
+      showEvidence: boolean;
+      timestamp?: number;
+    }
+  | {
+      id: string;
+      kind: "guidance";
+      reason:
+        | "unsupported"
+        | "ingredient_not_found"
+        | "ingredient_ambiguous"
+        | "ingredient_mismatch"
+        | "ingredient_unavailable"
+        | "invalid_request";
+      text: string;
+      suggestedPrompts?: string[];
+      candidates?: Array<{
+        ingredient_id: string;
+        ingredient_name: string;
+      }>;
+      retry?: {
+        question: string;
+        ingredient_id?: string;
+      };
+      requestId: string;
+      timestamp?: number;
+    }
+  | {
+      id: string;
+      kind: "recoverable_error";
+      text: string;
+      request: ExplanationRequest;
+      status?: number;
+      timestamp?: number;
+    }
+  | {
+      id: string;
+      kind: "stale_resource";
+      text: string;
+      timestamp?: number;
+    };
+
 
 export interface WhatIfRequest {
   demand_multiplier?: number | null;

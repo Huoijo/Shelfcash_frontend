@@ -1,13 +1,18 @@
 "use client";
 
 import {
+  AlertCircle,
+  AlertTriangle,
   Check,
+  CheckCircle2,
   Download,
   FileSpreadsheet,
+  Info,
   RefreshCw,
   Sparkles,
   UploadCloud,
   X,
+  XCircle,
 } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useMemo, useRef, useState } from "react";
@@ -28,6 +33,12 @@ import {
   validateImportFiles,
   validateImportMappings,
 } from "../../lib/ingestion";
+import {
+  buildImportFeedbackModel,
+  deriveSheetCardStatus,
+  type ImportFeedbackSummary,
+  type MappingFeedbackItem,
+} from "../../lib/import-feedback";
 import {
   ShelfCashApiError,
   confirmImport,
@@ -118,22 +129,23 @@ export function ImportSheetCard({
   validation,
   selected,
   onSelect,
+  feedbackItems,
 }: {
   item: EditableSheetMapping;
   validation: SheetMappingValidation | undefined;
   selected: boolean;
   onSelect: () => void;
+  feedbackItems?: MappingFeedbackItem[];
 }) {
   const fileName = item.fileName || "Tệp đã tải";
   const metadata = `${fileName} · ${item.rowCount.toLocaleString("vi-VN")} dòng`;
   const typeLabel =
     sheetTypeLabels[item.sheetType as keyof typeof sheetTypeLabels] ??
     item.sheetType;
-  const mappingLabel = validation?.unknownSheetType
-    ? "Bỏ qua"
-    : validation?.fullyMapped
-      ? "Đã ghép đủ"
-      : `${validation?.mappedColumns ?? 0}/${validation?.totalColumns ?? item.columns.length} cột`;
+  const cardStatus = deriveSheetCardStatus(
+    validation,
+    feedbackItems ?? [],
+  );
 
   return (
     <button
@@ -141,35 +153,327 @@ export function ImportSheetCard({
       className={cn(
         "sheet-card",
         selected && "active",
-        validation?.unknownSheetType
-          ? "skipped"
-          : validation?.complete
-            ? "complete"
-            : "needs-review",
+        cardStatus.cardClass,
       )}
       aria-pressed={selected}
       onClick={onSelect}
     >
       <span className="sheet-card-content">
         <strong title={item.sheetName}>{item.sheetName}</strong>
-        <small title={metadata}>{metadata}</small>
+        <small title={metadata}>
+          <span className="sheet-card-filename">{fileName}</span>
+          <span className="sheet-card-count"> · {item.rowCount.toLocaleString("vi-VN")} dòng</span>
+        </small>
       </span>
       <span className="sheet-card-meta">
         <em title={typeLabel}>{typeLabel}</em>
         <b
           className={cn(
             "mapping-state",
-            validation?.unknownSheetType
-              ? "skipped"
-              : validation?.fullyMapped
-                ? "complete"
-                : "pending",
+            cardStatus.badgeClass,
           )}
+          title={`${cardStatus.iconText} ${cardStatus.label}`}
+          aria-label={`${cardStatus.iconText} ${cardStatus.label}`}
         >
-          {mappingLabel}
+          <span className="mapping-state-icon" aria-hidden="true">
+            {cardStatus.iconText}
+          </span>
+          <span className="mapping-state-text">
+            {cardStatus.label}
+          </span>
         </b>
       </span>
     </button>
+  );
+}
+
+export function ImportSummaryBanner({
+  summary,
+  onViewDetails,
+}: {
+  summary: ImportFeedbackSummary;
+  onViewDetails?: () => void;
+}) {
+  const {
+    totalSheets,
+    recognizedSheets,
+    readySheets,
+    reviewSheets,
+    blockedSheets,
+    totalMappedColumns,
+    totalColumns,
+    reviewItemsCount,
+    blockingItemsCount,
+  } = summary;
+
+  let description =
+    "Phần lớn dữ liệu đã được nhận diện tự động. Một số mục cần bạn kiểm tra trước khi xác nhận.";
+  if (blockingItemsCount > 0 || blockedSheets > 0) {
+    description =
+      "Một số bảng còn thiếu trường bắt buộc. Vui lòng bổ sung trước khi tiếp tục.";
+  } else if (reviewItemsCount === 0 && reviewSheets === 0) {
+    description =
+      "Tất cả bảng dữ liệu đã được nhận diện hợp lệ và sẵn sàng để xác nhận.";
+  }
+
+  return (
+    <section
+      className="import-summary-banner"
+      aria-label="Tóm tắt phân tích dữ liệu AI"
+    >
+      <div className="import-summary-banner-header">
+        <div className="import-summary-banner-title">
+          <Sparkles className="import-summary-icon" size={20} aria-hidden="true" />
+          <div>
+            <strong>AI đã phân tích dữ liệu</strong>
+            <p>{description}</p>
+          </div>
+        </div>
+        {onViewDetails ? (
+          <button
+            type="button"
+            className="import-summary-banner-link"
+            onClick={onViewDetails}
+          >
+            Xem chi tiết ↓
+          </button>
+        ) : null}
+      </div>
+
+      <div className="import-summary-stats">
+        <div className="import-summary-stat-chip">
+          <FileSpreadsheet size={15} aria-hidden="true" />
+          <span>
+            <strong>
+              {recognizedSheets}/{totalSheets}
+            </strong>{" "}
+            bảng đã được nhận diện
+          </span>
+        </div>
+
+        {blockingItemsCount > 0 || blockedSheets > 0 ? (
+          <div className="import-summary-stat-chip stat-blocked">
+            <XCircle size={15} aria-hidden="true" />
+            <span>
+              <strong>
+                {blockedSheets > 0
+                  ? `${blockedSheets} bảng`
+                  : `${blockingItemsCount} trường`}
+              </strong>{" "}
+              cần hoàn tất
+            </span>
+          </div>
+        ) : reviewItemsCount > 0 || reviewSheets > 0 ? (
+          <div className="import-summary-stat-chip stat-review">
+            <AlertTriangle size={15} aria-hidden="true" />
+            <span>
+              <strong>{reviewItemsCount} mục</strong> cần bạn kiểm tra
+            </span>
+          </div>
+        ) : (
+          <div className="import-summary-stat-chip stat-success">
+            <CheckCircle2 size={15} aria-hidden="true" />
+            <span>
+              <strong>{readySheets} bảng</strong> sẵn sàng
+            </span>
+          </div>
+        )}
+
+        <div className="import-summary-stat-chip">
+          <Check size={15} aria-hidden="true" />
+          <span>
+            <strong>
+              {totalMappedColumns}/{totalColumns}
+            </strong>{" "}
+            cột đã ghép
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function SheetFeedbackPanel({
+  sheet,
+  validation,
+  items,
+}: {
+  sheet: EditableSheetMapping;
+  validation: SheetMappingValidation | undefined;
+  items: MappingFeedbackItem[];
+}) {
+  if (validation?.unknownSheetType) {
+    const readmeItem = items.find((i) => i.severity === "info") ?? {
+      id: "info-skipped",
+      severity: "info" as const,
+      title: "README sẽ được bỏ qua",
+      description:
+        "Sheet này được nhận diện là phần hướng dẫn, không phải dữ liệu vận hành và không nhập vào hệ thống.",
+    };
+
+    return (
+      <div className="sheet-feedback-panel" aria-label={`Thông tin bảng ${sheet.sheetName}`}>
+        <div className="sheet-feedback-item feedback-info">
+          <div className="feedback-item-header">
+            <Info size={17} className="feedback-icon" aria-hidden="true" />
+            <div className="feedback-item-text">
+              <strong>{readmeItem.title}</strong>
+              <p>{readmeItem.description}</p>
+            </div>
+            <span className="feedback-badge badge-info">Bỏ qua</span>
+          </div>
+          {readmeItem.rawMessage ? (
+            <details className="mapping-tech-details">
+              <summary>Xem chi tiết kỹ thuật</summary>
+              <div className="mapping-tech-details-body">
+                <div className="tech-detail-row">
+                  <span>Thông điệp gốc:</span>
+                  <code>{readmeItem.rawMessage}</code>
+                </div>
+                {readmeItem.reasonCode ? (
+                  <div className="tech-detail-row">
+                    <span>Mã lý do:</span>
+                    <code>{readmeItem.reasonCode}</code>
+                  </div>
+                ) : null}
+              </div>
+            </details>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  // If no items and fully mapped
+  if (items.length === 0 && validation?.fullyMapped) {
+    return (
+      <div className="sheet-feedback-panel" aria-label={`Trạng thái ghép cột cho ${sheet.sheetName}`}>
+        <div className="sheet-feedback-item feedback-success">
+          <div className="feedback-item-header">
+            <CheckCircle2 size={17} className="feedback-icon" aria-hidden="true" />
+            <div className="feedback-item-text">
+              <strong>Tất cả cột của bảng này đã được ghép hợp lệ</strong>
+              <p>
+                Bảng đã có đầy đủ các trường bắt buộc và cấu trúc sẵn sàng để nhập.
+              </p>
+            </div>
+            <span className="feedback-badge badge-success">Đã ghép đủ</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="sheet-feedback-panel" aria-label={`Mục lưu ý và kiểm tra cho ${sheet.sheetName}`}>
+      {items.map((item) => {
+        const isSuccess = item.severity === "success";
+        const isReview = item.severity === "review";
+        const isBlocking = item.severity === "blocking";
+
+        const badgeLabel = isBlocking
+          ? "Bắt buộc"
+          : isReview
+            ? "Cần kiểm tra"
+            : isSuccess
+              ? "Đã ánh xạ"
+              : "Thông tin";
+
+        const badgeClass = isBlocking
+          ? "badge-blocking"
+          : isReview
+            ? "badge-review"
+            : isSuccess
+              ? "badge-success"
+              : "badge-info";
+
+        const itemClass = isBlocking
+          ? "feedback-blocking"
+          : isReview
+            ? "feedback-review"
+            : isSuccess
+              ? "feedback-success"
+              : "feedback-info";
+
+        const IconComponent = isBlocking
+          ? XCircle
+          : isReview
+            ? AlertTriangle
+            : isSuccess
+              ? CheckCircle2
+              : Info;
+
+        const hasTechDetails = Boolean(
+          item.rawMessage ||
+            item.columnName ||
+            item.targetField ||
+            item.confidence != null ||
+            item.reasonCode,
+        );
+
+        return (
+          <div className={cn("sheet-feedback-item", itemClass)} key={item.id}>
+            <div className="feedback-item-header">
+              <IconComponent size={17} className="feedback-icon" aria-hidden="true" />
+              <div className="feedback-item-text">
+                <strong>{item.title}</strong>
+                {item.description ? <p>{item.description}</p> : null}
+              </div>
+              <span className={cn("feedback-badge", badgeClass)}>{badgeLabel}</span>
+            </div>
+
+            {hasTechDetails ? (
+              <details className="mapping-tech-details">
+                <summary>Xem chi tiết kỹ thuật</summary>
+                <div className="mapping-tech-details-body">
+                  {item.rawMessage ? (
+                    <div className="tech-detail-row">
+                      <span>Thông điệp gốc:</span>
+                      <code>{item.rawMessage}</code>
+                    </div>
+                  ) : null}
+                  {item.columnName ? (
+                    <div className="tech-detail-row">
+                      <span>Cột nguồn:</span>
+                      <code>{item.columnName}</code>
+                    </div>
+                  ) : null}
+                  {item.targetField ? (
+                    <div className="tech-detail-row">
+                      <span>Trường chuẩn:</span>
+                      <code>{item.targetField}</code>
+                    </div>
+                  ) : null}
+                  {item.confidence != null ? (
+                    <div className="tech-detail-row">
+                      <span>Độ tin cậy:</span>
+                      <code>
+                        {Math.round(
+                          item.confidence <= 1
+                            ? item.confidence * 100
+                            : item.confidence,
+                        )}
+                        %
+                      </code>
+                    </div>
+                  ) : null}
+                  {item.reasonCode ? (
+                    <div className="tech-detail-row">
+                      <span>Mã lý do:</span>
+                      <code>{item.reasonCode}</code>
+                    </div>
+                  ) : null}
+                </div>
+              </details>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -274,6 +578,7 @@ export function ImportView({
     process?: { importId: string; key: string };
   }>({});
   const [storeId, setStoreId] = useState(() => defaultStoreId?.trim() || "");
+  const [storeError, setStoreError] = useState("");
   const [forecastDate, setForecastDate] = useState(defaultForecastDate);
   const [forecastHorizon, setForecastHorizon] = useState(() =>
     clampForecastHorizon(defaultForecastHorizon),
@@ -284,6 +589,7 @@ export function ImportView({
     setPrevDefaultStoreId(defaultStoreId);
     if (defaultStoreId?.trim()) {
       setStoreId(defaultStoreId.trim());
+      setStoreError("");
     }
   }
   const [phase, setPhase] = useState<Phase>("select");
@@ -295,6 +601,8 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
   const [statusText, setStatusText] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
+  const [rawWarnings, setRawWarnings] = useState<unknown[]>([]);
+  const [rawErrors, setRawErrors] = useState<unknown[]>([]);
   const [result, setResult] = useState<IngestionResult | null>(null);
   const actionAttempts = useActionAttempts();
   const requestMgr = useRequestManager();
@@ -329,6 +637,20 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
   const selectedValidation = selected
     ? validationBySheetId.get(selected.id)
     : undefined;
+  const feedbackModel = useMemo(
+    () =>
+      buildImportFeedbackModel(
+        rawWarnings.length ? rawWarnings : warnings,
+        rawErrors.length ? rawErrors : errors,
+        mappings,
+        mappingValidation,
+      ),
+    [rawWarnings, rawErrors, warnings, errors, mappings, mappingValidation],
+  );
+  const selectedSheetFeedbackItems = useMemo(() => {
+    if (!selected) return [];
+    return feedbackModel.itemsBySheetId.get(selected.id) ?? [];
+  }, [selected, feedbackModel]);
   const usedTargetFields = useMemo(() => {
     if (!selected) return new Map<string, string>();
     return new Map(
@@ -376,8 +698,11 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
     setStatusText("");
     setWarnings([]);
     setErrors([]);
+    setRawWarnings([]);
+    setRawErrors([]);
     setResult(null);
     setActiveRequestId(null);
+    setStoreError("");
   }
 
   function addFiles(incoming: FileList | File[]) {
@@ -408,18 +733,12 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
     if (!files.length) return;
     const targetStoreId = storeId.trim() || defaultStoreId?.trim();
     if (!targetStoreId) {
-      const key = actionKey("upload");
-      const attemptId = actionAttempts.begin(key);
-      actionAttempts.fail(
-        key,
-        attemptId,
-        "Chưa xác định cửa hàng (STORE_NOT_SELECTED). Vui lòng chọn hoặc nhập mã cửa hàng.",
-      );
-      setErrors([
+      setStoreError(
         "Chưa xác định cửa hàng (STORE_NOT_SELECTED). Vui lòng nhập mã cửa hàng trước khi tải tệp.",
-      ]);
+      );
       return;
     }
+    setStoreError("");
     const fileErrors = validateImportFiles(files);
     if (fileErrors.length) {
       const key = actionKey("upload");
@@ -477,6 +796,8 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
       setCreated(response);
       setMappings(editable);
       setSelectedId(editable[0]?.id ?? "");
+      setRawWarnings(response.warnings ?? []);
+      setRawErrors(response.errors ?? []);
       setWarnings(issueMessages(response.warnings));
       setErrors(issueMessages(response.errors));
       setPhase("review");
@@ -541,6 +862,8 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
     if (!action) return;
     try {
       const response = await getImport(created.import_id);
+      setRawWarnings(response.warnings ?? []);
+      setRawErrors(response.errors ?? []);
       setWarnings(issueMessages(response.warnings));
       setErrors(issueMessages(response.errors));
       const backendStatus = normalizedImportStatus(response.status);
@@ -650,6 +973,8 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
       );
       const nextWarnings = issueMessages(response.warnings);
       const nextErrors = issueMessages(response.errors);
+      setRawWarnings(response.warnings ?? []);
+      setRawErrors(response.errors ?? []);
       setWarnings(nextWarnings);
       setErrors(nextErrors);
       if (nextErrors.length) {
@@ -721,6 +1046,8 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
         idempotencyKey: idempotency.current.process.key,
       });
       const nextErrors = issueMessages(response.errors);
+      setRawWarnings(response.warnings ?? []);
+      setRawErrors(response.errors ?? []);
       setWarnings(issueMessages(response.warnings));
       setErrors(nextErrors);
       if (normalizedImportStatus(response.status) === "failed") {
@@ -823,13 +1150,33 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
       {phase === "select" ? (
         <>
           <div className="import-config">
-            <label className="field">
+            <label className={cn("field", storeError && "field-has-error")}>
               <span>Mã cửa hàng</span>
-              <input
-                value={storeId}
-                onChange={(event) => setStoreId(event.target.value)}
-                placeholder="Ví dụ: STORE_HCM_01"
-              />
+              <div className="field-input-wrapper">
+                <input
+                  className={cn(storeError && "input-error")}
+                  value={storeId}
+                  onChange={(event) => {
+                    setStoreId(event.target.value);
+                    if (event.target.value.trim()) {
+                      setStoreError("");
+                    }
+                  }}
+                  placeholder="Ví dụ: STORE_HCM_01"
+                  aria-invalid={Boolean(storeError)}
+                  aria-describedby={storeError ? "store-id-error" : undefined}
+                />
+                {storeError ? (
+                  <span className="field-error-icon" aria-hidden="true" title="Chưa nhập mã cửa hàng">
+                    <AlertCircle size={17} />
+                  </span>
+                ) : null}
+              </div>
+              {storeError ? (
+                <span id="store-id-error" className="field-error-message" role="alert">
+                  {storeError}
+                </span>
+              ) : null}
             </label>
             <label className="field">
               <span>Ngày dự báo</span>
@@ -855,7 +1202,7 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
             </label>
           </div>
 
-          <div className="import-top">
+          <div className="import-top" data-tutorial-id="import-dropzone">
             <button
               className={cn("dropzone", busy === "upload" && "dropzone-busy")}
               disabled={Boolean(busy)}
@@ -934,7 +1281,9 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
       ) : null}
 
       {actionAttempts.entries().flatMap(([actionKey, state]) =>
-        ["error", "unknown"].includes(state.status) && state.message
+        ["error", "unknown"].includes(state.status) &&
+        state.message &&
+        !state.message.includes("STORE_NOT_SELECTED")
           ? [[actionKey, state] as const]
           : [],
       ).map(([actionKey, state]) => (
@@ -942,33 +1291,38 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
           {state.message}
         </Notice>
       ))}
-      {warnings.map((warning) => (
-        <Notice tone="warning" key={warning}>
-          {warning}
-        </Notice>
-      ))}
-      {errors.map((item) => (
-        <Notice tone="error" key={item}>
-          {item}
-        </Notice>
-      ))}
-
-      {phase !== "select" && created ? (
+      {phase === "select" ? (
         <>
-          <div className="import-meta">
-            <Button
-              variant="quiet"
-              busy={busy === "status"}
-              onClick={() => void refreshStatus()}
-            >
-              <RefreshCw size={13} />
-              Đồng bộ
-            </Button>
-          </div>
-
-          {statusText ? <p className="quiet-help">{statusText}</p> : null}
+          {errors
+            .filter((item) => !item.includes("STORE_NOT_SELECTED"))
+            .map((item) => (
+              <Notice tone="error" key={item}>
+                {item}
+              </Notice>
+            ))}
         </>
       ) : null}
+
+      {(phase === "review" || phase === "confirmed") ? (
+        <ImportSummaryBanner
+          summary={feedbackModel.summary}
+          onViewDetails={() => {
+            const el = document.getElementById("import-sheet-section");
+            el?.scrollIntoView({ behavior: "smooth" });
+          }}
+        />
+      ) : null}
+
+      {(phase === "review" || phase === "confirmed") &&
+        feedbackModel.items
+          .filter((i) => i.severity === "blocking" && !i.sheetId)
+          .map((item) => (
+            <Notice tone="error" key={item.id}>
+              {item.title}: {item.description}
+            </Notice>
+          ))}
+
+      {statusText ? <p className="quiet-help">{statusText}</p> : null}
 
       {(phase === "review" || phase === "confirmed") && selected ? (
         <>
@@ -997,9 +1351,10 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
               }
             />
           </div>
-          <div className="sheet-grid">
+          <div className="sheet-grid" id="import-sheet-section">
             {mappings.map((item) => {
               const validation = validationBySheetId.get(item.id);
+              const sheetFeedback = feedbackModel.itemsBySheetId.get(item.id);
               return (
                 <ImportSheetCard
                   key={item.id}
@@ -1007,6 +1362,7 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
                   validation={validation}
                   selected={item.id === selected.id}
                   onSelect={() => setSelectedId(item.id)}
+                  feedbackItems={sheetFeedback}
                 />
               );
             })}
@@ -1044,53 +1400,15 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
             />
           </div>
 
-          {selectedValidation?.unknownSheetType ? (
-            <Notice tone="info">
-              Bảng này chưa xác định được loại dữ liệu và sẽ được bỏ qua.
-            </Notice>
-          ) : null}
+          <SheetFeedbackPanel
+            sheet={selected}
+            validation={selectedValidation}
+            items={selectedSheetFeedbackItems}
+          />
 
           {!selectedValidation?.unknownSheetType ? (
             <>
               <SectionHeading title="Ghép cột" />
-              {selectedValidation?.unresolvedColumns.length ? (
-                <Notice tone="info">
-                  Có {selectedValidation.unresolvedColumns.length} cột không được
-                  nhập:{" "}
-                  <strong>
-                    {selectedValidation.unresolvedColumns.join(", ")}
-                  </strong>
-                  .
-                </Notice>
-              ) : null}
-              {selectedValidation?.missingCoreFields.length ? (
-                <Notice tone="error">
-                  Thiếu trường bắt buộc:{" "}
-                  <strong>
-                    {selectedValidation.missingCoreFields
-                      .map(canonicalFieldLabel)
-                      .join(", ")}
-                  </strong>
-                  . Hãy ghép một cột nguồn với từng trường này.
-                </Notice>
-              ) : null}
-              {selectedValidation?.duplicateFields.length ? (
-                <Notice tone="error">
-                  Mỗi trường chuẩn chỉ được dùng một lần. Các trường đang bị
-                  trùng:{" "}
-                  <strong>
-                    {selectedValidation.duplicateFields
-                      .map(canonicalFieldLabel)
-                      .join(", ")}
-                  </strong>
-                  .
-                </Notice>
-              ) : null}
-              {selectedValidation?.fullyMapped ? (
-                <Notice tone="success">
-                  Tất cả cột của bảng này đã được ghép hợp lệ.
-                </Notice>
-              ) : null}
               <div className="mapping-grid">
                 {selected.columns.map((column) => {
                   const selectedField =
@@ -1191,19 +1509,32 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
                   )}
                   role="status"
                 >
-                  <span>
-                    <strong>
-                      {mappingValidation.mappedColumns}/
-                      {mappingValidation.totalColumns} cột đã ghép
-                    </strong>
-                    <small>
-                      {mappingValidation.fullyMapped
-                        ? "Tất cả cột đã được ghép."
-                        : mappingValidation.complete
-                          ? `Đủ trường bắt buộc; còn ${mappingValidation.unresolvedColumns} cột chưa ghép.`
-                        : `Còn ${mappingValidation.incompleteSheets} bảng dữ liệu cần hoàn tất.`}
-                    </small>
-                  </span>
+                  <div className="mapping-progress-copy">
+                    <div className="mapping-progress-header">
+                      <span className="mapping-progress-label">Chuẩn bị dữ liệu</span>
+                      <strong>
+                        {mappingValidation.mappedColumns} / {mappingValidation.totalColumns} cột đã ghép
+                      </strong>
+                    </div>
+                    <div className="mapping-progress-stats">
+                      <span className="progress-stat-ready">
+                        {feedbackModel.summary.readySheets} bảng sẵn sàng
+                      </span>
+                      {feedbackModel.summary.reviewSheets > 0 ? (
+                        <span className="progress-stat-review">
+                          {feedbackModel.summary.reviewSheets} bảng cần kiểm tra
+                        </span>
+                      ) : feedbackModel.summary.blockedSheets > 0 ? (
+                        <span className="progress-stat-blocked">
+                          {feedbackModel.summary.blockedSheets} bảng thiếu trường bắt buộc
+                        </span>
+                      ) : (
+                        <span className="progress-stat-done">
+                          Tất cả bảng hợp lệ
+                        </span>
+                      )}
+                    </div>
+                  </div>
                   <progress
                     max={Math.max(mappingValidation.totalColumns, 1)}
                     value={mappingValidation.mappedColumns}
@@ -1237,16 +1568,22 @@ const [created, setCreated] = useState<ImportCreateResponse | null>(null);
                     Boolean(busy) ||
                     !checked ||
                     !mappingValidation.complete ||
+                    feedbackModel.summary.hasBlockingIssues ||
                     Boolean(errors.length)
                   }
                   title={
-                    mappingValidation.complete
+                    mappingValidation.complete && !feedbackModel.summary.hasBlockingIssues
                       ? undefined
                       : "Cần đủ trường bắt buộc và không được trùng trường chuẩn"
                   }
                   onClick={() => void confirmMappings()}
                 >
-                  Xác nhận ghép cột
+                  {mappingValidation.complete &&
+                  !feedbackModel.summary.hasBlockingIssues &&
+                  (feedbackModel.summary.reviewItemsCount > 0 ||
+                    mappingValidation.unresolvedColumns > 0)
+                    ? "Xác nhận và tiếp tục"
+                    : "Xác nhận ghép cột"}
                 </Button>
               </div>
             </>

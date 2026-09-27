@@ -60,6 +60,7 @@ import {
   parseMoneyInput,
 } from "../components/ui";
 import { useActionAttempts } from "../hooks/useActionAttempts";
+import { useTutorial } from "../components/tutorial/TutorialContext";
 import type { SimulationProgress } from "../../lib/simulation-orchestration";
 
 interface StrategyOption {
@@ -311,7 +312,7 @@ export function PlanView({
   onRunWhatIf,
   strategy,
   initialIngredient,
-  draftOrders,
+  draftOrders = [],
   ordersPagination,
   onRunPlanning,
   onTrainModel,
@@ -338,9 +339,9 @@ export function PlanView({
   whatIfLoading?: boolean;
   whatIfError?: string | null;
   onRunWhatIf?: (mutation: WhatIfRequest) => void;
-  strategy: Strategy;
+  strategy?: Strategy;
   initialIngredient?: string;
-  draftOrders: PurchaseOrder[];
+  draftOrders?: PurchaseOrder[];
   ordersPagination?: { page: number; pageSize: number; total: number };
   onRunPlanning: (input: SimulationRunInput) => Promise<void>;
   onTrainModel?: (modelVersion: string, historyDays: number) => Promise<void>;
@@ -357,6 +358,7 @@ export function PlanView({
   onReceiveOrder: (poId: string, input: ReceiveOrderInput) => Promise<void>;
   focus?: "future" | "simulator" | "plan" | "orders";
 }) {
+  const { triggerAction } = useTutorial();
   const [horizonDays, setHorizonDays] = useState(
     clampHorizon(plan.horizonDays ?? data.settings.forecastHorizon),
   );
@@ -617,6 +619,7 @@ export function PlanView({
 
   async function createOrders() {
     const attemptId = actionAttempts.begin(createOrdersAction);
+    triggerAction("draft-po-button", "click");
     try {
       const orders = await onCreateOrders(eligibleRecommendations);
       if (!actionAttempts.isCurrent(createOrdersAction, attemptId)) return;
@@ -813,6 +816,7 @@ export function PlanView({
           onRunAgain={onResetPlanning ?? (() => void runPlanning())}
           onRunWhatIf={onRunWhatIf ?? (() => undefined)}
           onRetry={onRetryBrief ?? (() => undefined)}
+          onCreateOrders={() => void createOrders()}
           decision={decision}
           data={data}
           appliedBudget={
@@ -865,10 +869,10 @@ export function PlanView({
           context={`${data.settings.storeName} · ${cutoffDate} · ${horizonDays} ngày`}
           action={<Button variant="primary" busy={isRunning} onClick={() => void runPlanning()} aria-label="Chạy mô phỏng"><Play size={16} />{isRunning ? "Đang chạy mô phỏng…" : "Chạy mô phỏng"}</Button>}
         />
-        <div className="plan-controls">
-          <label className="field"><span>Ngày chốt dữ liệu</span><input type="date" disabled={isRunning} value={cutoffDate} onChange={(event) => { setCutoffDate(event.target.value); setControlsDirty(true); }} /></label>
+        <div className="plan-controls" data-tutorial-id="decision-controls">
+          <label className="field" data-tutorial-id="decision-cutoff-date"><span>Ngày chốt dữ liệu</span><input type="date" disabled={isRunning} value={cutoffDate} onChange={(event) => { setCutoffDate(event.target.value); setControlsDirty(true); }} /></label>
           <label className="field"><span>Số ngày mô phỏng (1–7)</span><input type="number" min="1" max="7" step="1" disabled={isRunning} value={horizonDays} onChange={(event) => { setHorizonDays(clampHorizon(Number(event.target.value))); setControlsDirty(true); }} /></label>
-          <label className="field">
+          <label className="field" data-tutorial-id="decision-budget">
             <span>Ngân sách tối đa</span>
             <input
               type="text"
@@ -897,7 +901,7 @@ export function PlanView({
               }}
             />
           </label>
-          <label className="field">
+          <label className="field" data-tutorial-id="decision-engine-mode">
             <span>Chế độ mô phỏng</span>
             <select
               disabled={isRunning}
@@ -940,8 +944,8 @@ export function PlanView({
           context={`${data.settings.storeName} · ${cutoffDate}`}
         />
 
-        <div className="plan-controls" id="simulation-run">
-          <label className="field">
+        <div className="plan-controls" id="simulation-run" data-tutorial-id="decision-controls">
+          <label className="field" data-tutorial-id="decision-cutoff-date">
             <span>Ngày chốt dữ liệu forecast</span>
             <input
               type="date"
@@ -968,7 +972,7 @@ export function PlanView({
               }}
             />
           </label>
-          <label className="field">
+          <label className="field" data-tutorial-id="decision-budget">
             <span>Ngân sách tối đa</span>
             <input
               type="text"
@@ -997,7 +1001,7 @@ export function PlanView({
               }}
             />
           </label>
-          <label className="field">
+          <label className="field" data-tutorial-id="decision-engine-mode">
             <span>Chế độ mô phỏng</span>
             <select
               disabled={runBusy}
@@ -1117,7 +1121,7 @@ export function PlanView({
         }
       />
 
-      <div className="plan-controls" id="simulation-run">
+      <div className="plan-controls" id="simulation-run" data-tutorial-id="decision-controls">
         <label className="field">
           <span>Ngày chốt dữ liệu forecast</span>
           <input
@@ -1676,6 +1680,7 @@ export function PlanView({
         </label>
         <Button
           variant="primary"
+          data-tutorial-id="draft-po-button"
           busy={actionAttempts.get(createOrdersAction)?.status === "loading"}
           disabled={
             plan.status !== "completed" ||

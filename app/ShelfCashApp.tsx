@@ -17,7 +17,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   adaptBootstrap,
   adaptOrders,
@@ -114,6 +114,7 @@ import { PlanView, type SimulationRunInput } from "./views/PlanView";
 import { RecipesView, type ComboComponentsSaveResult, type RecipeSaveOptions } from "./views/RecipesView";
 import { SettingsView } from "./views/SettingsView";
 import { OpportunityView } from "./views/OpportunityView";
+import { getOpportunityMode } from "../lib/opportunity/config";
 import { LoginView } from "./views/LoginView";
 import { StaffShell } from "./components/staff/StaffShell";
 import { SubscriptionModal } from "./components/SubscriptionModal";
@@ -124,8 +125,24 @@ import {
   SUBSCRIPTION_PLANS,
 } from "../lib/subscriptions";
 import { getStoredSession, saveSession, clearSession, type UserSession } from "../lib/auth";
-import { getOpportunityMode } from "../lib/opportunity/config";
 import { ForecastBenchmark } from "./components/forecast/ForecastBenchmark";
+import {
+  TutorialProvider,
+  useTutorial,
+} from "./components/tutorial/TutorialContext";
+import { TutorialOverlay } from "./components/tutorial/TutorialOverlay";
+import { TutorialWelcomeCard } from "./components/tutorial/TutorialWelcomeCard";
+import { TutorialCompletionCard } from "./components/tutorial/TutorialCompletionCard";
+import { TutorialBanner } from "./components/tutorial/TutorialBanner";
+import { HelpMenu } from "./components/tutorial/HelpMenu";
+import {
+  getTutorialBootstrapData,
+  getTutorialDecisionPackage,
+  getTutorialDecisionBrief,
+  getTutorialPlanResponse,
+  getTutorialDraftOrders,
+  getTutorialWhatIfResponse,
+} from "../lib/tutorial/tutorial-fixture";
 
 type PageKey =
   | "today"
@@ -338,7 +355,7 @@ function retryableTransportFailure(caught: unknown): boolean {
   );
 }
 
-export function ShelfCashApp({
+function ShelfCashAppContent({
   initialData,
   initialDecisionIngredient = "",
   initialDecisionView = "today",
@@ -349,6 +366,16 @@ export function ShelfCashApp({
   initialDecisionView?: "today" | "future";
   initialPlan: PlanResponse;
 }) {
+  const { mode, isActive, currentStep } = useTutorial();
+  const isTutorial = mode === "tutorial";
+
+  const tutorialBootstrapData = useMemo(() => getTutorialBootstrapData(), []);
+  const tutorialDecisionPackage = useMemo(() => getTutorialDecisionPackage(tutorialBootstrapData), [tutorialBootstrapData]);
+  const tutorialDecisionBrief = useMemo(() => getTutorialDecisionBrief(), []);
+  const tutorialPlanResponse = useMemo(() => getTutorialPlanResponse(tutorialBootstrapData), [tutorialBootstrapData]);
+  const [tutorialOrders, setTutorialOrders] = useState<PurchaseOrder[]>([]);
+  const [tutorialWhatIf, setTutorialWhatIf] = useState<WhatIfResponse | null>(null);
+
   const [isMounted, setIsMounted] = useState(false);
   const [session, setSession] = useState<UserSession | null>(null);
   const [page, setPage] = useState<PageKey>(initialDecisionView);
@@ -381,6 +408,12 @@ export function ShelfCashApp({
   const [decisionIngredient, setDecisionIngredient] = useState("");
   const [decisionCenterIngredient, setDecisionCenterIngredient] = useState(initialDecisionIngredient);
 
+  const displayData = isTutorial ? tutorialBootstrapData : data;
+  const displayPlan = isTutorial ? tutorialPlanResponse : plan;
+  const displayDecision = isTutorial ? tutorialDecisionPackage : decision;
+  const displayBrief = isTutorial ? tutorialDecisionBrief : decisionBrief;
+  const displayWhatIf = isTutorial ? (tutorialWhatIf ?? getTutorialWhatIfResponse()) : decisionWhatIf;
+
   function navigateDecisionCenter(
     view: "today" | "future",
     ingredientId?: string,
@@ -395,7 +428,28 @@ export function ShelfCashApp({
     window.history.pushState({}, "", url);
   }
 
+  // Auto-sync page navigation with tutorial guided steps
+  useEffect(() => {
+    if (!isActive || !currentStep) return;
+    if (currentStep.targetPage === "today" || currentStep.targetPage === "future") {
+      navigateDecisionCenter(currentStep.targetActiveView ?? (currentStep.targetPage === "future" ? "future" : "today"));
+    } else if (currentStep.targetPage) {
+      setPage(currentStep.targetPage);
+    }
+  }, [isActive, currentStep]);
+
+  // Cleanly restore view to today when exiting tutorial
+  const prevIsTutorial = useRef(isTutorial);
+  useEffect(() => {
+    if (prevIsTutorial.current && !isTutorial) {
+      setPage("today");
+      navigateDecisionCenter("today");
+    }
+    prevIsTutorial.current = isTutorial;
+  }, [isTutorial]);
+
   async function loadDecisionBrief(decisionRunId: string, signal?: AbortSignal) {
+    if (isTutorial) return tutorialDecisionBrief;
     const active = briefLoadRef.current;
     if (active?.decisionRunId === decisionRunId) return active.promise;
     const requestSequence = ++briefRequestSequence.current;
@@ -458,6 +512,14 @@ export function ShelfCashApp({
   }
 
   async function requestDecisionWhatIf(mutation: WhatIfRequest) {
+    if (isTutorial) {
+      setWhatIfLoading(true);
+      setWhatIfError(null);
+      const simulated = getTutorialWhatIfResponse(mutation);
+      setTutorialWhatIf(simulated);
+      setWhatIfLoading(false);
+      return;
+    }
     if (!decision?.decision_run_id) return;
     setWhatIfLoading(true);
     setWhatIfError(null);
@@ -499,6 +561,7 @@ export function ShelfCashApp({
   }, [data.settings.storeId]);
 
   useEffect(() => {
+    if (isTutorial) return;
     const storeId = data.settings.storeId;
     if (!storeId) return;
     const decisionRunId = window.localStorage.getItem(`shelfcash:decision-run:${storeId}`);
@@ -538,6 +601,7 @@ export function ShelfCashApp({
   );
   const [planIngredient, setPlanIngredient] = useState("");
   const [draftOrders, setDraftOrders] = useState<PurchaseOrder[]>([]);
+  const displayDraftOrders = isTutorial ? (tutorialOrders.length > 0 ? tutorialOrders : getTutorialDraftOrders()) : draftOrders;
   const [ordersPagination, setOrdersPagination] = useState<{
     page: number;
     pageSize: number;
@@ -1260,6 +1324,12 @@ export function ShelfCashApp({
     scenarioCount,
     onProgress,
   }: SimulationRunInput): Promise<void> {
+    if (isTutorial) {
+      onProgress?.(50, "Đang tính toán phân bổ mẫu…");
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      onProgress?.(100, "Hoàn tất mô phỏng mẫu.");
+      return;
+    }
     if (!data.settings.storeId.trim()) {
       throw new Error("Hãy cấu hình hoặc import một store trước.");
     }
@@ -1332,6 +1402,11 @@ export function ShelfCashApp({
   async function createOrdersFromPlan(
     recommendations: typeof plan.recommendations,
   ): Promise<PurchaseOrder[]> {
+    if (isTutorial) {
+      const simulatedOrders = getTutorialDraftOrders();
+      setTutorialOrders(simulatedOrders);
+      return simulatedOrders;
+    }
     if (
       !plan.forecastRunId ||
       !plan.cutoffDate ||
@@ -1716,7 +1791,7 @@ export function ShelfCashApp({
     }
   }
 
-  const hasStore = Boolean(data.settings.storeId.trim());
+  const hasStore = isTutorial || Boolean(displayData.settings.storeId.trim());
   const selectedPage = (() => {
     if (!hasStore && page !== "today" && page !== "import") {
       return (
@@ -1730,17 +1805,17 @@ export function ShelfCashApp({
         return (
           <DecisionCenterWorkspace
             activeView="today"
-            data={data}
-            decision={decision}
-            brief={decisionBrief}
-            briefLoading={briefLoading}
-            briefError={briefError}
+            data={displayData}
+            decision={displayDecision}
+            brief={displayBrief}
+            briefLoading={isTutorial ? false : briefLoading}
+            briefError={isTutorial ? null : briefError}
             initialIngredient={decisionCenterIngredient}
             onNavigate={(target) =>
               target === "plan" ? openPlan() : setPage("inventory")
             }
             onViewChange={navigateDecisionCenter}
-            plan={plan}
+            plan={displayPlan}
           />
         );
       case "import":
@@ -1787,17 +1862,17 @@ export function ShelfCashApp({
         return (
           <DecisionCenterWorkspace
             activeView="future"
-            data={data}
-            decision={decision}
-            brief={decisionBrief}
-            briefLoading={briefLoading}
-            briefError={briefError}
+            data={displayData}
+            decision={displayDecision}
+            brief={displayBrief}
+            briefLoading={isTutorial ? false : briefLoading}
+            briefError={isTutorial ? null : briefError}
             initialIngredient={decisionCenterIngredient}
             onNavigate={(target) =>
               target === "plan" ? openPlan() : setPage("inventory")
             }
             onViewChange={navigateDecisionCenter}
-            plan={plan}
+            plan={displayPlan}
           />
         );
       case "simulator":
@@ -1805,12 +1880,12 @@ export function ShelfCashApp({
       case "orders":
         return (
           <PlanView
-            data={data}
-            plan={plan}
-            decision={decision}
-            decisionBrief={decisionBrief}
-            briefLoading={briefLoading}
-            briefError={briefError}
+            data={displayData}
+            plan={displayPlan}
+            decision={displayDecision}
+            decisionBrief={displayBrief}
+            briefLoading={isTutorial ? false : briefLoading}
+            briefError={isTutorial ? null : briefError}
             onRetryBrief={() => {
               if (decision?.decision_run_id) void loadDecisionBrief(decision.decision_run_id);
             }}
@@ -1818,13 +1893,13 @@ export function ShelfCashApp({
             explanationLoading={explanationLoading}
             explanationError={explanationError}
             onExplainDecision={(request) => void requestDecisionExplanation(request)}
-            decisionWhatIf={decisionWhatIf}
+            decisionWhatIf={displayWhatIf}
             whatIfLoading={whatIfLoading}
             whatIfError={whatIfError}
             onRunWhatIf={(mutation) => void requestDecisionWhatIf(mutation)}
             strategy={strategy}
             initialIngredient={planIngredient}
-            draftOrders={draftOrders}
+            draftOrders={displayDraftOrders}
             ordersPagination={ordersPagination}
             onRunPlanning={runPlanning}
             onTrainModel={trainModel}
@@ -1930,9 +2005,9 @@ export function ShelfCashApp({
         </div>
         <label className="store-select">
           <span>Cửa hàng</span>
-          <select value={data.settings.storeId} disabled>
-            <option value={data.settings.storeId}>
-              {data.settings.storeName}
+          <select value={displayData.settings.storeId} disabled>
+            <option value={displayData.settings.storeId}>
+              {displayData.settings.storeName}
             </option>
           </select>
         </label>
@@ -1957,7 +2032,7 @@ export function ShelfCashApp({
           ) : null}
           <small>
             <CalendarClock aria-hidden="true" size={15} />
-            Hôm nay · {data.today.split("-").reverse().join("/")}
+            Hôm nay · {displayData.today.split("-").reverse().join("/")}
           </small>
         </div>
         {session ? (
@@ -2037,16 +2112,19 @@ export function ShelfCashApp({
               </div>
             </div>
             <div className="top-header-trailing">
-              <span className="store-pill" title={data.settings.storeName}>
+              <HelpMenu />
+              <span className="store-pill" title={displayData.settings.storeName}>
                 <Store aria-hidden="true" size={15} />
-                <strong>{data.settings.storeName}</strong>
+                <strong>{displayData.settings.storeName}</strong>
               </span>
             </div>
           </div>
         </header>
 
+        <TutorialBanner />
+
         <main className="main-content" tabIndex={-1}>
-          {hasStore && connection?.service === "offline" ? (
+          {hasStore && !isTutorial && connection?.service === "offline" ? (
             <Notice tone="warning">
               Không thể kết nối dịch vụ. Dữ liệu đang hiển thị có thể chưa phải bản mới nhất.
             </Notice>
@@ -2061,10 +2139,10 @@ export function ShelfCashApp({
             aria-hidden={page !== "import"}
           >
             <ImportView
-              store={data.settings.storeName}
-              defaultStoreId={data.settings.storeId}
-              defaultForecastDate={data.today}
-              defaultForecastHorizon={data.settings.forecastHorizon}
+              store={displayData.settings.storeName}
+              defaultStoreId={displayData.settings.storeId}
+              defaultForecastDate={displayData.today}
+              defaultForecastHorizon={displayData.settings.forecastHorizon}
               connection={connection}
               files={importDraftFiles}
               setFiles={setImportDraftFiles}
@@ -2074,6 +2152,10 @@ export function ShelfCashApp({
           </section>
           {page === "import" ? null : selectedPage}
         </main>
+
+        <TutorialWelcomeCard onOpenImport={() => setPage("import")} />
+        <TutorialCompletionCard onOpenImport={() => setPage("import")} />
+        <TutorialOverlay />
       </div>
 
       {decisionIngredient ? (
@@ -2243,3 +2325,27 @@ export function ShelfCashApp({
     </div>
   );
 }
+
+export function ShelfCashApp(props: {
+  initialData: BootstrapData;
+  initialDecisionIngredient?: string;
+  initialDecisionView?: "today" | "future";
+  initialPlan: PlanResponse;
+}) {
+  const hasMeaningfulActivity = Boolean(
+    (props.initialData.inventory &&
+      props.initialData.inventory.length > 0 &&
+      props.initialData.settings?.storeId &&
+      props.initialData.settings.storeId !== "STORE_001") ||
+      (props.initialPlan &&
+        props.initialPlan.recommendations &&
+        props.initialPlan.recommendations.length > 0)
+  );
+
+  return (
+    <TutorialProvider hasMeaningfulActivity={hasMeaningfulActivity}>
+      <ShelfCashAppContent {...props} />
+    </TutorialProvider>
+  );
+}
+

@@ -15,6 +15,8 @@ import type {
   DecisionBriefFacts,
   DecisionExplanationResponse,
   ExplanationRequest,
+  ExplanationSuccess,
+  ApiError,
   WhatIfRequest,
   WhatIfResponse,
   DecisionPackage,
@@ -286,14 +288,101 @@ export async function getDecisionBrief(
   return request<DecisionBriefFacts>(`${decisionPath(decisionRunId)}/brief`, options);
 }
 
+export type ExplanationTransportResult =
+  | {
+      status: 200;
+      body: ExplanationSuccess;
+    }
+  | {
+      status: 422;
+      body: ApiError;
+    }
+  | {
+      status: 404;
+      body?: ApiError;
+    }
+  | {
+      status: 503;
+      body?: ApiError;
+    }
+  | {
+      status: "network_error";
+      error: Error;
+      body?: ApiError;
+    };
+
+export async function postExplanation(
+  decisionRunId: string,
+  explanation: ExplanationRequest,
+  options: MutationOptions = {},
+): Promise<ExplanationTransportResult> {
+  try {
+    const data = await request<ExplanationSuccess>(
+      `${decisionPath(decisionRunId)}/explanation`,
+      jsonRequest("POST", explanation, options),
+    );
+    return {
+      status: 200,
+      body: data,
+    };
+  } catch (caught) {
+    if (caught instanceof ShelfCashApiError) {
+      const apiErr: ApiError = {
+        code: caught.code,
+        message: caught.message,
+        details: caught.details,
+        request_id: caught.request_id || caught.requestId || "",
+      };
+      if (caught.status === 422) {
+        return {
+          status: 422,
+          body: apiErr,
+        };
+      }
+      if (caught.status === 404) {
+        return {
+          status: 404,
+          body: apiErr,
+        };
+      }
+      if (caught.status === 503) {
+        return {
+          status: 503,
+          body: apiErr,
+        };
+      }
+      return {
+        status: (caught.status === 404 || caught.status === 503 ? caught.status : 503) as 404 | 503,
+        body: apiErr,
+      };
+    }
+    return {
+      status: "network_error",
+      error: caught instanceof Error ? caught : new Error(String(caught)),
+    };
+  }
+}
+
 export async function explainDecision(
   decisionRunId: string,
   explanation: ExplanationRequest,
   options: MutationOptions = {},
 ): Promise<DecisionExplanationResponse> {
-  return request<DecisionExplanationResponse>(
-    `${decisionPath(decisionRunId)}/explanation`,
-    jsonRequest("POST", explanation, options),
+  const result = await postExplanation(decisionRunId, explanation, options);
+  if (result.status === 200) {
+    return result.body;
+  }
+  if (result.status === "network_error") {
+    throw result.error;
+  }
+  throw new ShelfCashApiError(
+    result.body ?? {
+      code: `HTTP_${result.status}`,
+      message: "Không thể kết nối ShelfCash backend.",
+      details: {},
+      request_id: "",
+    },
+    typeof result.status === "number" ? result.status : 500,
   );
 }
 
