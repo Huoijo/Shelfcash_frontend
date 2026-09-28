@@ -13,16 +13,13 @@ import {
   GitCompare,
   Info,
   Layers,
-  Package,
   RefreshCw,
-  Send,
   ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Truck,
   X,
-  XCircle,
 } from "lucide-react";
 import { useId, useMemo, useState, type FormEvent } from "react";
 import {
@@ -2227,12 +2224,18 @@ export function DecisionBriefWorkspace({
       {brief.recommendation.summary || brief.assistant_summary || brief.presented_warnings?.length ? (
         <section className="cockpit-plan-summary-section" aria-labelledby="plan-summary-title">
           <div className="plan-summary-card">
+            {/* Summary Card Header */}
             <div className="plan-summary-card-header">
               <div className="plan-summary-header-left">
                 <FileText size={18} style={{ color: "#147a62" }} />
-                <h2 id="plan-summary-title" className="plan-summary-title">
-                  TỔNG QUAN & TÓM TẮT KẾ HOẠCH
-                </h2>
+                <div>
+                  <h2 id="plan-summary-title" className="plan-summary-title">
+                    TỔNG QUAN & TÓM TẮT KẾ HOẠCH
+                  </h2>
+                  <p className="plan-summary-subtitle">
+                    Theo dõi theo thứ tự: 1. Đề xuất chính → 2. Điểm trọng tâm → 3. Cảnh báo vận hành
+                  </p>
+                </div>
               </div>
               {brief.assistant_summary?.source ? (
                 <span className="summary-provenance-tag">
@@ -2241,54 +2244,110 @@ export function DecisionBriefWorkspace({
               ) : null}
             </div>
 
-            {brief.recommendation.summary ? (
-              <div className="plan-decision-summary-box">
-                <strong className="summary-section-label">Tóm tắt quyết định:</strong>
-                <p className="summary-decision-text">{brief.recommendation.summary}</p>
-              </div>
-            ) : null}
-
-            {brief.assistant_summary ? (
-              <div className="plan-assistant-narrative-box">
-                {brief.assistant_summary.headline ? (
-                  <h3 className="assistant-narrative-headline">{brief.assistant_summary.headline}</h3>
-                ) : null}
-                {brief.assistant_summary.summary ? (
-                  <p className="assistant-narrative-body">{brief.assistant_summary.summary}</p>
-                ) : null}
-                {brief.assistant_summary.key_points?.length ? (
-                  <div className="assistant-key-points-wrap">
-                    <span className="key-points-label">Các điểm trọng tâm:</span>
-                    <ul className="assistant-key-points-list">
-                      {brief.assistant_summary.key_points.map((point, idx) => (
-                        <li key={idx}>{point}</li>
-                      ))}
-                    </ul>
+            <div className="plan-summary-flow-container">
+              {/* BƯỚC 1: ĐỀ XUẤT CỐT LÕI */}
+              {(brief.assistant_summary?.headline || brief.assistant_summary?.summary || brief.recommendation.summary) ? (
+                <div className="summary-flow-step step-primary">
+                  <div className="flow-step-header">
+                    <span className="step-num-badge">1</span>
+                    <span className="step-title-text">Đề xuất kế hoạch cốt lõi</span>
                   </div>
-                ) : null}
-                {brief.assistant_summary.warning_summary ? (
-                  <div className="assistant-warning-callout">
-                    <AlertTriangle size={15} />
-                    <span>{brief.assistant_summary.warning_summary}</span>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
 
-            {brief.presented_warnings?.length ? (
-              <div className="presented-warnings-list">
-                <span className="warnings-section-label">Lưu ý quản lý:</span>
-                {brief.presented_warnings.map((w, idx) => (
-                  <Notice
-                    key={`${w.code}-${idx}`}
-                    tone={w.severity === "critical" ? "error" : w.severity === "warning" ? "warning" : "info"}
-                  >
-                    <strong>{w.title}</strong>
-                    <p style={{ margin: "4px 0 0" }}>{w.message}</p>
-                  </Notice>
-                ))}
-              </div>
-            ) : null}
+                  <div className="step-content-body">
+                    {brief.assistant_summary?.headline ? (
+                      <h3 className="assistant-narrative-headline">{brief.assistant_summary.headline}</h3>
+                    ) : brief.recommendation.summary ? (
+                      <h3 className="assistant-narrative-headline">{brief.recommendation.summary}</h3>
+                    ) : null}
+
+                    {brief.assistant_summary?.summary ? (
+                      <p className="assistant-narrative-body">{brief.assistant_summary.summary}</p>
+                    ) : null}
+
+                    {brief.recommendation.summary ? (
+                      <div className="plan-decision-meta-pill">
+                        <span className="summary-section-label">Tóm tắt quyết định:</span>
+                        <span className="summary-decision-text">{brief.recommendation.summary}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* BƯỚC 2: TRỌNG TÂM PHÂN TÍCH */}
+              {(brief.assistant_summary?.key_points?.length || brief.assistant_summary?.warning_summary) ? (
+                <div className="summary-flow-step step-secondary">
+                  <div className="flow-step-header">
+                    <span className="step-num-badge">2</span>
+                    <span className="step-title-text">Trọng tâm phân tích & điểm cần chú ý</span>
+                  </div>
+
+                  <div className="step-content-body">
+                    {brief.assistant_summary?.warning_summary ? (
+                      <div className="assistant-warning-callout">
+                        <AlertTriangle size={15} />
+                        <div>
+                          <strong>Cảnh báo quan trọng:</strong> <span>{brief.assistant_summary.warning_summary}</span>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {brief.assistant_summary?.key_points?.length ? (
+                      <div className="assistant-key-points-wrap">
+                        <span className="key-points-label">Các điểm trọng tâm:</span>
+                        <div className="assistant-key-points-grid">
+                          {brief.assistant_summary.key_points.map((point, idx) => (
+                            <div key={idx} className="key-point-card">
+                              <span className="key-point-index">{idx + 1}</span>
+                              <span className="key-point-content">{point}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* BƯỚC 3: LƯU Ý & CẢNH BÁO QUẢN LÝ */}
+              {brief.presented_warnings?.length ? (
+                <div className="summary-flow-step step-tertiary">
+                  <div className="flow-step-header">
+                    <span className="step-num-badge">3</span>
+                    <div className="step-title-group">
+                      <span className="step-title-text">Lưu ý quản lý</span>
+                      <span className="warnings-count-pill">
+                        {brief.presented_warnings.length} lưu ý vận hành
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="step-content-body">
+                    <span className="warnings-section-label" style={{ display: "none" }}>
+                      Lưu ý quản lý:
+                    </span>
+                    <div className="presented-warnings-grid">
+                      {brief.presented_warnings.map((w, idx) => {
+                        const tone = w.severity === "critical" ? "error" : w.severity === "warning" ? "warning" : "info";
+                        return (
+                          <div key={`${w.code}-${idx}`} className={`summary-warning-card tone-${tone}`}>
+                            <div className="warning-card-header">
+                              {w.severity === "critical" ? (
+                                <ShieldAlert size={15} />
+                              ) : (
+                                <AlertTriangle size={15} />
+                              )}
+                              <strong>{w.title}</strong>
+                            </div>
+                            <p className="warning-card-message">{w.message}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
         </section>
       ) : null}
