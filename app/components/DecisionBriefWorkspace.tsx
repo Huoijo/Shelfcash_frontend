@@ -1650,7 +1650,7 @@ function WhatIfLab({
   error?: string | null;
   onRun?: (mutation: WhatIfRequest) => void;
 }) {
-  const { triggerAction } = useTutorial();
+  const { triggerAction, currentStep, nextStep } = useTutorial();
   const [demandMultiplier, setDemandMultiplier] = useState("1.1");
   const [supplierDelayDays, setSupplierDelayDays] = useState("1");
   const [budgetLimit, setBudgetLimit] = useState("");
@@ -1677,16 +1677,21 @@ function WhatIfLab({
       ...(budget === undefined ? {} : { budget_limit: budget }),
       ...(strategy ? { strategy } : {}),
     });
-    triggerAction("what-if-input", "submit");
-    triggerAction("what-if-submit", "click");
+
+    if (currentStep?.id === "what-if-open") {
+      nextStep();
+    } else {
+      triggerAction("what-if-input", "submit");
+      triggerAction("what-if-submit", "submit");
+      triggerAction("what-if-submit", "click");
+      triggerAction("what-if-button", "click");
+    }
   };
 
   return (
     <section
       className="what-if-lab-section"
       aria-labelledby="what-if-lab-title"
-      data-tutorial-id="what-if-button"
-      onClick={() => triggerAction("what-if-button", "click")}
     >
       <div className="what-if-lab-header">
         <div className="what-if-lab-title-group">
@@ -1701,7 +1706,7 @@ function WhatIfLab({
       </div>
 
       <form className="what-if-controls-form" onSubmit={submit}>
-        <div className="controls-grid">
+        <div className="controls-grid" data-tutorial-id="what-if-button">
           <label className="control-field">
             <span>Hệ số nhu cầu</span>
             <div className="input-with-hint">
@@ -1766,7 +1771,22 @@ function WhatIfLab({
         </div>
 
         <div className="controls-actions">
-          <Button busy={loading} type="submit" variant="primary" data-tutorial-id="what-if-submit">
+          <Button
+            busy={loading}
+            type="submit"
+            variant="primary"
+            data-tutorial-id="what-if-submit"
+            data-tutorial-action="true"
+            onClick={() => {
+              if (currentStep?.id === "what-if-open") {
+                nextStep();
+              } else {
+                triggerAction("what-if-submit", "submit");
+                triggerAction("what-if-submit", "click");
+                triggerAction("what-if-button", "click");
+              }
+            }}
+          >
             <SlidersHorizontal size={15} /> Chạy giả lập kịch bản
           </Button>
         </div>
@@ -2639,7 +2659,6 @@ export function DecisionBriefWorkspace({
         initialRequest={aiChatInitialRequest}
         isTutorial={isTutorial}
         loading={explanationLoading}
-        onAsk={onExplain}
         onClose={() => {
           setDrawerOpen(false);
           setAiChatInitialRequest(null);

@@ -417,7 +417,16 @@ function ShelfCashAppContent({
   const displayPlan = isTutorial ? tutorialPlanResponse : plan;
   const displayDecision = isTutorial ? tutorialDecisionPackage : decision;
   const displayBrief = isTutorial ? tutorialDecisionBrief : decisionBrief;
-  const displayWhatIf = isTutorial ? (tutorialWhatIf ?? getTutorialWhatIfResponse()) : decisionWhatIf;
+  const isWhatIfResultStepOrLater =
+    currentStep?.id === "what-if-result" ||
+    currentStep?.id === "draft-po" ||
+    currentStep?.id === "completion";
+
+  const displayWhatIf = isTutorial
+    ? (isWhatIfResultStepOrLater
+        ? (tutorialWhatIf ?? getTutorialWhatIfResponse())
+        : null)
+    : decisionWhatIf;
 
   function navigateDecisionCenter(
     view: "today" | "future",
@@ -443,12 +452,16 @@ function ShelfCashAppContent({
     }
   }, [isActive, currentStep]);
 
-  // Cleanly restore view to today when exiting tutorial
+  // Cleanly restore view to today when exiting tutorial and reset whatIf state
   const prevIsTutorial = useRef(isTutorial);
   useEffect(() => {
     if (prevIsTutorial.current && !isTutorial) {
       setPage("today");
       navigateDecisionCenter("today");
+      setTutorialWhatIf(null);
+    }
+    if (!prevIsTutorial.current && isTutorial) {
+      setTutorialWhatIf(null);
     }
     prevIsTutorial.current = isTutorial;
   }, [isTutorial]);

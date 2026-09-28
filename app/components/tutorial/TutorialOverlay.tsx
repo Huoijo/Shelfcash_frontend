@@ -231,8 +231,15 @@ export function TutorialOverlay() {
         12;
 
       const tooltipEl = tooltipRef.current;
-      const tooltipWidth = tooltipEl.offsetWidth || 350;
-      const tooltipHeight = tooltipEl.offsetHeight || 150;
+      const measuredWidth = tooltipEl
+        ? Math.max(tooltipEl.offsetWidth, tooltipEl.getBoundingClientRect().width)
+        : 350;
+      const measuredHeight = tooltipEl
+        ? Math.max(tooltipEl.offsetHeight, tooltipEl.getBoundingClientRect().height)
+        : 200;
+      const tooltipWidth = measuredWidth || 350;
+      // Default to at least 195px so bounds calculation accounts for header + title + body + footer buttons
+      const tooltipHeight = Math.max(measuredHeight, 195);
       const padding = 12;
 
       const viewportWidth = window.innerWidth;
@@ -300,7 +307,7 @@ export function TutorialOverlay() {
           calculatedLeft = leftLeft;
           actualPlacement = "left";
         } else {
-          // Guaranteed collision-free bottom placement outside the target table
+          // Guaranteed bottom placement
           calculatedTop = targetRect.top + targetRect.height + 8;
           calculatedLeft = bottomLeft;
           actualPlacement = "bottom";
@@ -365,6 +372,23 @@ export function TutorialOverlay() {
         }
       }
 
+      // Viewport safety clamping: Ensure tooltip is ALWAYS completely visible on screen
+      // Priority 1: Never overflow bottom edge (where Next/Back/Skip forward buttons live)
+      const maxAllowedTop = Math.max(12, viewportHeight - tooltipHeight - 16);
+      if (calculatedTop > maxAllowedTop) {
+        calculatedTop = maxAllowedTop;
+      }
+      // Priority 2: Respect top safe limit if room permits, otherwise at least 12px from top
+      if (calculatedTop < topSafeLimit && maxAllowedTop >= topSafeLimit) {
+        calculatedTop = topSafeLimit;
+      } else if (calculatedTop < 12) {
+        calculatedTop = 12;
+      }
+
+      // Priority 3: Keep horizontal position fully inside viewport
+      const maxAllowedLeft = Math.max(16, viewportWidth - tooltipWidth - 16);
+      calculatedLeft = Math.max(16, Math.min(maxAllowedLeft, calculatedLeft));
+
       const targetCenterX = targetRect.left + targetRect.width / 2;
       const targetCenterY = targetRect.top + targetRect.height / 2;
       let calculatedCaretOffset = 24;
@@ -397,9 +421,89 @@ export function TutorialOverlay() {
   const isActionStep = currentStep?.type === "action" || Boolean(currentStep?.expectedAction);
   const breathingSpace = 8; // 8px breathing space as per prompt
 
-  // Determine direction of action arrow pointing to the target
-  const actionArrowDirection = useMemo((): "down" | "up" | "left" | "right" => {
-    if (!targetRect) return "down";
+  // Determine configuration and exact position of action arrow beacon pointing to target or inner button
+  const beaconConfig = useMemo((): {
+    direction: "down" | "up" | "left" | "right";
+    style?: React.CSSProperties;
+  } => {
+    if (!targetRect) return { direction: "down" };
+
+    // Case 1: An action button (sub-target) exists inside the highlighted container
+    if (actionTargetRect) {
+      const spotlightLeft = targetRect.left - breathingSpace;
+      const spotlightTop = targetRect.top - breathingSpace;
+      const spotlightWidth = targetRect.width + breathingSpace * 2;
+      const spotlightHeight = targetRect.height + breathingSpace * 2;
+
+      const btnRelLeft = actionTargetRect.left - spotlightLeft;
+      const btnRelTop = actionTargetRect.top - spotlightTop;
+      const btnWidth = actionTargetRect.width;
+      const btnHeight = actionTargetRect.height;
+
+      // If container is large (height > 100, e.g. What-If lab card), position directly adjacent to the inner action button
+      if (targetRect.height > 100) {
+        // Preference A: If button has ample space to its left inside the card (e.g. right-aligned action buttons)
+        if (btnRelLeft > 140) {
+          return {
+            direction: "right",
+            style: {
+              right: `${Math.round(spotlightWidth - btnRelLeft + 12)}px`,
+              top: `${Math.round(btnRelTop + btnHeight / 2)}px`,
+              left: "auto",
+              bottom: "auto",
+            },
+          };
+        }
+        // Preference B: If button has space above it inside the card
+        if (btnRelTop > 45) {
+          return {
+            direction: "down",
+            style: {
+              left: `${Math.round(btnRelLeft + btnWidth / 2)}px`,
+              bottom: `${Math.round(spotlightHeight - btnRelTop + 10)}px`,
+              top: "auto",
+              right: "auto",
+            },
+          };
+        }
+        // Preference C: If button has space to its right inside the card
+        if (spotlightWidth - (btnRelLeft + btnWidth) > 140) {
+          return {
+            direction: "left",
+            style: {
+              left: `${Math.round(btnRelLeft + btnWidth + 12)}px`,
+              top: `${Math.round(btnRelTop + btnHeight / 2)}px`,
+              right: "auto",
+              bottom: "auto",
+            },
+          };
+        }
+        // Fallback: place above button
+        return {
+          direction: "down",
+          style: {
+            left: `${Math.round(btnRelLeft + btnWidth / 2)}px`,
+            bottom: `${Math.round(spotlightHeight - btnRelTop + 10)}px`,
+            top: "auto",
+            right: "auto",
+          },
+        };
+      }
+
+      // If container is thin / small (height <= 100, e.g. table row in Step 6),
+      // place beacon right above the row, horizontally aligned with the action button:
+      return {
+        direction: "down",
+        style: {
+          left: `${Math.round(btnRelLeft + btnWidth / 2)}px`,
+          bottom: "calc(100% + 10px)",
+          top: "auto",
+          right: "auto",
+        },
+      };
+    }
+
+    // Case 2: Target itself is the action button (no separate sub-target)
     const windowH = typeof window !== "undefined" ? window.innerHeight : 800;
     const windowW = typeof window !== "undefined" ? window.innerWidth : 1200;
 
@@ -410,34 +514,29 @@ export function TutorialOverlay() {
 
     const placement = tooltipPos.placement;
 
+    let dir: "down" | "up" | "left" | "right" = "down";
     if (placement === "bottom") {
-      if (hasSpaceAbove) return "down"; // Floats above target, points DOWN into target
-      if (hasSpaceRight) return "left"; // Floats to the right of target, points LEFT into target
-      if (hasSpaceLeft) return "right"; // Floats to the left of target, points RIGHT into target
-      return "down";
+      if (hasSpaceLeft) dir = "right";
+      else if (hasSpaceAbove) dir = "down";
+      else if (hasSpaceRight) dir = "left";
+      else dir = "down";
+    } else if (placement === "top") {
+      if (hasSpaceLeft) dir = "right";
+      else if (hasSpaceBelow) dir = "up";
+      else if (hasSpaceRight) dir = "left";
+      else dir = "up";
+    } else if (placement === "left") {
+      if (hasSpaceRight) dir = "left";
+      else if (hasSpaceAbove) dir = "down";
+      else dir = "up";
+    } else {
+      if (hasSpaceLeft) dir = "right";
+      else if (hasSpaceAbove) dir = "down";
+      else dir = "up";
     }
 
-    if (placement === "top") {
-      if (hasSpaceBelow) return "up"; // Floats below target, points UP into target
-      if (hasSpaceRight) return "left";
-      if (hasSpaceLeft) return "right";
-      return "up";
-    }
-
-    if (placement === "left") {
-      if (hasSpaceRight) return "left"; // Floats to the right of target, points LEFT into target
-      if (hasSpaceAbove) return "down";
-      return "up";
-    }
-
-    if (placement === "right") {
-      if (hasSpaceLeft) return "right"; // Floats to the left of target, points RIGHT into target
-      if (hasSpaceAbove) return "down";
-      return "up";
-    }
-
-    return "down";
-  }, [targetRect, tooltipPos.placement]);
+    return { direction: dir };
+  }, [targetRect, actionTargetRect, breathingSpace, tooltipPos.placement]);
 
   const actionText =
     currentStep?.actionHint ||
@@ -460,13 +559,6 @@ export function TutorialOverlay() {
       return part;
     });
   };
-
-  const beaconLeftOffset = useMemo(() => {
-    if (!targetRect || !actionTargetRect) return null;
-    const spotlightLeft = targetRect.left - breathingSpace;
-    const actionCenterX = actionTargetRect.left + actionTargetRect.width / 2;
-    return Math.round(actionCenterX - spotlightLeft);
-  }, [targetRect, actionTargetRect, breathingSpace]);
 
   if (!isActive || !currentStep || currentStep.type === "welcome" || currentStep.type === "completion") {
     return null;
@@ -508,22 +600,18 @@ export function TutorialOverlay() {
           ) : null}
 
           {/* Action Arrow Indicator pointing directly at the clickable target */}
-          {isActionStep ? (
+          {isActionStep && beaconConfig ? (
             <div
-              className={`tutorial-action-arrow-beacon direction-${actionArrowDirection}`}
-              style={
-                beaconLeftOffset != null && (actionArrowDirection === "down" || actionArrowDirection === "up")
-                  ? { left: `${beaconLeftOffset}px` }
-                  : undefined
-              }
+              className={`tutorial-action-arrow-beacon direction-${beaconConfig.direction}`}
+              style={beaconConfig.style}
               aria-hidden="true"
             >
               <div className="action-arrow-bubble">
-                {actionArrowDirection === "down" ? (
+                {beaconConfig.direction === "down" ? (
                   <ArrowDown size={14} className="action-arrow-icon" />
-                ) : actionArrowDirection === "up" ? (
+                ) : beaconConfig.direction === "up" ? (
                   <ArrowUp size={14} className="action-arrow-icon" />
-                ) : actionArrowDirection === "left" ? (
+                ) : beaconConfig.direction === "left" ? (
                   <ArrowLeft size={14} className="action-arrow-icon" />
                 ) : (
                   <ArrowRight size={14} className="action-arrow-icon" />

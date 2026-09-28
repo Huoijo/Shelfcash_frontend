@@ -11,6 +11,7 @@ import type {
 } from "../lib/types.ts";
 import {
   createExplanationRequest,
+  humanizeRiskItem,
   mapExplanation422,
   mapTransportResultToMessage,
 } from "../lib/explanation-chat.ts";
@@ -480,4 +481,53 @@ test("57. TEST — NO EXPLANATION AUTOLOAD: DecisionBriefWorkspace renders witho
   assert.equal(explanationCallsCount, 0, "No /explanation request should trigger automatically on render");
   assert.match(markup, /Kế hoạch nhập hàng/);
   assert.match(markup, /Hỏi AI về kế hoạch/);
+});
+
+// 58. TEST — NATURAL RISK INTERPRETATION
+test("58. TEST — NATURAL RISK INTERPRETATION: translates raw enum parameters into natural Vietnamese phrasing", () => {
+  // Unit test helper
+  assert.equal(
+    humanizeRiskItem("CAPACITY_NOT_EVALUATED"),
+    "Chưa đủ dữ liệu để đánh giá giới hạn sức chứa kho.",
+  );
+  assert.equal(
+    humanizeRiskItem("STRESS_SHORTAGE_OBSERVED"),
+    "Ghi nhận nguy cơ thiếu hàng trong kịch bản nhu cầu tăng cao đột biến (stress test).",
+  );
+  assert.equal(
+    humanizeRiskItem("UNWEIGHTED_DESIGN_SCENARIOS_USE_EQUAL_CANDIDATE_WEIGHTS"),
+    "Các kịch bản đánh giá rủi ro hiện đang được tính với tỷ trọng đồng đều.",
+  );
+  assert.equal(
+    humanizeRiskItem("Rủi ro giao chậm từ nhà cung cấp Sữa Việt"),
+    "Rủi ro giao chậm từ nhà cung cấp Sữa Việt",
+  );
+
+  // Component render test
+  const responseWithEnums: ExplanationSuccess = {
+    ...mockSuccessResponse,
+    main_risks: [
+      "CAPACITY_NOT_EVALUATED",
+      "STRESS_SHORTAGE_OBSERVED",
+      "UNWEIGHTED_DESIGN_SCENARIOS_USE_EQUAL_CANDIDATE_WEIGHTS",
+    ],
+  };
+
+  const markup = renderToStaticMarkup(
+    <DecisionExplanationDrawer
+      open={true}
+      onClose={() => undefined}
+      explanation={responseWithEnums}
+    />,
+  );
+
+  assert.match(markup, /Rủi ro cần lưu ý:/);
+  assert.match(markup, /Chưa đủ dữ liệu để đánh giá giới hạn sức chứa kho/);
+  assert.match(markup, /Ghi nhận nguy cơ thiếu hàng trong kịch bản nhu cầu tăng cao đột biến/);
+  assert.match(markup, /Các kịch bản đánh giá rủi ro hiện đang được tính với tỷ trọng đồng đều/);
+
+  // Must not render raw machine enum codes to user
+  assert.doesNotMatch(markup, /CAPACITY_NOT_EVALUATED/);
+  assert.doesNotMatch(markup, /STRESS_SHORTAGE_OBSERVED/);
+  assert.doesNotMatch(markup, /UNWEIGHTED_DESIGN_SCENARIOS_USE_EQUAL_CANDIDATE_WEIGHTS/);
 });

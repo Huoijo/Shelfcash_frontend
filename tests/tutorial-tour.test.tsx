@@ -289,3 +289,13 @@ test("TutorialCompletionCard renders visual flow and action buttons", () => {
   const html = renderToStaticMarkup(<CompletionHost />);
   assert.equal(html, "");
 });
+
+test("Step 7 Future Heatmap: defines point step with forward button enabled", () => {
+  const step7 = TUTORIAL_STEPS.find((s) => s.id === "future-heatmap");
+  assert.ok(step7, "future-heatmap step exists");
+  assert.equal(step7.type, "point");
+  assert.equal(step7.stepNumber, 7);
+  assert.equal(step7.target, "future-heatmap");
+  assert.equal(step7.targetActiveView, "future");
+});
+

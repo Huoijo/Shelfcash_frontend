@@ -24,6 +24,7 @@ import { postExplanation, type ExplanationTransportResult } from "../../lib/shel
 import {
   DEFAULT_SUGGESTED_PROMPTS,
   createExplanationRequest,
+  humanizeRiskItem,
   mapTransportResultToMessage,
 } from "../../lib/explanation-chat";
 import { buildMockExplanation } from "../../lib/mock-data";
@@ -134,9 +135,6 @@ export function DecisionExplanationDrawer({
 
       setIsSubmitting(true);
       setQuestion("");
-
-      // Notify parent onAsk if wired
-      onAsk?.(requestToSend);
 
       try {
         let transportResult: ExplanationTransportResult;
@@ -401,7 +399,7 @@ export function DecisionExplanationDrawer({
                             <strong>Tại sao kế hoạch này tối ưu?</strong>
                             <ul>
                               {msg.response.why_this_plan.map((item, i) => (
-                                <li key={i}>{item}</li>
+                                <li key={i}>{humanizeRiskItem(item)}</li>
                               ))}
                             </ul>
                           </div>
@@ -412,7 +410,7 @@ export function DecisionExplanationDrawer({
                             <strong>Rủi ro cần lưu ý:</strong>
                             <ul>
                               {msg.response.main_risks.map((item, i) => (
-                                <li key={i}>{item}</li>
+                                <li key={i}>{humanizeRiskItem(item)}</li>
                               ))}
                             </ul>
                           </div>
@@ -423,7 +421,7 @@ export function DecisionExplanationDrawer({
                             <strong>Các đánh đổi đã cân nhắc:</strong>
                             <ul>
                               {msg.response.tradeoffs.map((item, i) => (
-                                <li key={i}>{item}</li>
+                                <li key={i}>{humanizeRiskItem(item)}</li>
                               ))}
                             </ul>
                           </div>
