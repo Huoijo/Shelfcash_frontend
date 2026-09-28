@@ -2130,7 +2130,7 @@ export function DecisionBriefWorkspace({
     // 3. From strategies in decision
     if (decision?.strategies) {
       if (Array.isArray(decision.strategies)) {
-        for (const strat of decision.strategies as Array<Record<string, unknown>>) {
+        for (const strat of decision.strategies as unknown as Array<Record<string, unknown>>) {
           const val =
             (strat?.business_metrics as Record<string, unknown> | undefined)?.deterministic?.minimum_fill_rate ??
             (strat?.business_metrics as Record<string, unknown> | undefined)?.minimum_fill_rate ??

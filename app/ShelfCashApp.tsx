@@ -55,8 +55,6 @@ import {
   saveSettings,
   saveSupplierConstraint,
   ShelfCashApiError,
-  updateInventoryPolicy,
-  updateSupplierConstraints,
   waitForDecisionRun,
 } from "../lib/shelfcash-client";
 import { requestManager } from "../lib/request-manager/request-manager";
