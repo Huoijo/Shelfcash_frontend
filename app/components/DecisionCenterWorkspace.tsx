@@ -348,7 +348,7 @@ function TodayOperationalView({
             {operationalAlerts.length > 0 ? (
               operationalAlerts.map((alert, alertIdx) => (
                 <div
-                  className="operational-alert-row"
+                  className={`operational-alert-row ${alertIdx === 0 ? "has-tutorial-target" : ""}`}
                   key={alert.key}
                   data-tutorial-id={alertIdx === 0 ? "risk-item" : undefined}
                   onClick={() => {
@@ -386,6 +386,7 @@ function TodayOperationalView({
                     <button
                       type="button"
                       className="lane-action-cta"
+                      data-tutorial-action={alertIdx === 0 ? "primary" : undefined}
                       onClick={(e) => {
                         e.stopPropagation();
                         if (alertIdx === 0) {

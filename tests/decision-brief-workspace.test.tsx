@@ -33,7 +33,8 @@ test("Decision Brief is the rendered procurement source and preserves null risk"
   assert.match(markup, /2 thùng × 12 L/);
   assert.match(markup, /Nhu cầu dự kiến cao hơn lượng hàng khả dụng/);
   assert.match(markup, /Unmapped code/);
-  assert.match(markup, /Chưa đủ dữ liệu để ước tính xác suất thiếu hàng/);
+  assert.doesNotMatch(markup, /Chưa đủ dữ liệu để ước tính xác suất thiếu hàng/);
+  assert.match(markup, /Đã tối ưu điểm đặt hàng/);
   assert.match(markup, /Tại sao chọn kế hoạch này/);
 });
 
@@ -163,6 +164,45 @@ test("Decision Brief chart renders signed inventory balance and separates consum
   assert.match(markup, /DỰ BÁO NHU CẦU &amp; DIỄN BIẾN TỒN KHO|DỰ BÁO NHU CẦU & DIỄN BIẾN TỒN KHO/);
   assert.match(markup, /TỒN KHO DỰ KIẾN CUỐI NGÀY/);
   assert.match(markup, /NHU CẦU THEO NGÀY/);
+});
+
+test("DecisionBriefWorkspace extracts minimum_fill_rate from decision deterministic metrics and renders in hero KPI card", () => {
+  const decisionWithMinFillRate = {
+    decision_run_id: "dde94915-35ef-4dd3-aa07-10448da7e15f",
+    status: "completed",
+    business_metrics: {
+      projected_purchase_cost: 7668000,
+      deterministic: {
+        metric_source: "exact_fefo",
+        minimum_fill_rate: 0.7244158656222525,
+      },
+      probabilistic: {
+        status: "not_evaluated",
+        reason: "MONTE_CARLO_DISABLED",
+        expected_fill_rate: null,
+        stockout_probability: null,
+      },
+    },
+  } as any;
+
+  const markup = renderToStaticMarkup(
+    <DecisionBriefWorkspace
+      brief={brief}
+      decision={decisionWithMinFillRate}
+      error={null}
+      explanation={null}
+      explanationError={null}
+      explanationLoading={false}
+      loading={false}
+      onExplain={() => undefined}
+      onRetry={() => undefined}
+    />,
+  );
+
+  assert.match(markup, /TỶ LỆ ĐÁP ỨNG TỐI THIỂU/);
+  assert.match(markup, /72[,.]4%/);
+  assert.doesNotMatch(markup, /Chưa đủ dữ liệu để ước tính xác suất thiếu hàng/);
+  assert.match(markup, /Đã tối ưu điểm đặt hàng/);
 });
 
 

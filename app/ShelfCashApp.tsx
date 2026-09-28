@@ -143,6 +143,13 @@ import {
   getTutorialDraftOrders,
   getTutorialWhatIfResponse,
 } from "../lib/tutorial/tutorial-fixture";
+import {
+  loadPersistedAppState,
+  persistAppStateDebounced,
+  flushPersistedAppState,
+  hasValidPersistedData,
+} from "../lib/app-persistence";
+import { hasOperationalData } from "../lib/data";
 
 type PageKey =
   | "today"
@@ -560,42 +567,6 @@ function ShelfCashAppContent({
     }));
   }, [data.settings.storeId]);
 
-  useEffect(() => {
-    if (isTutorial) return;
-    const storeId = data.settings.storeId;
-    if (!storeId) return;
-    const decisionRunId = window.localStorage.getItem(`shelfcash:decision-run:${storeId}`);
-    if (!decisionRunId) return;
-    const abortController = new AbortController();
-    void (async () => {
-      try {
-        const result = await getDecisionRun(decisionRunId, {
-          signal: abortController.signal,
-        });
-        const resolved = shouldPollDecisionRun(result.status)
-          ? await waitForDecisionRun(decisionRunId, result, {
-              signal: abortController.signal,
-            })
-          : result;
-        if (!abortController.signal.aborted) {
-          setDecision(resolved);
-          if (resolved.status === "completed" || resolved.status === "completed_with_no_feasible_recommendation") {
-            await loadDecisionBrief(resolved.decision_run_id, abortController.signal);
-            setPlan((current) => ({
-              ...current,
-              status: "completed",
-              cutoffDate: resolved.as_of_date ?? current.cutoffDate,
-              horizonDays: resolved.horizon_days ?? current.horizonDays,
-            }));
-          }
-        }
-      } catch {
-        // The persisted package is a convenience; a failed reload must not block the app.
-      }
-    })();
-    return () => abortController.abort();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   const [strategy, setStrategy] = useState<Strategy>(
     strategyFromApi(initialData.settings.defaultStrategy),
   );
@@ -644,6 +615,181 @@ function ShelfCashAppContent({
   >(null);
   const [inventoryConstraintsLoading, setInventoryConstraintsLoading] =
     useState(false);
+
+  // 1. Hydrate user data, plans, orders, logs and configurations from storage on mount
+  useEffect(() => {
+    if (isTutorial) return;
+
+    const storedSession = getStoredSession();
+    const targetStoreId =
+      storedSession?.storeId || initialData.settings.storeId || "";
+    const savedState = loadPersistedAppState(targetStoreId);
+
+    if (savedState && hasValidPersistedData(savedState)) {
+      setData(savedState.data);
+      if (savedState.plan) {
+        setPlan(savedState.plan);
+      } else {
+        const strat =
+          savedState.strategy ??
+          strategyFromApi(savedState.data.settings.defaultStrategy);
+        setPlan(emptyBackendPlan(savedState.data, strat));
+      }
+      if (savedState.strategy) {
+        setStrategy(savedState.strategy);
+      }
+      if (savedState.draftOrders && savedState.draftOrders.length > 0) {
+        setDraftOrders(savedState.draftOrders);
+      }
+      if (savedState.ordersPagination) {
+        setOrdersPagination(savedState.ordersPagination);
+      }
+      if (savedState.importLogs && savedState.importLogs.length > 0) {
+        setImportLogs(savedState.importLogs);
+      }
+      if (
+        savedState.inventoryConstraints &&
+        savedState.inventoryConstraints.length > 0
+      ) {
+        setInventoryConstraints(savedState.inventoryConstraints);
+      }
+      if (savedState.decision) {
+        setDecision(savedState.decision);
+      }
+      if (savedState.decisionBrief) {
+        setDecisionBrief(savedState.decisionBrief);
+      }
+      if (
+        savedState.activePage &&
+        typeof window !== "undefined" &&
+        !window.location.search.includes("decision_view")
+      ) {
+        setPage(savedState.activePage as PageKey);
+      }
+      if (savedState.activeIngredient && !initialDecisionIngredient) {
+        setDecisionCenterIngredient(savedState.activeIngredient);
+      }
+    } else if (storedSession?.storeId) {
+      setData((prev) => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          storeId: storedSession.storeId,
+          storeName: storedSession.storeName || prev.settings.storeName,
+        },
+      }));
+    }
+  }, [initialData.settings.storeId, initialDecisionIngredient, isTutorial]);
+
+  // 2. Persist user-entered data, plan, orders, and configurations across refreshes
+  useEffect(() => {
+    if (!isMounted || isTutorial) return;
+
+    const effectiveStoreId =
+      data.settings.storeId.trim() || session?.storeId?.trim() || "";
+
+    const hasStateToSave =
+      hasOperationalData(data) ||
+      data.ingredients.length > 0 ||
+      data.recipes.length > 0 ||
+      data.salesHistory.length > 0 ||
+      draftOrders.length > 0 ||
+      importLogs.length > 0 ||
+      effectiveStoreId.length > 0;
+
+    if (!hasStateToSave) return;
+
+    persistAppStateDebounced({
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      storeId: effectiveStoreId,
+      data,
+      plan,
+      draftOrders,
+      ordersPagination,
+      importLogs,
+      inventoryConstraints,
+      strategy,
+      decision,
+      decisionBrief,
+      activePage: page,
+      activeIngredient: decisionCenterIngredient,
+    });
+  }, [
+    isMounted,
+    isTutorial,
+    data,
+    plan,
+    draftOrders,
+    ordersPagination,
+    importLogs,
+    inventoryConstraints,
+    strategy,
+    decision,
+    decisionBrief,
+    page,
+    decisionCenterIngredient,
+    session?.storeId,
+  ]);
+
+  // 3. Flush any pending debounced persistence synchronously before browser reload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      flushPersistedAppState();
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, []);
+
+  // 4. Recover in-flight or completed decision run for active store
+  const decisionRunRecovered = useRef<string | null>(null);
+  useEffect(() => {
+    if (isTutorial) return;
+    const storeId = data.settings.storeId || session?.storeId;
+    if (!storeId || decisionRunRecovered.current === storeId) return;
+    const decisionRunId = window.localStorage.getItem(
+      `shelfcash:decision-run:${storeId}`,
+    );
+    if (!decisionRunId) return;
+    decisionRunRecovered.current = storeId;
+    const abortController = new AbortController();
+    void (async () => {
+      try {
+        const result = await getDecisionRun(decisionRunId, {
+          signal: abortController.signal,
+        });
+        const resolved = shouldPollDecisionRun(result.status)
+          ? await waitForDecisionRun(decisionRunId, result, {
+              signal: abortController.signal,
+            })
+          : result;
+        if (!abortController.signal.aborted) {
+          setDecision(resolved);
+          if (
+            resolved.status === "completed" ||
+            resolved.status === "completed_with_no_feasible_recommendation"
+          ) {
+            await loadDecisionBrief(
+              resolved.decision_run_id,
+              abortController.signal,
+            );
+            setPlan((current) => ({
+              ...current,
+              status: "completed",
+              cutoffDate: resolved.as_of_date ?? current.cutoffDate,
+              horizonDays: resolved.horizon_days ?? current.horizonDays,
+            }));
+          }
+        }
+      } catch {
+        // The persisted package is a convenience; a failed reload must not block the app.
+      }
+    })();
+    return () => abortController.abort();
+  }, [data.settings.storeId, isTutorial, session?.storeId]);
+
   const operationSequence = useRef(0);
   const decisionRunAbort = useRef<AbortController | null>(null);
   const activeForecast = useRef<ForecastRunResult | null>(null);
@@ -781,20 +927,29 @@ function ShelfCashAppContent({
     [setToast],
   );
 
+  const initialSyncAttempted = useRef<string | null>(null);
   useEffect(() => {
     let active = true;
     void (async () => {
       const health = await getConnectionHealth();
       if (!active) return;
       setConnection(health);
+      const effectiveStoreId =
+        data.settings.storeId.trim() ||
+        initialData.settings.storeId.trim() ||
+        session?.storeId?.trim() ||
+        "";
       if (
         health.service === "online" &&
-        initialData.settings.storeId.trim()
+        effectiveStoreId &&
+        initialSyncAttempted.current !== effectiveStoreId
       ) {
+        initialSyncAttempted.current = effectiveStoreId;
         await reloadFromBackend(
-          initialData,
-          initialData.settings.storeId,
-          strategyFromApi(initialData.settings.defaultStrategy),
+          data,
+          effectiveStoreId,
+          strategy,
+          false,
         );
       }
     })();
@@ -802,7 +957,7 @@ function ShelfCashAppContent({
       active = false;
       operationSequence.current += 1;
     };
-  }, [initialData, reloadFromBackend]);
+  }, [data.settings.storeId, initialData.settings.storeId, session?.storeId, strategy, reloadFromBackend, data]);
 
   useEffect(() => {
     if (!mobileNavigationOpen) return;
@@ -1955,14 +2110,27 @@ function ShelfCashAppContent({
           saveSession(userSession);
           setSession(userSession);
           if (userSession.storeId) {
-            setData((prev) => ({
-              ...prev,
-              settings: {
-                ...prev.settings,
-                storeId: userSession.storeId,
-                storeName: userSession.storeName,
-              },
-            }));
+            const savedForStore = loadPersistedAppState(userSession.storeId);
+            if (savedForStore && hasValidPersistedData(savedForStore)) {
+              setData(savedForStore.data);
+              if (savedForStore.plan) setPlan(savedForStore.plan);
+              if (savedForStore.draftOrders) setDraftOrders(savedForStore.draftOrders);
+              if (savedForStore.ordersPagination) setOrdersPagination(savedForStore.ordersPagination);
+              if (savedForStore.importLogs) setImportLogs(savedForStore.importLogs);
+              if (savedForStore.inventoryConstraints) setInventoryConstraints(savedForStore.inventoryConstraints);
+              if (savedForStore.strategy) setStrategy(savedForStore.strategy);
+              if (savedForStore.decision) setDecision(savedForStore.decision);
+              if (savedForStore.decisionBrief) setDecisionBrief(savedForStore.decisionBrief);
+            } else {
+              setData((prev) => ({
+                ...prev,
+                settings: {
+                  ...prev.settings,
+                  storeId: userSession.storeId,
+                  storeName: userSession.storeName,
+                },
+              }));
+            }
           }
         }}
       />
@@ -2332,11 +2500,18 @@ export function ShelfCashApp(props: {
   initialDecisionView?: "today" | "future";
   initialPlan: PlanResponse;
 }) {
+  const [hasStoredData] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const saved = loadPersistedAppState();
+    return hasValidPersistedData(saved);
+  });
+
   const hasMeaningfulActivity = Boolean(
-    (props.initialData.inventory &&
-      props.initialData.inventory.length > 0 &&
-      props.initialData.settings?.storeId &&
-      props.initialData.settings.storeId !== "STORE_001") ||
+    hasStoredData ||
+      (props.initialData.inventory &&
+        props.initialData.inventory.length > 0 &&
+        props.initialData.settings?.storeId &&
+        props.initialData.settings.storeId !== "STORE_001") ||
       (props.initialPlan &&
         props.initialPlan.recommendations &&
         props.initialPlan.recommendations.length > 0)

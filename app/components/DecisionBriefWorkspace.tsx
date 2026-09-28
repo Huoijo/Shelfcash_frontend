@@ -21,7 +21,7 @@ import {
   Truck,
   X,
 } from "lucide-react";
-import { useId, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Area,
   CartesianGrid,
@@ -1049,6 +1049,10 @@ function getRealMetricsForStrategy(
 
   const fillRate =
     (typeof candidateMetrics?.expected_fill_rate === "number" ? candidateMetrics.expected_fill_rate : null) ??
+    (typeof (candidateMetrics?.deterministic as Record<string, unknown> | undefined)?.minimum_fill_rate === "number"
+      ? ((candidateMetrics?.deterministic as Record<string, unknown>).minimum_fill_rate as number)
+      : null) ??
+    (typeof candidateMetrics?.minimum_fill_rate === "number" ? candidateMetrics.minimum_fill_rate : null) ??
     (typeof compCandidate?.expected_fill_rate === "number" ? compCandidate.expected_fill_rate : null) ??
     (isSelected && brief.recommendation.available ? (brief.risk?.expected_fill_rate ?? null) : null);
 
@@ -2017,6 +2021,25 @@ export function DecisionBriefWorkspace({
     return typeof raw === "number" && raw >= 1 && raw <= 30 ? raw : 7;
   }, [brief, decision]);
 
+  // Selected item state (default to first urgent item or first item)
+  const currentSelectedId =
+    selectedIngredientId ||
+    (sortedItems.find((item) => item.statusType === "urgent")?.demand.ingredient_id ??
+      sortedItems[0]?.demand.ingredient_id ??
+      "");
+
+  const chipsStripRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!chipsStripRef.current || !currentSelectedId) return;
+    const activeEl = chipsStripRef.current.querySelector<HTMLElement>(
+      ".cockpit-ingredient-card.active"
+    );
+    if (activeEl) {
+      activeEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [currentSelectedId]);
+
   if (loading) {
     return (
       <div className="cockpit-loading-state">
@@ -2072,6 +2095,55 @@ export function DecisionBriefWorkspace({
       ? Math.round((totalPurchaseCost / effectiveBudget) * 100)
       : null;
 
+  const rawMinimumFillRate: number | null = (() => {
+    // 1. Direct from decision.business_metrics.deterministic.minimum_fill_rate
+    const fromDecisionDeterministic =
+      decision?.business_metrics?.deterministic?.minimum_fill_rate;
+    if (typeof fromDecisionDeterministic === "number" && Number.isFinite(fromDecisionDeterministic)) {
+      return fromDecisionDeterministic;
+    }
+    // 2. Direct from decision.business_metrics.minimum_fill_rate
+    const fromDecisionDirect = (decision?.business_metrics as Record<string, unknown> | null | undefined)?.minimum_fill_rate;
+    if (typeof fromDecisionDirect === "number" && Number.isFinite(fromDecisionDirect)) {
+      return fromDecisionDirect;
+    }
+    // 3. From strategies in decision
+    if (decision?.strategies) {
+      if (Array.isArray(decision.strategies)) {
+        for (const strat of decision.strategies as Array<Record<string, unknown>>) {
+          const val =
+            (strat?.business_metrics as Record<string, unknown> | undefined)?.deterministic?.minimum_fill_rate ??
+            (strat?.business_metrics as Record<string, unknown> | undefined)?.minimum_fill_rate ??
+            strat?.minimum_fill_rate;
+          if (typeof val === "number" && Number.isFinite(val)) return val;
+        }
+      } else if (typeof decision.strategies === "object") {
+        const stratMap = decision.strategies as Record<string, Record<string, unknown>>;
+        const recommended = decision.recommended_strategy;
+        const targetStrat =
+          recommended && stratMap[recommended]
+            ? stratMap[recommended]
+            : Object.values(stratMap)[0];
+        const val =
+          (targetStrat?.business_metrics as Record<string, unknown> | undefined)?.deterministic?.minimum_fill_rate ??
+          (targetStrat?.business_metrics as Record<string, unknown> | undefined)?.minimum_fill_rate ??
+          targetStrat?.minimum_fill_rate;
+        if (typeof val === "number" && Number.isFinite(val)) return val;
+      }
+    }
+    // 4. From brief if passed or adapted
+    const fromBrief =
+      (brief as unknown as Record<string, unknown>)?.business_metrics?.deterministic?.minimum_fill_rate ??
+      (brief as unknown as Record<string, unknown>)?.minimum_fill_rate ??
+      (brief?.recommendation as unknown as Record<string, unknown>)?.minimum_fill_rate ??
+      (brief?.risk as unknown as Record<string, unknown>)?.minimum_fill_rate;
+    if (typeof fromBrief === "number" && Number.isFinite(fromBrief)) {
+      return fromBrief;
+    }
+    return null;
+  })();
+
+  const minFillRate = percentage(rawMinimumFillRate);
   const fillRate = percentage(
     brief.recommendation.expected_fill_rate ??
       brief.risk.expected_fill_rate
@@ -2079,13 +2151,6 @@ export function DecisionBriefWorkspace({
   const stockoutProb = percentage(
     brief.risk?.stockout_probability
   );
-
-  // Selected item state (default to first urgent item or first item)
-  const currentSelectedId =
-    selectedIngredientId ||
-    (sortedItems.find((item) => item.statusType === "urgent")?.demand.ingredient_id ??
-      sortedItems[0]?.demand.ingredient_id ??
-      "");
 
   const selectedItem =
     enrichedItems.find((item) => item.demand.ingredient_id === currentSelectedId) ?? null;
@@ -2205,14 +2270,37 @@ export function DecisionBriefWorkspace({
             </div>
 
             <div className="hero-kpi-card">
-              <strong className="kpi-value-large text-accent">
-                {stockoutProb
-                  ? `Xác suất thiếu hàng: ${stockoutProb}`
-                  : "Chưa đủ dữ liệu để ước tính xác suất thiếu hàng"}
-              </strong>
-              <span className="kpi-subtext">
-                {fillRate ? `Expected Fill Rate: ${fillRate}` : "Đã tối ưu điểm đặt hàng"}
-              </span>
+              {minFillRate ? (
+                <>
+                  <span className="kpi-label">TỶ LỆ ĐÁP ỨNG TỐI THIỂU</span>
+                  <div className="kpi-value-row">
+                    <strong className="kpi-value-large text-accent">
+                      {minFillRate}
+                    </strong>
+                  </div>
+                  <span className="kpi-subtext">
+                    {stockoutProb
+                      ? `Xác suất thiếu hàng: ${stockoutProb}`
+                      : "Đã tối ưu điểm đặt hàng"}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="kpi-label">
+                    {fillRate ? "TỶ LỆ ĐÁP ỨNG DỰ KIẾN" : "TỶ LỆ ĐÁP ỨNG"}
+                  </span>
+                  <div className="kpi-value-row">
+                    <strong className="kpi-value-large text-accent">
+                      {fillRate || (stockoutProb ? `Rủi ro thiếu: ${stockoutProb}` : "100%")}
+                    </strong>
+                  </div>
+                  <span className="kpi-subtext">
+                    {stockoutProb
+                      ? `Xác suất thiếu hàng: ${stockoutProb}`
+                      : "Đã tối ưu điểm đặt hàng"}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -2370,10 +2458,15 @@ export function DecisionBriefWorkspace({
       {!noFeasible && uniqueDemand.length ? (
         <section className="cockpit-ingredients-section" aria-labelledby="cockpit-ingredients-title">
           <div className="section-header-row">
-            <div>
+            <div className="section-title-wrap">
               <h2 id="cockpit-ingredients-title" className="cockpit-main-category-title">
                 DANH MỤC NGUYÊN LIỆU
               </h2>
+              {filteredItems.length > 5 ? (
+                <span className="cockpit-scroll-hint" aria-hidden="true" title="Cuộn xuống để xem thêm nguyên liệu">
+                  <ChevronDown size={13} /> Cuộn xuống xem thêm
+                </span>
+              ) : null}
             </div>
 
             <div className="cockpit-filter-pills" role="tablist">
@@ -2401,7 +2494,7 @@ export function DecisionBriefWorkspace({
             </div>
           </div>
 
-          <div className="cockpit-chips-strip" role="list">
+          <div className="cockpit-chips-strip" role="list" ref={chipsStripRef}>
             {filteredItems.map((item) => {
               const active = item.demand.ingredient_id === currentSelectedId;
               const unit = item.demand.unit ? ` ${item.demand.unit}` : "";

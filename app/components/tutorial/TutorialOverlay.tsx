@@ -1,7 +1,15 @@
 "use client";
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Sparkles, X } from "lucide-react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  MousePointerClick,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { useTutorial } from "./TutorialContext";
 
 interface TargetRect {
@@ -14,11 +22,18 @@ interface TargetRect {
 export function TutorialOverlay() {
   const { isActive, currentStep, nextStep, prevStep, skipTutorial, currentStepIndex } = useTutorial();
   const [targetRect, setTargetRect] = useState<TargetRect | null>(null);
+  const [actionTargetRect, setActionTargetRect] = useState<TargetRect | null>(null);
   const [targetFound, setTargetFound] = useState(true);
-  const [tooltipPos, setTooltipPos] = useState<{ top: number; left: number; placement: string }>({
+  const [tooltipPos, setTooltipPos] = useState<{
+    top: number;
+    left: number;
+    placement: string;
+    caretOffset: number;
+  }>({
     top: 0,
     left: 0,
     placement: "bottom",
+    caretOffset: 24,
   });
   const tooltipRef = useRef<HTMLDivElement>(null);
 
@@ -29,6 +44,7 @@ export function TutorialOverlay() {
     if (!currentStep.target) {
       const resetTimer = setTimeout(() => {
         setTargetRect(null);
+        setActionTargetRect(null);
         setTargetFound(true);
       }, 0);
       return () => clearTimeout(resetTimer);
@@ -102,6 +118,21 @@ export function TutorialOverlay() {
             width: rect.width,
             height: rect.height,
           });
+
+          const actionChild = el.querySelector<HTMLElement>(
+            "[data-tutorial-action], .lane-action-cta, button"
+          );
+          if (actionChild) {
+            const aRect = actionChild.getBoundingClientRect();
+            setActionTargetRect({
+              top: aRect.top,
+              left: aRect.left,
+              width: aRect.width,
+              height: aRect.height,
+            });
+          } else {
+            setActionTargetRect(null);
+          }
           setTargetFound(true);
         };
 
@@ -114,6 +145,7 @@ export function TutorialOverlay() {
       } else {
         // Target missing fallback: don't crash
         setTargetRect(null);
+        setActionTargetRect(null);
         setTargetFound(false);
       }
     };
@@ -147,6 +179,21 @@ export function TutorialOverlay() {
           width: rect.width,
           height: rect.height,
         });
+
+        const actionChild = el.querySelector<HTMLElement>(
+          "[data-tutorial-action], .lane-action-cta, button"
+        );
+        if (actionChild) {
+          const aRect = actionChild.getBoundingClientRect();
+          setActionTargetRect({
+            top: aRect.top,
+            left: aRect.left,
+            width: aRect.width,
+            height: aRect.height,
+          });
+        } else {
+          setActionTargetRect(null);
+        }
       }
     };
 
@@ -170,6 +217,7 @@ export function TutorialOverlay() {
             top: window.innerHeight / 2 - 100,
             left: Math.max(16, window.innerWidth / 2 - 170),
             placement: "center",
+            caretOffset: 24,
           });
         }
         return;
@@ -317,10 +365,27 @@ export function TutorialOverlay() {
         }
       }
 
+      const targetCenterX = targetRect.left + targetRect.width / 2;
+      const targetCenterY = targetRect.top + targetRect.height / 2;
+      let calculatedCaretOffset = 24;
+
+      if (actualPlacement === "bottom" || actualPlacement === "top") {
+        calculatedCaretOffset = Math.max(
+          20,
+          Math.min(tooltipWidth - 32, targetCenterX - calculatedLeft - 7)
+        );
+      } else if (actualPlacement === "left" || actualPlacement === "right") {
+        calculatedCaretOffset = Math.max(
+          20,
+          Math.min(tooltipHeight - 32, targetCenterY - calculatedTop - 7)
+        );
+      }
+
       setTooltipPos({
         top: calculatedTop,
         left: calculatedLeft,
         placement: actualPlacement,
+        caretOffset: calculatedCaretOffset,
       });
     });
 
@@ -329,12 +394,83 @@ export function TutorialOverlay() {
     };
   }, [targetRect, currentStep]);
 
+  const isActionStep = currentStep?.type === "action" || Boolean(currentStep?.expectedAction);
+  const breathingSpace = 8; // 8px breathing space as per prompt
+
+  // Determine direction of action arrow pointing to the target
+  const actionArrowDirection = useMemo((): "down" | "up" | "left" | "right" => {
+    if (!targetRect) return "down";
+    const windowH = typeof window !== "undefined" ? window.innerHeight : 800;
+    const windowW = typeof window !== "undefined" ? window.innerWidth : 1200;
+
+    const hasSpaceAbove = targetRect.top > 65;
+    const hasSpaceBelow = windowH - (targetRect.top + targetRect.height) > 65;
+    const hasSpaceRight = windowW - (targetRect.left + targetRect.width) > 140;
+    const hasSpaceLeft = targetRect.left > 140;
+
+    const placement = tooltipPos.placement;
+
+    if (placement === "bottom") {
+      if (hasSpaceAbove) return "down"; // Floats above target, points DOWN into target
+      if (hasSpaceRight) return "left"; // Floats to the right of target, points LEFT into target
+      if (hasSpaceLeft) return "right"; // Floats to the left of target, points RIGHT into target
+      return "down";
+    }
+
+    if (placement === "top") {
+      if (hasSpaceBelow) return "up"; // Floats below target, points UP into target
+      if (hasSpaceRight) return "left";
+      if (hasSpaceLeft) return "right";
+      return "up";
+    }
+
+    if (placement === "left") {
+      if (hasSpaceRight) return "left"; // Floats to the right of target, points LEFT into target
+      if (hasSpaceAbove) return "down";
+      return "up";
+    }
+
+    if (placement === "right") {
+      if (hasSpaceLeft) return "right"; // Floats to the left of target, points RIGHT into target
+      if (hasSpaceAbove) return "down";
+      return "up";
+    }
+
+    return "down";
+  }, [targetRect, tooltipPos.placement]);
+
+  const actionText =
+    currentStep?.actionHint ||
+    (currentStep?.expectedAction === "submit"
+      ? "Nhập & gửi"
+      : "Bấm vào đây");
+
+  const formatTutorialBody = (text: string) => {
+    if (!text) return null;
+    const parts = text.split(/(".*?")/g);
+    if (parts.length === 1) return text;
+    return parts.map((part, index) => {
+      if (part.startsWith('"') && part.endsWith('"')) {
+        return (
+          <strong key={index} className="tutorial-body-highlight-keyword">
+            {part}
+          </strong>
+        );
+      }
+      return part;
+    });
+  };
+
+  const beaconLeftOffset = useMemo(() => {
+    if (!targetRect || !actionTargetRect) return null;
+    const spotlightLeft = targetRect.left - breathingSpace;
+    const actionCenterX = actionTargetRect.left + actionTargetRect.width / 2;
+    return Math.round(actionCenterX - spotlightLeft);
+  }, [targetRect, actionTargetRect, breathingSpace]);
+
   if (!isActive || !currentStep || currentStep.type === "welcome" || currentStep.type === "completion") {
     return null;
   }
-
-  const isActionStep = currentStep.type === "action";
-  const breathingSpace = 8; // 8px breathing space as per prompt
 
   return (
     <div className="tutorial-overlay-container" aria-live="polite">
@@ -356,6 +492,48 @@ export function TutorialOverlay() {
           }}
         >
           {isActionStep ? <div className="tutorial-action-pulse-ring" /> : null}
+
+          {/* Sub-target pulse specifically around the action button inside the card */}
+          {isActionStep && actionTargetRect && targetRect ? (
+            <div
+              className="tutorial-action-pulse-ring is-sub-target"
+              style={{
+                top: actionTargetRect.top - (targetRect.top - breathingSpace) - 3,
+                left: actionTargetRect.left - (targetRect.left - breathingSpace) - 4,
+                width: actionTargetRect.width + 8,
+                height: actionTargetRect.height + 6,
+                borderRadius: 8,
+              }}
+            />
+          ) : null}
+
+          {/* Action Arrow Indicator pointing directly at the clickable target */}
+          {isActionStep ? (
+            <div
+              className={`tutorial-action-arrow-beacon direction-${actionArrowDirection}`}
+              style={
+                beaconLeftOffset != null && (actionArrowDirection === "down" || actionArrowDirection === "up")
+                  ? { left: `${beaconLeftOffset}px` }
+                  : undefined
+              }
+              aria-hidden="true"
+            >
+              <div className="action-arrow-bubble">
+                {actionArrowDirection === "down" ? (
+                  <ArrowDown size={14} className="action-arrow-icon" />
+                ) : actionArrowDirection === "up" ? (
+                  <ArrowUp size={14} className="action-arrow-icon" />
+                ) : actionArrowDirection === "left" ? (
+                  <ArrowLeft size={14} className="action-arrow-icon" />
+                ) : (
+                  <ArrowRight size={14} className="action-arrow-icon" />
+                )}
+                <MousePointerClick size={14} className="action-click-icon" />
+                <span className="action-arrow-text">{actionText}</span>
+              </div>
+              <div className="action-arrow-pointer-tip" />
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -372,6 +550,18 @@ export function TutorialOverlay() {
           left: tooltipPos.left,
         }}
       >
+        {/* Tooltip Caret Pointer */}
+        {targetRect && tooltipPos.placement !== "center" ? (
+          <div
+            className={`tutorial-tooltip-caret caret-${tooltipPos.placement}`}
+            style={
+              tooltipPos.placement === "bottom" || tooltipPos.placement === "top"
+                ? { left: tooltipPos.caretOffset }
+                : { top: tooltipPos.caretOffset }
+            }
+            aria-hidden="true"
+          />
+        ) : null}
         <div className="tutorial-tooltip-header">
           <span className="tutorial-tooltip-eyebrow">
             <Sparkles size={13} className="tutorial-sparkle-icon" />
@@ -393,7 +583,7 @@ export function TutorialOverlay() {
         </h3>
 
         <p id="tutorial-step-body" className="tutorial-tooltip-body">
-          {currentStep.body}
+          {formatTutorialBody(currentStep.body)}
         </p>
 
         {!targetFound && currentStep.target ? (

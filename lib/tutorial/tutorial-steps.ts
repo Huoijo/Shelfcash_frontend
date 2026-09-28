@@ -92,9 +92,10 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     targetPage: "today",
     targetActiveView: "today",
     eyebrow: "BƯỚC 6 / 11",
-    title: "Có một nguyên liệu cần chú ý",
-    body: "Nhấn vào nguyên liệu này để xem vì sao ShelfCash đánh dấu rủi ro.",
+    title: "Kiểm tra nguyên liệu rủi ro",
+    body: "Bấm vào chữ \"Xem nhu cầu & ràng buộc\" tại dòng Sữa tươi để mở bảng phân tích rủi ro và các phương án xử lý.",
     expectedAction: "click",
+    actionHint: "Bấm \"Xem nhu cầu & ràng buộc\"",
     placement: "bottom",
   },
 

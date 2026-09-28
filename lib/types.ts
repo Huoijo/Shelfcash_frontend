@@ -504,6 +504,24 @@ export interface DecisionBusinessMetrics {
   stockout_probability?: number | null;
   expected_fill_rate?: number | null;
   expected_waste_quantity?: number | null;
+  deterministic?: {
+    metric_source?: string | null;
+    minimum_fill_rate?: number | null;
+    first_stockout_date?: string | null;
+    ingredient_metrics?: unknown[];
+    ingredients_with_stockout?: unknown[];
+    shortage_by_ingredient?: unknown[];
+    waste_by_ingredient?: unknown[];
+    [key: string]: unknown;
+  } | null;
+  probabilistic?: {
+    status?: string | null;
+    reason?: string | null;
+    expected_fill_rate?: number | null;
+    stockout_probability?: number | null;
+    [key: string]: unknown;
+  } | null;
+  [key: string]: unknown;
 }
 
 export interface DecisionPlanItem {

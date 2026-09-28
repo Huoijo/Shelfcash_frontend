@@ -16,6 +16,7 @@ export interface TutorialStep {
   target?: string;
   placement?: "top" | "bottom" | "left" | "right";
   expectedAction?: ExpectedAction;
+  actionHint?: string;
   targetPage?: "today" | "future" | "plan" | "import" | "simulator";
   targetActiveView?: "today" | "future";
 }
