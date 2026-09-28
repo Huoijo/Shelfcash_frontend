@@ -144,10 +144,8 @@ import {
   getTutorialWhatIfResponse,
 } from "../lib/tutorial/tutorial-fixture";
 import {
-  loadPersistedAppState,
-  persistAppStateDebounced,
-  flushPersistedAppState,
-  hasValidPersistedData,
+  getStoredActiveStoreId,
+  saveStoredActiveStoreId,
 } from "../lib/app-persistence";
 import { hasOperationalData } from "../lib/data";
 
@@ -616,132 +614,64 @@ function ShelfCashAppContent({
   const [inventoryConstraintsLoading, setInventoryConstraintsLoading] =
     useState(false);
 
-  // 1. Hydrate user data, plans, orders, logs and configurations from storage on mount
+  // 1. Resolve active store ID and active page on mount (domain data is fetched from BE database)
   useEffect(() => {
     if (isTutorial) return;
 
     const storedSession = getStoredSession();
     const targetStoreId =
-      storedSession?.storeId || initialData.settings.storeId || "";
-    const savedState = loadPersistedAppState(targetStoreId);
+      storedSession?.storeId?.trim() ||
+      getStoredActiveStoreId()?.trim() ||
+      initialData.settings.storeId?.trim() ||
+      "STORE_001";
 
-    if (savedState && hasValidPersistedData(savedState)) {
-      setData(savedState.data);
-      if (savedState.plan) {
-        setPlan(savedState.plan);
-      } else {
-        const strat =
-          savedState.strategy ??
-          strategyFromApi(savedState.data.settings.defaultStrategy);
-        setPlan(emptyBackendPlan(savedState.data, strat));
-      }
-      if (savedState.strategy) {
-        setStrategy(savedState.strategy);
-      }
-      if (savedState.draftOrders && savedState.draftOrders.length > 0) {
-        setDraftOrders(savedState.draftOrders);
-      }
-      if (savedState.ordersPagination) {
-        setOrdersPagination(savedState.ordersPagination);
-      }
-      if (savedState.importLogs && savedState.importLogs.length > 0) {
-        setImportLogs(savedState.importLogs);
-      }
-      if (
-        savedState.inventoryConstraints &&
-        savedState.inventoryConstraints.length > 0
-      ) {
-        setInventoryConstraints(savedState.inventoryConstraints);
-      }
-      if (savedState.decision) {
-        setDecision(savedState.decision);
-      }
-      if (savedState.decisionBrief) {
-        setDecisionBrief(savedState.decisionBrief);
-      }
-      if (
-        savedState.activePage &&
-        typeof window !== "undefined" &&
-        !window.location.search.includes("decision_view")
-      ) {
-        setPage(savedState.activePage as PageKey);
-      }
-      if (savedState.activeIngredient && !initialDecisionIngredient) {
-        setDecisionCenterIngredient(savedState.activeIngredient);
-      }
-    } else if (storedSession?.storeId) {
+    if (targetStoreId) {
+      saveStoredActiveStoreId(targetStoreId);
       setData((prev) => ({
         ...prev,
         settings: {
           ...prev.settings,
-          storeId: storedSession.storeId,
-          storeName: storedSession.storeName || prev.settings.storeName,
+          storeId: targetStoreId,
+          storeName: storedSession?.storeName || prev.settings.storeName,
         },
       }));
     }
+
+    if (typeof window !== "undefined") {
+      const savedPage = window.localStorage.getItem("shelfcash:active-page:v1");
+      if (
+        savedPage &&
+        !window.location.search.includes("decision_view")
+      ) {
+        setPage(savedPage as PageKey);
+      }
+    }
   }, [initialData.settings.storeId, initialDecisionIngredient, isTutorial]);
 
-  // 2. Persist user-entered data, plan, orders, and configurations across refreshes
+  // 2. Persist active navigation and store ID pointers only (domain data is authoritative in BE database)
   useEffect(() => {
     if (!isMounted || isTutorial) return;
 
     const effectiveStoreId =
       data.settings.storeId.trim() || session?.storeId?.trim() || "";
 
-    const hasStateToSave =
-      hasOperationalData(data) ||
-      data.ingredients.length > 0 ||
-      data.recipes.length > 0 ||
-      data.salesHistory.length > 0 ||
-      draftOrders.length > 0 ||
-      importLogs.length > 0 ||
-      effectiveStoreId.length > 0;
-
-    if (!hasStateToSave) return;
-
-    persistAppStateDebounced({
-      version: 1,
-      updatedAt: new Date().toISOString(),
-      storeId: effectiveStoreId,
-      data,
-      plan,
-      draftOrders,
-      ordersPagination,
-      importLogs,
-      inventoryConstraints,
-      strategy,
-      decision,
-      decisionBrief,
-      activePage: page,
-      activeIngredient: decisionCenterIngredient,
-    });
+    if (effectiveStoreId) {
+      saveStoredActiveStoreId(effectiveStoreId);
+    }
+    if (page && typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem("shelfcash:active-page:v1", page);
+      } catch {
+        // Safe ignore
+      }
+    }
   }, [
     isMounted,
     isTutorial,
-    data,
-    plan,
-    draftOrders,
-    ordersPagination,
-    importLogs,
-    inventoryConstraints,
-    strategy,
-    decision,
-    decisionBrief,
-    page,
-    decisionCenterIngredient,
+    data.settings.storeId,
     session?.storeId,
+    page,
   ]);
-
-  // 3. Flush any pending debounced persistence synchronously before browser reload
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      flushPersistedAppState();
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, []);
 
   // 4. Recover in-flight or completed decision run for active store
   const decisionRunRecovered = useRef<string | null>(null);
@@ -936,9 +866,10 @@ function ShelfCashAppContent({
       setConnection(health);
       const effectiveStoreId =
         data.settings.storeId.trim() ||
-        initialData.settings.storeId.trim() ||
         session?.storeId?.trim() ||
-        "";
+        getStoredActiveStoreId()?.trim() ||
+        initialData.settings.storeId.trim() ||
+        "STORE_001";
       if (
         health.service === "online" &&
         effectiveStoreId &&
@@ -2110,27 +2041,22 @@ function ShelfCashAppContent({
           saveSession(userSession);
           setSession(userSession);
           if (userSession.storeId) {
-            const savedForStore = loadPersistedAppState(userSession.storeId);
-            if (savedForStore && hasValidPersistedData(savedForStore)) {
-              setData(savedForStore.data);
-              if (savedForStore.plan) setPlan(savedForStore.plan);
-              if (savedForStore.draftOrders) setDraftOrders(savedForStore.draftOrders);
-              if (savedForStore.ordersPagination) setOrdersPagination(savedForStore.ordersPagination);
-              if (savedForStore.importLogs) setImportLogs(savedForStore.importLogs);
-              if (savedForStore.inventoryConstraints) setInventoryConstraints(savedForStore.inventoryConstraints);
-              if (savedForStore.strategy) setStrategy(savedForStore.strategy);
-              if (savedForStore.decision) setDecision(savedForStore.decision);
-              if (savedForStore.decisionBrief) setDecisionBrief(savedForStore.decisionBrief);
-            } else {
-              setData((prev) => ({
-                ...prev,
-                settings: {
-                  ...prev.settings,
-                  storeId: userSession.storeId,
-                  storeName: userSession.storeName,
-                },
-              }));
-            }
+            saveStoredActiveStoreId(userSession.storeId);
+            const nextData = {
+              ...data,
+              settings: {
+                ...data.settings,
+                storeId: userSession.storeId,
+                storeName: userSession.storeName || data.settings.storeName,
+              },
+            };
+            setData(nextData);
+            void reloadFromBackend(
+              nextData,
+              userSession.storeId,
+              strategy,
+              false,
+            );
           }
         }}
       />
@@ -2500,18 +2426,11 @@ export function ShelfCashApp(props: {
   initialDecisionView?: "today" | "future";
   initialPlan: PlanResponse;
 }) {
-  const [hasStoredData] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const saved = loadPersistedAppState();
-    return hasValidPersistedData(saved);
-  });
-
   const hasMeaningfulActivity = Boolean(
-    hasStoredData ||
-      (props.initialData.inventory &&
-        props.initialData.inventory.length > 0 &&
-        props.initialData.settings?.storeId &&
-        props.initialData.settings.storeId !== "STORE_001") ||
+    (props.initialData.inventory &&
+      props.initialData.inventory.length > 0 &&
+      props.initialData.settings?.storeId &&
+      props.initialData.settings.storeId !== "STORE_001") ||
       (props.initialPlan &&
         props.initialPlan.recommendations &&
         props.initialPlan.recommendations.length > 0)
