@@ -2440,8 +2440,7 @@ export function ShelfCashApp(props: {
   const hasMeaningfulActivity = Boolean(
     (props.initialData.inventory &&
       props.initialData.inventory.length > 0 &&
-      props.initialData.settings?.storeId &&
-      props.initialData.settings.storeId !== "STORE_001") ||
+      props.initialData.settings?.storeId) ||
       (props.initialPlan &&
         props.initialPlan.recommendations &&
         props.initialPlan.recommendations.length > 0)

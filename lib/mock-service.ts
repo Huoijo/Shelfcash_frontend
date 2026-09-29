@@ -76,22 +76,55 @@ function buildEmptyMockBootstrap(today: string = "2026-08-20"): StoreBootstrapRe
   } as unknown as StoreBootstrapResponse;
 }
 
+function getBackendUrl(): string | null {
+  const raw =
+    process.env.SHELFCASH_BACKEND_URL ||
+    process.env.NEXT_PUBLIC_SHELFCASH_BACKEND_URL ||
+    process.env.VITE_SHELFCASH_BACKEND_URL ||
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_BACKEND_URL;
+  if (!raw) return null;
+  const clean = String(raw).replace(/^["']|["']$/g, "").trim();
+  return clean || null;
+}
+
 /** Check if mock mode is activated via environment variable */
 export function isMockModeActive(): boolean {
-  const envVal =
-    process.env.USE_MOCK_API ||
-    process.env.SHELFCASH_USE_MOCK_API ||
-    process.env.VITE_USE_MOCK_API ||
-    process.env.NEXT_PUBLIC_USE_MOCK_API;
+  const mockKeys = [
+    "USE_MOCK_API",
+    "NEXT_PUBLIC_USE_MOCK_API",
+    "VITE_USE_MOCK_API",
+    "SHELFCASH_USE_MOCK_API",
+    "USE_MOCK",
+    "NEXT_PUBLIC_USE_MOCK",
+    "MOCK_API",
+    "NEXT_PUBLIC_MOCK_API",
+  ];
 
-  if (typeof envVal === "string") {
-    const val = envVal.trim().toLowerCase();
-    if (val === "true" || val === "1" || val === "yes") return true;
-    if (val === "false" || val === "0" || val === "no") return false;
+  // 1. If ANY mock variable is explicitly disabled -> mock is definitively OFF (false)
+  for (const key of mockKeys) {
+    const val = process.env[key];
+    if (val !== undefined && val !== null && val !== "") {
+      const clean = String(val).replace(/^["']|["']$/g, "").trim().toLowerCase();
+      if (clean === "false" || clean === "0" || clean === "no" || clean === "off") {
+        return false;
+      }
+    }
   }
 
-  // Default to mock mode if backend URL is not configured or set to dummy/example
-  const backendUrl = process.env.SHELFCASH_BACKEND_URL?.trim();
+  // 2. If ANY mock variable is explicitly enabled -> mock is ON (true)
+  for (const key of mockKeys) {
+    const val = process.env[key];
+    if (val !== undefined && val !== null && val !== "") {
+      const clean = String(val).replace(/^["']|["']$/g, "").trim().toLowerCase();
+      if (clean === "true" || clean === "1" || clean === "yes" || clean === "on") {
+        return true;
+      }
+    }
+  }
+
+  // 3. If no mock variable is set, check backend URL configuration
+  const backendUrl = getBackendUrl();
   if (!backendUrl || backendUrl.includes("example.com") || backendUrl.includes("dummy")) {
     return true;
   }

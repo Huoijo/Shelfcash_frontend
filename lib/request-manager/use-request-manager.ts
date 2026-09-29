@@ -8,13 +8,18 @@ export function useRequestManager() {
   const [registry, setRegistry] = useState<ManagedRequestRegistry>(() => {
     return {
       version: 1,
-      requests: requestManager.getRequests(),
-      lastSavedAt: new Date().toISOString(),
+      requests: [],
+      lastSavedAt: "",
     };
   });
 
   useEffect(() => {
     requestManager.init();
+    setRegistry({
+      version: 1,
+      requests: [...requestManager.getRequests()],
+      lastSavedAt: new Date().toISOString(),
+    });
     return requestManager.subscribe((next) => {
       setRegistry({ ...next, requests: [...next.requests] });
     });
@@ -35,9 +40,7 @@ export function useRequestManager() {
 }
 
 export function useManagedRequest(clientRequestId: string | null | undefined): ManagedRequest | undefined {
-  const [request, setRequest] = useState<ManagedRequest | undefined>(() =>
-    clientRequestId ? requestManager.getRequest(clientRequestId) : undefined,
-  );
+  const [request, setRequest] = useState<ManagedRequest | undefined>(undefined);
 
   useEffect(() => {
     if (!clientRequestId) {

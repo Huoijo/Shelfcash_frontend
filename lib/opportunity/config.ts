@@ -14,10 +14,11 @@ export interface OpportunityConfig {
  * Safely falls back to "disabled" if undefined or unrecognized.
  */
 export function getOpportunityMode(): OpportunityMode {
-  const envMode = (
+  const raw =
     process.env.VITE_SHELFCASH_OPPORTUNITY_MODE ||
-    process.env.NEXT_PUBLIC_SHELFCASH_OPPORTUNITY_MODE
-  )?.trim().toLowerCase();
+    process.env.NEXT_PUBLIC_SHELFCASH_OPPORTUNITY_MODE ||
+    process.env.SHELFCASH_OPPORTUNITY_MODE;
+  const envMode = raw ? String(raw).replace(/^["']|["']$/g, "").trim().toLowerCase() : "";
 
   if (envMode === "preview" || envMode === "live" || envMode === "disabled") {
     return envMode;
@@ -36,10 +37,11 @@ export function isOpportunityEnabled(): boolean {
  * Safely falls back to "none" if undefined or unrecognized.
  */
 export function getOpportunityMapProvider(): OpportunityMapProvider {
-  const envProvider = (
+  const raw =
     process.env.VITE_SHELFCASH_MAP_PROVIDER ||
-    process.env.NEXT_PUBLIC_SHELFCASH_MAP_PROVIDER
-  )?.trim().toLowerCase();
+    process.env.NEXT_PUBLIC_SHELFCASH_MAP_PROVIDER ||
+    process.env.SHELFCASH_MAP_PROVIDER;
+  const envProvider = raw ? String(raw).replace(/^["']|["']$/g, "").trim().toLowerCase() : "";
 
   if (envProvider === "osm" || envProvider === "google" || envProvider === "none") {
     return envProvider;

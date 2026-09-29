@@ -221,7 +221,14 @@ export function resolveBackendPath(
 }
 
 function backendBaseUrl(): string | null {
-  const configured = process.env.SHELFCASH_BACKEND_URL?.trim();
+  const raw =
+    process.env.SHELFCASH_BACKEND_URL ||
+    process.env.NEXT_PUBLIC_SHELFCASH_BACKEND_URL ||
+    process.env.VITE_SHELFCASH_BACKEND_URL ||
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_BACKEND_URL;
+  if (!raw) return null;
+  const configured = String(raw).replace(/^["']|["']$/g, "").trim();
   if (!configured) return null;
   try {
     const url = new URL(configured);
@@ -248,7 +255,13 @@ function forwardedHeaders(
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
-  const apiKey = process.env.SHELFCASH_API_KEY?.trim();
+  const rawKey =
+    process.env.SHELFCASH_API_KEY ||
+    process.env.NEXT_PUBLIC_SHELFCASH_API_KEY ||
+    process.env.VITE_SHELFCASH_API_KEY ||
+    process.env.API_KEY ||
+    process.env.NEXT_PUBLIC_API_KEY;
+  const apiKey = rawKey ? String(rawKey).replace(/^["']|["']$/g, "").trim() : "";
   const publicPath =
     path === "/health" || path === "/api/v1/llm/health";
   if (apiKey && !publicPath) headers.set("X-ShelfCash-Key", apiKey);

@@ -36,6 +36,30 @@ export function LoginView({ onLogin }: LoginViewProps) {
     setBusy(true);
     setErrorMessage(null);
 
+    const isMock = (() => {
+      const mockKeys = [
+        process.env.NEXT_PUBLIC_USE_MOCK_API,
+        process.env.NEXT_PUBLIC_USE_MOCK,
+        process.env.VITE_USE_MOCK_API,
+      ];
+      for (const val of mockKeys) {
+        if (val !== undefined && val !== null && val !== "") {
+          const clean = String(val).replace(/^["']|["']$/g, "").trim().toLowerCase();
+          if (clean === "false" || clean === "0" || clean === "no" || clean === "off") return false;
+          if (clean === "true" || clean === "1" || clean === "yes" || clean === "on") return true;
+        }
+      }
+      return false;
+    })();
+
+    const targetStoreId =
+      process.env.NEXT_PUBLIC_STORE_ID?.trim() ||
+      process.env.NEXT_PUBLIC_SHELFCASH_STORE_ID?.trim() ||
+      "STORE_001";
+    const targetStoreName =
+      process.env.NEXT_PUBLIC_STORE_NAME?.trim() ||
+      "ShelfCash Flagship Coffee & Tea";
+
     setTimeout(() => {
       if (portalMode === "staff") {
         onLogin({
@@ -52,9 +76,9 @@ export function LoginView({ onLogin }: LoginViewProps) {
             "STAFF_COUNT_INVENTORY",
             "STAFF_REPORT_ISSUE",
           ],
-          storeId: "STORE_001",
-          storeName: "ShelfCash Flagship Coffee & Tea",
-          mode: "mock",
+          storeId: targetStoreId,
+          storeName: targetStoreName,
+          mode: isMock ? "mock" : "real",
           loggedInAt: new Date().toISOString(),
         });
       } else {
@@ -67,9 +91,9 @@ export function LoginView({ onLogin }: LoginViewProps) {
           portal: "manager",
           allowedPortals: ["manager"],
           permissions: ["ALL"],
-          storeId: "STORE_001",
-          storeName: "ShelfCash Flagship Coffee & Tea",
-          mode: "mock",
+          storeId: targetStoreId,
+          storeName: targetStoreName,
+          mode: isMock ? "mock" : "real",
           loggedInAt: new Date().toISOString(),
         });
       }

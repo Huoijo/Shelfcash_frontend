@@ -256,3 +256,45 @@ test("proxy-generated errors include a traceable request ID", async () => {
     request_id: "bad-route-trace",
   });
 });
+
+test("isMockModeActive accurately handles false, quotes, spaces, and aliases", async () => {
+  const { isMockModeActive } = await import("../lib/mock-service.ts");
+  const originalEnv = { ...process.env };
+
+  try {
+    // Clear all mock envs
+    for (const k of ["USE_MOCK_API", "NEXT_PUBLIC_USE_MOCK_API", "VITE_USE_MOCK_API", "SHELFCASH_USE_MOCK_API", "USE_MOCK", "NEXT_PUBLIC_USE_MOCK", "SHELFCASH_BACKEND_URL", "NEXT_PUBLIC_SHELFCASH_BACKEND_URL"]) {
+      delete process.env[k];
+    }
+
+    // Explicit false with trailing space and quotes
+    process.env.USE_MOCK_API = '"false"';
+    assert.equal(isMockModeActive(), false, "USE_MOCK_API='\"false\"' should be false");
+
+    process.env.USE_MOCK_API = "false ";
+    assert.equal(isMockModeActive(), false, "USE_MOCK_API='false ' should be false");
+
+    delete process.env.USE_MOCK_API;
+    process.env.NEXT_PUBLIC_USE_MOCK_API = "false";
+    assert.equal(isMockModeActive(), false, "NEXT_PUBLIC_USE_MOCK_API='false' should be false");
+
+    delete process.env.NEXT_PUBLIC_USE_MOCK_API;
+    process.env.VITE_USE_MOCK_API = "0";
+    assert.equal(isMockModeActive(), false, "VITE_USE_MOCK_API='0' should be false");
+
+    delete process.env.VITE_USE_MOCK_API;
+    // When no mock flag is set, but backend URL is set, should be false
+    process.env.NEXT_PUBLIC_SHELFCASH_BACKEND_URL = "https://backend.internal:8000";
+    assert.equal(isMockModeActive(), false, "Valid backend URL fallback should be false");
+
+    // When backend URL is dummy/example and no flag, should be true
+    process.env.NEXT_PUBLIC_SHELFCASH_BACKEND_URL = "https://example.com";
+    assert.equal(isMockModeActive(), true, "example.com without false flag should default to mock true");
+
+    // But if mock is explicitly false, even with dummy backend URL it MUST remain false
+    process.env.NEXT_PUBLIC_USE_MOCK_API = "false";
+    assert.equal(isMockModeActive(), false, "Explicit false takes precedence over missing/dummy backend");
+  } finally {
+    process.env = originalEnv;
+  }
+});

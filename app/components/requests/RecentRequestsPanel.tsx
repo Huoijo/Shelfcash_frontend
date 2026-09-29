@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ManagedRequest, ManagedRequestKind } from "../../../lib/request-manager/types";
 import { useRecentRequests, useRequestManager } from "../../../lib/request-manager/use-request-manager";
 import { RequestStatusBadge } from "./RequestStatusBadge";
@@ -26,12 +26,17 @@ export function RecentRequestsPanel({
   title?: string;
   onCheckStatus?: (request: ManagedRequest) => Promise<void>;
 }) {
+  const [mounted, setMounted] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const requests = useRecentRequests(kind, 6);
   const { hideRequest } = useRequestManager();
 
-  if (!requests.length) {
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted || !requests.length) {
     return null;
   }
 

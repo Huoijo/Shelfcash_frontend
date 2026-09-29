@@ -57,21 +57,46 @@ export interface DecisionDiagnosticsReport {
  */
 export function isDecisionMockDiagnosticsEnabled(): boolean {
   if (typeof process !== "undefined" && process.env) {
-    const val =
-      process.env.NEXT_PUBLIC_ENABLE_DECISION_MOCK_DIAGNOSTICS ||
-      process.env.NEXT_PUBLIC_DECISION_MOCK_FAILURES ||
-      process.env.ENABLE_DECISION_MOCK_DIAGNOSTICS;
-    if (val !== undefined && val !== "") {
-      return val.toLowerCase() === "true" || val === "1";
+    const diagnosticKeys = [
+      "NEXT_PUBLIC_ENABLE_DECISION_MOCK_DIAGNOSTICS",
+      "NEXT_PUBLIC_DECISION_MOCK_FAILURES",
+      "ENABLE_DECISION_MOCK_DIAGNOSTICS",
+    ];
+
+    for (const key of diagnosticKeys) {
+      const raw = process.env[key];
+      if (raw !== undefined && raw !== null && raw !== "") {
+        const clean = String(raw).replace(/^["']|["']$/g, "").trim().toLowerCase();
+        if (clean === "false" || clean === "0" || clean === "no" || clean === "off") {
+          return false;
+        }
+        if (clean === "true" || clean === "1" || clean === "yes" || clean === "on") {
+          return true;
+        }
+      }
     }
 
-    // Nếu USE_MOCK_API đang bật toàn hệ thống thì mặc định cho phép mock diagnostics
-    const useMockApi =
-      process.env.NEXT_PUBLIC_USE_MOCK_API ||
-      process.env.USE_MOCK_API ||
-      process.env.SHELFCASH_USE_MOCK_API;
-    if (useMockApi && (useMockApi.toLowerCase() === "true" || useMockApi === "1")) {
-      return true;
+    // Nếu mock mode hệ thống tắt -> mock diagnostics cũng tắt
+    const mockKeys = [
+      "NEXT_PUBLIC_USE_MOCK_API",
+      "USE_MOCK_API",
+      "SHELFCASH_USE_MOCK_API",
+      "VITE_USE_MOCK_API",
+      "USE_MOCK",
+      "NEXT_PUBLIC_USE_MOCK",
+    ];
+
+    for (const key of mockKeys) {
+      const raw = process.env[key];
+      if (raw !== undefined && raw !== null && raw !== "") {
+        const clean = String(raw).replace(/^["']|["']$/g, "").trim().toLowerCase();
+        if (clean === "false" || clean === "0" || clean === "no" || clean === "off") {
+          return false;
+        }
+        if (clean === "true" || clean === "1" || clean === "yes" || clean === "on") {
+          return true;
+        }
+      }
     }
   }
   return false;
